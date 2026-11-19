@@ -69,8 +69,8 @@ print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
 PY
 . "$t/ids"
-# The Bone Yard's line: its corners, each bend's radius (the template's
-# generator laid the road along it); the finish line's x on the first straight
+# The Bone Yard's line: its corners, each bend's radius (local/brim_yard's
+# corners, the road laid along them); the finish line's x on the first straight
 export PATH_PTS="-100,-58,12 60,-58,10 60,-34,10 10,-34,9 0,-14,9 30,0,10 95,0,12 95,55,12 50,55,9 40,30,8 25,30,8 15,58,10 -40,58,12 -55,20,10 -30,5,9 -60,-10,10 -100,-20,12"
 LINE_X=-64
 

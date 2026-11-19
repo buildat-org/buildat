@@ -13,7 +13,8 @@
 -- resistance and each tyre's drag on the floor slow it, so the top speed
 -- (`speed`) is approached slowly as the drag nears the engine's push.
 -- The floor (w:under: a kit/polygon floor's surface under each tyre) sets
--- the grip and drag: dirt (and anything else: the track's ground), "mud",
+-- the grip and drag: dirt (and anything else: the track's ground), "gravel"
+-- (the run-off beside it: less grip, more drag, short of "mud"), "mud",
 -- "oil", "asphalt" holds best, "boost" pushes it on; "finish" is the lap
 -- line (dirt to the tyres).
 -- [KIT_BODY_VARS] Read from s.vars (the race's c:body_var), here and in the
@@ -65,9 +66,10 @@ local RG2 = 1.5
 -- The floor: {grip (a share of p.grip), drag (m/s^2 on the car, its four
 -- tyres together), marks always}; EDGM's asphalt, gravel and field
 local GROUND = {asphalt = {1, 0.16}, dirt = {0.5, 0.33}, mud = {0.25, 2.5, true},
+	gravel = {0.35, 1.8, true},
 	oil = {0.08, 0.1}, boost = {0.8, 0.1}}
 -- (the pose's floor index: the client's dust and marks colours)
-local SURF = {dirt = 1, mud = 2, oil = 3, asphalt = 4, boost = 5}
+local SURF = {dirt = 1, mud = 2, oil = 3, asphalt = 4, boost = 5, gravel = 6}
 local ROLL = 0.25 -- rolling resistance (m/s^2)
 local BRAKE = 9 -- the brakes (m/s^2)
 local WALL_E, WALL_MU = 0.35, 0.35
@@ -119,7 +121,7 @@ return {
 	version = 1,
 	about = {
 		group = "Players",
-		what = "Brimstone Speedway's car, seen from above: a heavy body on four tyres. W gas, S brake, A and D steer, Space the handbrake. Grip by the floor's surface: dirt (the default), mud, oil, asphalt, boost; finish the lap line.",
+		what = "Brimstone Speedway's car, seen from above: a heavy body on four tyres. W gas, S brake, A and D steer, Space the handbrake. Grip by the floor's surface: dirt (the default), gravel, mud, oil, asphalt, boost; finish the lap line.",
 		outputs = {
 			lap = "Over the finish line with every checkpoint passed (the race's lap_open).",
 			fire = "The race's fire key pressed (its body var fire). Value: the car's heading (degrees, kit's yaw).",

@@ -107,3 +107,46 @@ assert(math.abs(m30 - m60) < 2 and math.abs(t30 - t60) < 2, string.format(
 	"rate 30 x 4 and 60 x 2 differ: slid %.1f and %.1f, turned %.1f and %.1f", m30, m60,
 	t30, t60))
 print("ok: rate 30 with 4 substeps drives as rate 60 with 2")
+
+-- [KIT_GENERATORS] (4z37f) The run-off's gravel (brim_yard's, brim_car's GROUND.gravel:
+-- grip and drag between dirt's and mud's). A car run wide at the top speed on
+-- full throttle: 2 s on gravel 1...4 m/s slower than on dirt and less than on
+-- mud; from 8 m/s on gravel on the throttle it picks up speed (it rejoins
+-- the road, never stuck there)
+local function floor_of(surf)
+	return MV.world{cell = function() return nil end, plane = 0.5, horizontal = true,
+		polys = {MV.look_poly({shape = "polygon", depth = 0.05, solid = false, floor = true,
+		surface = surf, points = {{-900, -900}, {900, -900}, {900, 900}, {-900, 900}}},
+		false, {0, 0, 0}, 0, 90, 0)}}
+end
+local function wide(surf, from)
+	local p = {}
+	for k, d in pairs(car.params) do
+		p[k] = d.default
+	end
+	local s = {pos = {0, 0.5, 0}, yaw = 0}
+	local function speed()
+		return math.sqrt(s.c[3] ^ 2 + s.c[4] ^ 2)
+	end
+	local dirt, on = floor_of("dirt"), floor_of(surf)
+	MV.steps(car, s, {{f = 0, r = 0, jump = 0}}, 1 / p.rate, p.substeps, dirt, p)
+	local n = 0
+	while speed() < from - 0.05 and n < 30 * p.rate do
+		MV.steps(car, s, {{f = 1, r = 0, jump = 0}}, 1 / p.rate, p.substeps, dirt, p)
+		n = n + 1
+	end
+	local v0 = speed()
+	for _ = 1, 2 * p.rate do
+		MV.steps(car, s, {{f = 1, r = 0, jump = 0}}, 1 / p.rate, p.substeps, on, p)
+	end
+	return v0, speed()
+end
+local _, vd = wide("dirt", 27.9)
+local v0, vg = wide("gravel", 27.9)
+local _, vm = wide("mud", 27.9)
+assert(vd - vg >= 1 and vd - vg <= 4 and vg > vm, string.format(
+	"2 s on the run-off from %.1f m/s: %.1f on gravel, %.1f on dirt, %.1f on mud", v0, vg, vd, vm))
+local g0, g1 = wide("gravel", 8)
+assert(g1 > g0 + 2, string.format("on gravel from %.1f m/s, 2 s on the throttle: %.1f", g0, g1))
+print(string.format("ok: run wide at %.1f m/s, 2 s on the throttle: %.1f on gravel (%.1f on dirt, " ..
+	"%.1f on mud); from %.1f m/s on gravel %.1f", v0, vg, vd, vm, g0, g1))
