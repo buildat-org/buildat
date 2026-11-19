@@ -373,7 +373,9 @@ for re in "The template's type local/brim_car \([0-9]+ bytes\)" "The template's 
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 n=0
-for e in "$RACE laps 1" "$RACE mine_damage 30" "$CRATE weapon \"mines\"" "$TRIAL trial_laps 1"; do
+# (time_out 90: kitbob, wrecked and slow, finishes some 43 s after kitboss,
+# and a loaded box once made it 46, over the default 45's "out of time")
+for e in "$RACE laps 1" "$RACE mine_damage 30" "$RACE time_out 90" "$CRATE weapon \"mines\"" "$TRIAL trial_laps 1"; do
 	set -- $e
 	n=$((n + 1))
 	step 10 "entities, $n to undo" "event kit_edit {\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
