@@ -12,12 +12,14 @@ M.safe.main_scene = getmetatable(magic.Scene).wrap(__buildat_replicated_scene)
 
 local sync_node_added_subs = {}
 local sync_node_removed_subs = {}
+local changed = nil -- (take_changed's)
 
 -- The scene emptied and the subscribers forgotten: a connection left
 -- ([MENU_CONTEXT]); the next one fills it again
 function M.reset()
 	sync_node_added_subs = {}
 	sync_node_removed_subs = {}
+	changed = nil
 	__buildat_replicated_scene:RemoveAllChildren()
 end
 
@@ -54,6 +56,23 @@ function __buildat_replicate_on_node_created(node_id)
 	for _, v in ipairs(sync_node_added_subs) do
 		v(node)
 	end
+end
+
+-- [KIT_STILL_LOOKS] The nodes the server updated (their attributes or
+-- vars) since the last take_changed(): {[node id] = true}. A script
+-- reading its nodes' properties each frame -- dear through the sandbox --
+-- reads the ones in it. Kept only once asked for, so nobody's set grows
+-- unread. simplified: one set, so one reader (Kit); a second's take would
+-- empty the first's
+function __buildat_replicate_on_node_updated(node_id)
+	if changed then
+		changed[node_id] = true
+	end
+end
+function M.safe.take_changed()
+	local c = changed or {}
+	changed = {}
+	return c
 end
 
 function __buildat_replicate_on_node_removed(node_id)

@@ -68,10 +68,16 @@ B += [["waitlog_any", "kit: the touch stacks of [0-9]+x9[0-9][0-9]:", 10], ["sho
 B += [["tap", "Button", "Brake"], ["frames", 3], ["tap", "Button", "Gas"], ["frames", 3]]
 # Slid off and lifted
 off = [W // 2, H // 3]
-B += [["touch", "find", [["Button", "Gas", 0], ["Button", "Right", 0]]],
+B += [["touch", "find", [["Button", "Gas", 0], ["Button", "Brake", 0],
+      ["Button", "Left", 0], ["Button", "Right", 0]]],
       ["touch", "touchStart", [["Button", "Gas", 1]]], ["frames", 10],
-      ["touch", "touchMove", [off + [1]]], ["frames", 10]] + mark("slid off")
+      ["touch", "touchMove", [["Button", "Brake", 1]]], ["frames", 10]] + mark("slid onto Brake")
+B += [["touch", "touchMove", [off + [1]]], ["frames", 10]] + mark("slid off")
 B += [["touch", "touchEnd", [off + [1]]], ["frames", 10]] + mark("lifted")
+# The left stack: Left slid onto Right
+B += [["touch", "touchStart", [["Button", "Left", 1]]], ["frames", 10]] + mark("left")
+B += [["touch", "touchMove", [["Button", "Right", 1]]], ["frames", 10]] + mark("slid onto Right")
+B += [["touch", "touchEnd", [["Button", "Right", 1]]], ["frames", 10]]
 # Two fingers: Gas and Right, then Right lifted
 B += mark("before") + [["touch", "touchStart", [["Button", "Gas", 1]]], ["frames", 3],
       ["touch", "touchStart", [["Button", "Gas", 1], ["Button", "Right", 2]]], ["wait", 1500]]
@@ -149,9 +155,14 @@ for l in L:
     if m and m[1] not in ys:
         ys[m[1]] = int(m[2])
 assert ys.get("Gas", 0) > ys.get("Brake", 1e9), f"Gas not under Brake: {ys}"
-s, l_, b, both, rl = (after(L, n) for n in ("slid off", "lifted", "before", "both", "right lifted"))
-assert s[2] == 1, f"Gas let go as the finger slid off: {s}"
-assert l_[2] == 0, f"Gas still held after the finger lifted off it: {l_}"
+sb, s, l_, lf, sr, b, both, rl = (after(L, n) for n in ("slid onto Brake", "slid off", "lifted",
+    "left", "slid onto Right", "before", "both", "right lifted"))
+assert sb[2] == -1, f"Gas slid onto Brake: not Brake's: {sb}"
+assert any(re.search(r"kit: touch button Gas up by finger \d+ at .*\(slid onto Brake\)", l) for l in L), "Gas not let go onto Brake"
+assert s[2] == -1, f"Brake let go as the finger slid off: {s}"
+assert l_[2] == 0, f"Brake still held after the finger lifted off it: {l_}"
+assert lf[3] == -1 and sr[3] == 1, f"Left slid onto Right: {lf} -> {sr}"
+print("ok: Gas slid onto Brake: Brake's; off both still Brake's; lifted: let go; Left slid onto Right: Right's")
 assert both[2] == 1 and both[3] == 1, f"Gas and Right not both held: {both}"
 turn = min(abs(both[4] - b[4]) % 360, 360 - abs(both[4] - b[4]) % 360)
 assert turn >= 20, f"the car not turned by Right: {b} -> {both}"

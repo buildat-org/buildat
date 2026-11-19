@@ -21,6 +21,15 @@ void on_node_removed(lua_State *L, uint node_id)
 			(uint32_t)node_id);
 }
 
+// [KIT_STILL_LOOKS] A node's attributes or vars updated by the server: a
+// script that reads its nodes only as they change (Kit's) asks which did
+// (the replicate extension's take_changed)
+void on_node_updated(lua_State *L, uint node_id)
+{
+	luabind::call_function<void>(L, "__buildat_replicate_on_node_updated",
+			(uint32_t)node_id);
+}
+
 void set_scene(lua_State *L, magic::Scene *scene)
 {
 	tolua_pushusertype(L, scene, "Scene");

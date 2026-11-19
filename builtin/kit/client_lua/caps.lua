@@ -362,8 +362,7 @@ end)
 local CORNERS = {{-0.5, -0.5}, {-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}}
 local function entity_caps()
 	local cut = S.cut
-	-- simplified: ten times a second (a door's swing a step behind), a
-	-- dozen sandbox calls an entity
+	-- simplified: ten times a second (a door's swing a step behind)
 	local now = buildat.get_time_us()
 	if C.ents_cut == cut and C.ents_hv == C.hv and
 			now - (C.ents_us or 0) < 100000 then
@@ -372,20 +371,38 @@ local function entity_caps()
 	C.ents_cut, C.ents_us, C.ents_hv = cut, now, C.hv
 	local list, sig = {}, {}
 	for id, n in pairs(P.nodes) do
-		local body = n.body
-		if body and body.enabled and n.box then
-			local m = body.worldTransform
-			local lo, hi, pts = math.huge, -math.huge, {}
-			for _, sy in ipairs({0.5, -0.5}) do
-				for i, c in ipairs(CORNERS) do
-					local w = m * magic.Vector3(c[1], sy, c[2])
-					lo, hi = math.min(lo, w.y), math.max(hi, w.y)
-					pts[i] = {w.x, w.z}
+		-- Its footprint kept while what places its body is the same (Kit's
+		-- module.lua makes each anew as it changes: the look, its place and
+		-- turn, its box, its slide, its fading); one attached or on a
+		-- parallax layer moves by the frame. The body's transform and its
+		-- corners were some 20 sandbox calls an entity: 80 ms of Brimstone's
+		-- 2D editor's frame (575 entities, llvmpipe, 2026-11-19)
+		local f = n.caps_fp
+		if not (f and f.look == n.look and f.at == n.at and f.q == n.at_q and
+				f.box == n.box and f.slide == n.slide_at and f.hidden == n.hidden and
+				f.seen == n.see_through and not n.attach_to and not n.par) then
+			f = {look = n.look, at = n.at, q = n.at_q, box = n.box,
+				slide = n.slide_at, hidden = n.hidden, seen = n.see_through}
+			n.caps_fp = f
+			local body = n.body
+			if body and body.enabled and n.box then
+				local m = body.worldTransform
+				local lo, hi, pts = math.huge, -math.huge, {}
+				for _, sy in ipairs({0.5, -0.5}) do
+					for i, c in ipairs(CORNERS) do
+						local w = m * magic.Vector3(c[1], sy, c[2])
+						lo, hi = math.min(lo, w.y), math.max(hi, w.y)
+						pts[i] = {w.x, w.z}
+					end
 				end
-			end
-			if lo < cut and hi > cut then
 				local col = color(n.box.color, magic.Color(0.8, 0.8, 0.8))
-				list[#list + 1] = {pts, {col.r, col.g, col.b}}
+				f.lo, f.hi, f.pts, f.col = lo, hi, pts, {col.r, col.g, col.b}
+			end
+		end
+		if f.pts then
+			local lo, hi, pts = f.lo, f.hi, f.pts
+			if lo < cut and hi > cut then
+				list[#list + 1] = {pts, f.col}
 				sig[#sig + 1] = string.format("%d %.3f %.3f %.3f %.3f %.3f %s",
 						id, pts[1][1], pts[1][2], pts[3][1], pts[3][2],
 						pts[2][1], tostring(n.box.color))

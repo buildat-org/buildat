@@ -11,7 +11,8 @@
 # line's place, speed and yaw: A/D toward a point ahead, W/S to a speed for
 # the bends):
 #   0. New from it (the edits: one lap a race and a trial, a mine 30 damage,
-#      crate 2 mines): the lobby's full screen and its two tracks
+#      crate 2 mines; the editor's idle frames read no still look,
+#      [KIT_STILL_LOOKS]): the lobby's full screen and its two tracks
 #      (lobby.png), Race: kitboss on the grid, the Start button; kitbob
 #      joins and picks Race: the second slot (grid.png);
 #   1. Start: the countdown, then both go at once (GO on both screens);
@@ -438,6 +439,18 @@ for e in "$RACE laps 1" "$RACE mine_damage 30" "$RACE time_out 90" "$CRATE weapo
 	n=$((n + 1))
 	step 10 "entities, $n to undo" "event kit_edit {\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
 done
+# [KIT_STILL_LOOKS] Idle frames in the editor read no still look (every
+# look each frame there once: 25 ms of the editor's 150 natively, more on
+# a phone); counts, as the machines' ms differ. (The first ask resets them)
+cmd "frames 30"
+step 10 "kit: looks:" "event kit_looks"
+step 30 "kit: looks:" "frames 30" "event kit_looks"
+python3 -I - "$(grep -aoP 'kit: looks: .*' "$CL" | tail -1)" <<'PY' || fail "the editor's idle frames' looks ($CL)"
+import re, sys
+f, read, looks = re.search(r"(\d+) frames, ([0-9.]+) read a frame of ([0-9.]+)", sys.argv[1]).groups()
+assert int(f) >= 20 and float(looks) >= 100 and float(read) <= 0.05 * float(looks), sys.argv[1]
+print("ok: the editor's idle frames read %s of %s looks a frame" % (read, looks))
+PY
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: controls: camera top_down, pointer [a-z]+, movement local/brim_car, plane y 1"
 await "$CL" 0 10 "brim_car: the draw hook draws a car"

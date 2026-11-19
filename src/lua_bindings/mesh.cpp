@@ -1067,28 +1067,44 @@ void set_cell_geometry(const luabind::object &node_o,
 // objects into, in Lua, and hands over at once: a triangle defined a call
 // at a time from the sandbox was a dozen calls, and a window 10 to 20 ms
 // natively, several times that on the web (user, 2026-09-30).
+// verts may instead be a list of such lists: a geometry each (a material
+// each), up to 64; Kit's polygons, a side and a textured top band
+// ([KIT_STILL_LOOKS]: Brimstone's 270 built a vertex a call were most of a
+// join's two seconds natively, 2026-11-19).
 void set_triangle_geometry(const luabind::object &node_o,
 		const luabind::object &verts)
 {
 	lua_State *L = node_o.interpreter();
 	GET_TOLUA_STUFF(node, 1, Node);
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
-	cg->SetNumGeometries(1);
-	cg->BeginGeometry(0, TRIANGLE_LIST);
 	verts.push(L);
-	const int t = lua_gettop(L);
-	const size_t n = lua_objlen(L, t) / 12;
+	const int top = lua_gettop(L);
+	lua_rawgeti(L, top, 1);
+	const bool many = lua_istable(L, -1);
+	lua_pop(L, 1);
+	const int num = many ? std::min((int)lua_objlen(L, top), 64) : 1;
+	cg->SetNumGeometries(num);
 	float f[12];
-	for(size_t i = 0; i < n; i++){
-		for(int k = 0; k < 12; k++){
-			lua_rawgeti(L, t, (int)(i * 12 + k + 1));
-			f[k] = (float)lua_tonumber(L, -1);
-			lua_pop(L, 1);
+	for(int g = 0; g < num; g++){
+		cg->BeginGeometry(g, TRIANGLE_LIST);
+		if(many)
+			lua_rawgeti(L, top, g + 1);
+		else
+			lua_pushvalue(L, top);
+		const int t = lua_gettop(L);
+		const size_t n = lua_istable(L, t) ? lua_objlen(L, t) / 12 : 0;
+		for(size_t i = 0; i < n; i++){
+			for(int k = 0; k < 12; k++){
+				lua_rawgeti(L, t, (int)(i * 12 + k + 1));
+				f[k] = (float)lua_tonumber(L, -1);
+				lua_pop(L, 1);
+			}
+			cg->DefineVertex(Vector3(f[0], f[1], f[2]));
+			cg->DefineNormal(Vector3(f[3], f[4], f[5]));
+			cg->DefineColor(Color(f[6], f[7], f[8], f[9]));
+			cg->DefineTexCoord(Vector2(f[10], f[11]));
 		}
-		cg->DefineVertex(Vector3(f[0], f[1], f[2]));
-		cg->DefineNormal(Vector3(f[3], f[4], f[5]));
-		cg->DefineColor(Color(f[6], f[7], f[8], f[9]));
-		cg->DefineTexCoord(Vector2(f[10], f[11]));
+		lua_pop(L, 1);
 	}
 	lua_pop(L, 1);
 	cg->Commit();

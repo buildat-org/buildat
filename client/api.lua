@@ -3023,7 +3023,8 @@ end
 
 -- set_triangle_geometry(node, verts): a triangle list, 12 numbers a vertex
 -- (position, normal, colour, texture coordinate), as the node's
--- CustomGeometry; see src/lua_bindings/mesh.cpp
+-- CustomGeometry; or a list of such lists, a geometry each (up to 64); see
+-- src/lua_bindings/mesh.cpp
 function buildat.safe.set_triangle_geometry(safe_node, verts)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then

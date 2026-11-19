@@ -1476,6 +1476,7 @@ void CState::setup_packet_handlers()
 			log_d(MODULE, "Updating node %i (LatestDataUpdate)", node_id);
 			node->ReadLatestDataUpdate(msg);
 			node_arrived(node);
+			lua_bindings::replicate::on_node_updated(m_app->get_lua(), node_id);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
 			// Note: Network/Connection.cpp would buffer this
@@ -1517,6 +1518,7 @@ void CState::setup_packet_handlers()
 				node->SetVar(key, msg.ReadVariant());
 				num_vars--;
 			}
+			lua_bindings::replicate::on_node_updated(m_app->get_lua(), node_id);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
 			// Note: Network/Connection.cpp would NOT buffer this

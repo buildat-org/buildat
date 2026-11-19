@@ -82,7 +82,9 @@ pressed() # <button> <server regex>: in the pause menu
 }
 await "$t/boss.log" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
-step 30 "world_menu: the list shown" "frames 3"
+# (from the start: the list may come before "Don't add" is clicked)
+await "$t/boss.log" 0 30 "world_menu: the list shown"
+cmd "frames 3"
 step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
 cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Capture the flag"'

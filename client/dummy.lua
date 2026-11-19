@@ -9,4 +9,7 @@ end
 function __buildat_replicate_on_node_removed(node_id)
 end
 
+function __buildat_replicate_on_node_updated(node_id)
+end
+
 -- vim: set noet ts=4 sw=4:

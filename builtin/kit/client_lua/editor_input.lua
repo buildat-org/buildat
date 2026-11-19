@@ -2948,6 +2948,55 @@ local function draw_play_links()
 	end
 end
 
+-- (draw()'s: a place's Vector3, made at the first ask)
+function NT.at_of(x, y, z)
+	local m
+	return function()
+		m = m or magic.Vector3(x, y, z)
+		return m
+	end
+end
+-- (draw()'s: the parameters an extent is drawn from)
+NT.EXTENT_KEYS = {"zone", "volume", "grants", "voxel_box", "region",
+	"world_region"}
+NT.BOX_EDGES = {}
+for _, a in ipairs({1, 2, 3}) do
+	for _, u in ipairs({-1, 1}) do
+		for _, v in ipairs({-1, 1}) do
+			local p, q = {0, 0, 0}, {0, 0, 0}
+			p[a], q[a] = -1, 1
+			local b, c = a % 3 + 1, (a + 1) % 3 + 1
+			p[b], q[b], p[c], q[c] = u, u, v, v
+			NT.BOX_EDGES[#NT.BOX_EDGES + 1] = {p, q}
+		end
+	end
+end
+-- (draw()'s marks: NT.mk {x, y, z...}, 0.4 round each, one line list)
+function NT.marks_build()
+	if not NT.mk_node then
+		NT.mk_node = O.scene:CreateChild("kit_editor_marks")
+		NT.mk_mat = magic.Material:new()
+		NT.mk_mat:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/NoTextureOverlay.xml"))
+		NT.mk_mat:SetShaderParameter("MatDiffColor", magic.Color(0.8, 0.8, 0.8))
+		NT.mk_on = true
+	end
+	local out, mk, r = {}, NT.mk, 0.4
+	for i = 1, mk.n, 3 do
+		local x, y, z = mk[i], mk[i + 1], mk[i + 2]
+		-- (the box's 12 edges: 4 along each axis)
+		for _, ed in ipairs(NT.BOX_EDGES) do
+			for _, c in ipairs(ed) do
+				local o = #out
+				out[o + 1], out[o + 2], out[o + 3] = x + c[1] * r, y + c[2] * r, z + c[3] * r
+				out[o + 4], out[o + 5], out[o + 6], out[o + 7] = 1, 1, 1, 1
+			end
+		end
+	end
+	buildat.set_line_geometry(NT.mk_node, out)
+	NT.mk_node:GetComponent("CustomGeometry"):SetMaterial(0, NT.mk_mat)
+end
+
 local function draw()
 	if not E.editing and S.view == "hud" then
 		set_view(S.before_hud)
@@ -3036,14 +3085,28 @@ local function draw()
 					S.sel[e.id] and YELLOW or magic.Color(1, 0.55, 0.1), false)
 		end
 	end
+	-- Each entity's mark: the unselected ones' boxes one line geometry
+	-- (NT.mk_node, drawn over everything as the debug lines are), built
+	-- again only as one of them moves or the selection changes: a debug box
+	-- an entity a frame was 300 sandbox calls (Brimstone's editor,
+	-- 2026-11-19). The place as numbers (drawn_xyz); the Vector3 m only
+	-- where something more is drawn
+	local mk, k, dirty = NT.mk or {n = 0}, 0, false
+	NT.mk, NT.mk_want = mk, true
 	for _, e in ipairs(entities()) do
 		if e.pos then
-			local m = drawn_at(e)
-			local x, y, z = m.x, m.y, m.z
-			dbg:AddBoundingBox(magic.BoundingBox(
-					magic.Vector3(x - 0.4, y - 0.4, z - 0.4),
-					magic.Vector3(x + 0.4, y + 0.4, z + 0.4)),
-					S.sel[e.id] and YELLOW or magic.Color(0.8, 0.8, 0.8), false)
+			local x, y, z = NT.drawn_xyz(e)
+			if S.sel[e.id] then
+				dbg:AddBoundingBox(magic.BoundingBox(
+						magic.Vector3(x - 0.4, y - 0.4, z - 0.4),
+						magic.Vector3(x + 0.4, y + 0.4, z + 0.4)), YELLOW, false)
+			else
+				if mk[k + 1] ~= x or mk[k + 2] ~= y or mk[k + 3] ~= z then
+					mk[k + 1], mk[k + 2], mk[k + 3], dirty = x, y, z, true
+				end
+				k = k + 3
+			end
+			local at = nil -- (made where something more is drawn: NT.at_of)
 			if S.sel[e.id] and P.nodes[e.id] and P.nodes[e.id].box then
 				-- Its look's outline too
 				local c, half, rot = K.look_frame(P.nodes[e.id])
@@ -3052,101 +3115,113 @@ local function draw()
 				end
 			end
 			for _, c in ipairs(e.components or {}) do
-				local g = type_of(c.type).gizmo
-				if type(g) == "table" then
-					local col = color(g.color, magic.Color(0.3, 0.9, 1))
-					local s = tonumber(g.size) or 0.5
-					if g.shape == "box" then
-						dbg:AddBoundingBox(magic.BoundingBox(
-								magic.Vector3(x - s, y - s, z - s),
-								magic.Vector3(x + s, y + s, z + s)), col, false)
-					else
-						dbg:AddSphere(magic.Sphere(m, s), col, false)
-					end
-				end
-				-- [KIT_GOALS] A chain's final goal, on the map: gold, its box and a
-				-- post above it
-				if c.type == "kit/goal" and NT.goal_check().final[e.id] then
-					local gold = magic.Color(1, 0.75, 0.1)
-					local ex = type(c.params) == "table" and c.params.size or {}
-					local sx = math.max(1, tonumber(ex[1]) or 1)
-					local sy = math.max(1, tonumber(ex[2]) or 1)
-					local sz = math.max(1, tonumber(ex[3]) or 1)
-					dbg:AddBoundingBox(magic.BoundingBox(
-							magic.Vector3(x - 0.7, y - 0.7, z - 0.7),
-							magic.Vector3(x + sx - 0.3, y + sy - 0.3, z + sz - 0.3)),
-							gold, false)
-					dbg:AddLine(m, magic.Vector3(x, y + sy + 3, z), gold, false)
-					dbg:AddCross(magic.Vector3(x, y + sy + 3, z), 1.5, gold, false)
-				end
-				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
-				-- [KIT_ZONE_SHAPES] zone = "look": its look's outline as drawn, in
-				-- the zones' colour (a polygon's at its two faces)
-				local nd = t.zone == "look" and P.nodes[e.id]
-				local lc, lh, lr = nil, nil, nil
-				if nd then
-					lc, lh, lr = K.look_frame(nd)
-				end
-				if lc then
-					local zc = magic.Color(0.3, 0.75, 1)
-					if nd.poly then
-						local q, o, k = nd.poly.pts, nd.look.position, #nd.poly.pts / 2
-						for _, z in ipairs({-nd.poly.d, nd.poly.d}) do
-							for i = 1, k do
-								local j = i % k + 1
-								dbg:AddLine(o + lr * magic.Vector3(q[2 * i - 1], q[2 * i], z),
-										o + lr * magic.Vector3(q[2 * j - 1], q[2 * j], z), zc, false)
+				-- (most draw nothing more: skipped at once, Brimstone's 523
+				-- polygons a frame)
+				if t.gizmo or t.zone or t.volume or t.grants or t.voxel_box or
+						t.region or t.world_region or c.links or c.type == "kit/goal" then
+					at = at or NT.at_of(x, y, z)
+					local g = t.gizmo
+					if type(g) == "table" then
+						local col = color(g.color, magic.Color(0.3, 0.9, 1))
+						local s = tonumber(g.size) or 0.5
+						if g.shape == "box" then
+							dbg:AddBoundingBox(magic.BoundingBox(
+									magic.Vector3(x - s, y - s, z - s),
+									magic.Vector3(x + s, y + s, z + s)), col, false)
+						else
+							dbg:AddSphere(magic.Sphere(at(), s), col, false)
+						end
+					end
+					-- [KIT_GOALS] A chain's final goal, on the map: gold, its box and a
+					-- post above it
+					if c.type == "kit/goal" and NT.goal_check().final[e.id] then
+						local gold = magic.Color(1, 0.75, 0.1)
+						local ex = type(c.params) == "table" and c.params.size or {}
+						local sx = math.max(1, tonumber(ex[1]) or 1)
+						local sy = math.max(1, tonumber(ex[2]) or 1)
+						local sz = math.max(1, tonumber(ex[3]) or 1)
+						dbg:AddBoundingBox(magic.BoundingBox(
+								magic.Vector3(x - 0.7, y - 0.7, z - 0.7),
+								magic.Vector3(x + sx - 0.3, y + sy - 0.3, z + sz - 0.3)),
+								gold, false)
+						dbg:AddLine(at(), magic.Vector3(x, y + sy + 3, z), gold, false)
+						dbg:AddCross(magic.Vector3(x, y + sy + 3, z), 1.5, gold, false)
+					end
+					-- A zone's and an owned volume's extent, from its cell on
+					-- [KIT_ZONE_SHAPES] zone = "look": its look's outline as drawn, in
+					-- the zones' colour (a polygon's at its two faces)
+					local nd = t.zone == "look" and P.nodes[e.id]
+					local lc, lh, lr = nil, nil, nil
+					if nd then
+						lc, lh, lr = K.look_frame(nd)
+					end
+					if lc then
+						local zc = magic.Color(0.3, 0.75, 1)
+						if nd.poly then
+							local q, o, k = nd.poly.pts, nd.look.position, #nd.poly.pts / 2
+							for _, z in ipairs({-nd.poly.d, nd.poly.d}) do
+								for i = 1, k do
+									local j = i % k + 1
+									dbg:AddLine(o + lr * magic.Vector3(q[2 * i - 1], q[2 * i], z),
+											o + lr * magic.Vector3(q[2 * j - 1], q[2 * j], z), zc, false)
+								end
+							end
+						else
+							hover.box(lc, lh, lr, zc)
+						end
+					end
+					for _, k in ipairs(NT.EXTENT_KEYS) do
+						local n = t[k] and c.params and c.params[t[k]]
+						if type(n) == "table" then
+							local ext = {}
+							for i = 1, 3 do
+								ext[i] = math.max(1, math.floor(tonumber(n[i]) or 1))
+							end
+							local bc = k == "zone" and
+									magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
+									magic.Color(0.63, 0.38, 0.88) or k == "region" and
+									magic.Color(1, 0.3, 0.3) or k == "world_region" and
+									magic.Color(0.3, 0.75, 0.3) or magic.Color(1, 0.6, 0.2)
+							local tq = NT.drawn_turn(e)
+							-- [KIT_FREE_ROTATION] a zone and a region turn with it; the
+							-- others are the world's voxels
+							if (k == "zone" or k == "region") and math.abs(tq.x) +
+									math.abs(tq.y) + math.abs(tq.z) > 1e-6 then
+								NT.pf.draw_box(dbg, at(), tq, {-0.5, -0.5, -0.5},
+										{ext[1] - 0.5, ext[2] - 0.5, ext[3] - 0.5}, bc)
+							else
+								dbg:AddBoundingBox(magic.BoundingBox(
+										magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
+										magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
+										z + ext[3] - 0.5)), bc, false)
 							end
 						end
-					else
-						hover.box(lc, lh, lr, zc)
 					end
-				end
-				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
-						"region", "world_region"}) do
-					local n = t[k] and c.params and c.params[t[k]]
-					if type(n) == "table" then
-						local ext = {}
-						for i = 1, 3 do
-							ext[i] = math.max(1, math.floor(tonumber(n[i]) or 1))
+					for _, l in ipairs(c.links or {}) do
+						local to = find(l.to)
+						if to and to.pos then
+							local a, b = at(), drawn_at(to)
+							-- Lit while a signal passes ([KIT] stage 4d)
+							local lit = (E.flows[e.id .. ">" .. l.to] or 0) > now
+							local col = lit and magic.Color(1, 1, 0.3) or
+									magic.Color(0.2, 1, 0.4)
+							dbg:AddLine(a, b, col, false)
+							dbg:AddCross(magic.Vector3(a.x + (b.x - a.x) * 0.85,
+									a.y + (b.y - a.y) * 0.85, a.z + (b.z - a.z) * 0.85),
+									lit and 0.6 or 0.3, col, false)
 						end
-						local bc = k == "zone" and
-								magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
-								magic.Color(0.63, 0.38, 0.88) or k == "region" and
-								magic.Color(1, 0.3, 0.3) or k == "world_region" and
-								magic.Color(0.3, 0.75, 0.3) or magic.Color(1, 0.6, 0.2)
-						local tq = NT.drawn_turn(e)
-						-- [KIT_FREE_ROTATION] a zone and a region turn with it; the
-						-- others are the world's voxels
-						if (k == "zone" or k == "region") and math.abs(tq.x) +
-								math.abs(tq.y) + math.abs(tq.z) > 1e-6 then
-							NT.pf.draw_box(dbg, m, tq, {-0.5, -0.5, -0.5},
-									{ext[1] - 0.5, ext[2] - 0.5, ext[3] - 0.5}, bc)
-						else
-							dbg:AddBoundingBox(magic.BoundingBox(
-									magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
-									magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
-									z + ext[3] - 0.5)), bc, false)
-						end
-					end
-				end
-				for _, l in ipairs(c.links or {}) do
-					local to = find(l.to)
-					if to and to.pos then
-						local a, b = m, drawn_at(to)
-						-- Lit while a signal passes ([KIT] stage 4d)
-						local lit = (E.flows[e.id .. ">" .. l.to] or 0) > now
-						local col = lit and magic.Color(1, 1, 0.3) or
-								magic.Color(0.2, 1, 0.4)
-						dbg:AddLine(a, b, col, false)
-						dbg:AddCross(magic.Vector3(a.x + (b.x - a.x) * 0.85,
-								a.y + (b.y - a.y) * 0.85, a.z + (b.z - a.z) * 0.85),
-								lit and 0.6 or 0.3, col, false)
 					end
 				end
 			end
 		end
+	end
+	if dirty or k ~= mk.n then
+		for i = k + 1, mk.n do
+			mk[i] = nil
+		end
+		mk.n = k
+		NT.marks_build()
 	end
 	-- [KIT_SIGNALS_VIEW] The boxes and links for its viewport; no tools
 	if S.view == "signals" then
@@ -3906,7 +3981,12 @@ function M.editor(options)
 		local _, sh = screen_size()
 		hover.w = E.editing and S.view == "2d" and 3 * S.span / math.max(1, sh) or
 				nil
+		NT.mk_want = false
 		draw()
+		if NT.mk_node and NT.mk_on ~= NT.mk_want then
+			NT.mk_on = NT.mk_want
+			NT.mk_node.enabled = NT.mk_want
+		end
 		draw_guide()
 		hover.finish()
 		draw_builders(O.debug)
