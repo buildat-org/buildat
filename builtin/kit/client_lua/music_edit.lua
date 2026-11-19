@@ -2365,6 +2365,7 @@ local function analyze()
 end
 
 function MU.close()
+	MU.close_due = nil
 	stop()
 	stop_audition()
 	MU.win, MU.grid, MU.ph, MU.press = nil, nil, nil, nil
@@ -2663,7 +2664,8 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	local key, q = d:GetInt("Key"), d:GetInt("Qualifiers")
 	if key == magic.KEY_ESCAPE then
 		-- (closed next frame: Kit's own handler, after this one, sees it
-		-- open and leaves the Escape alone)
+		-- open and leaves the Escape alone; an app's pause menu asks
+		-- kit.escape() first, which closes it at once)
 		MU.close_due = not ui_utils.dropdown_open() or nil
 		return
 	end

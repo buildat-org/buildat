@@ -689,6 +689,11 @@ end
 -- Escape's, the tools' first ([FP_ESC]: down one level): a dialog or the
 -- menu, a drag, placing, a pending link, the crosshair. True when taken
 function M.escape()
+	-- ([JAM_EDITOR] the music editor closed)
+	if NT.mu.on() then
+		NT.mu.close()
+		return true
+	end
 	if S.view == "hud" then
 		set_view(S.before_hud)
 		return true

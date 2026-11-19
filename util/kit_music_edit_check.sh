@@ -419,7 +419,13 @@ set_song variant
 step 10 "kit editor: music opened .*, parses" "frames 3" 'click Button "song edit"'
 analyze
 [ "$HASH" = "$H0" ] || fail "a comment and spacing changed the hash ($H0, $HASH)"
+m=$(mark "$CL")
 step 10 "kit editor: music closed" "frames 2" "keypress Escape"
+step 10 "kit editor: music view song" "frames 5" 'click Button "song edit"' "frames 2" \
+	'click Button "music view song"'
+! tail -c +$((m + 1)) "$CL" | grep -aq "pause: the menu shown" ||
+	fail "the editor's Escape opened the pause menu too ($CL)"
+step 10 "kit editor: music closed" "frames 2" 'click Button "music close"'
 echo "ok: a comment and a lane's spacing leave the hash $H0; Escape closes the editor"
 quit
 
