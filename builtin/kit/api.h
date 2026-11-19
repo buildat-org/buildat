@@ -197,6 +197,11 @@ namespace interface
 //              Kit API 1 and may change in any release (kit/path,
 //              kit/parallax): get_guide's list says "(experimental)", and
 //              publishing a game that places one warns
+//   container = "<param>"    -- [KIT_API_1] (finding 16; kit/chest's) with
+//              usable = true: a use opens its slots on the player's
+//              inventory screen beside their own, as many as that number
+//              parameter says (1 to 54; 27 without it), its state `slots`
+//              as kit/inventory's
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
@@ -376,6 +381,20 @@ namespace interface
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
 //   on_timer(c, name, player), on_enter(c, by), on_leave(c, by),
 //   on_join(c, by),
+//   [KIT_API_1] (finding 16) on_give(c, by) (kit/starting_kit's: a starting
+//   kit for the player by, at a round's start, and where its `when`
+//   parameter is "spawn" at each respawn too; each instance in the
+//   player's scene or on the root, one under a kit/team its members' only;
+//   a `clear` parameter true empties the inventory first),
+//   on_inventory(c, player, when, kept, gone) (before a player's inventory
+//   changes, when "death", kit/game_rules' on_death, or "round_end"; kept
+//   the slots they will have, gone those dropped or lost; it returns kept,
+//   gone as it wants them, nil as they are; each instance in the player's
+//   scene, on the root or on their entity; simplified: box.c passes on a
+//   boolean return only, so what it returns is not taken yet: no type
+//   uses it),
+//   on_daytime(c, what) (an `environment = true` type's, kit/environment's:
+//   "dawn" as its clock passes 6:00, "dusk" at 18:00, while Running),
 //   on_params(c, changed) (a live edit changed its parameters: {name = the
 //   value before}), on_remove(c) (it is about to go: deleted while Running,
 //   removed by c:remove, or "Restart this" before its on_start)

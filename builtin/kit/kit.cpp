@@ -33641,7 +33641,7 @@ struct Module: public interface::Module, public Interface
 				"on_enter(c, by) and on_leave(c, by) as a body enters and leaves "
 				"it. Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
-				"on_timer(c, name), on_params(c, changed), on_remove(c). c: "
+				"on_timer(c, name, player), on_params(c, changed), on_remove(c). c: "
 				"c.id, c.pos, c.params, c.state (read and write), "
 				"c:params_of(type) (the params of the same entity's component of "
 				"that type, a copy read at use, so always current; nil: none; "
