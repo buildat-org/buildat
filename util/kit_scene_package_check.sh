@@ -12,15 +12,16 @@
 #      local/beacon and local/marker; a scene "track" (its own World, a
 #      heightmap), in it a timer linked to Score and to Bell, a teleporter onto
 #      Score, a beacon, a marker, a cell of the voxel type kitboss/brick and
-#      a heightmap stroke, a kit/scene_info. The palette's New tab: Export this scene, the
-#      file track.scene.zip in <user>/exports (its outside entities named);
-#      Publish this scene..., dev_apps/track, packed and published by the
+#      a heightmap stroke, a kit/scene_info. (4z37i) The Scenes window: Export
+#      track, the file track.scene.zip in <user>/exports (its outside
+#      entities named); Publish track..., dev_apps/track, packed and published by the
 #      command line, and a copy of it as "othertrack", made for the game
 #      other/game.
 #   2. B (another user dir, the file copied into its exports): in "world" a
 #      counter Score and B's own local/marker. Add from a file...
 #      (the scene list), the picker: a zip with a file no scene package has
-#      refused; track.scene.zip added as "track", the window listing the
+#      refused; track.scene.zip (the Scenes window's Import a scene...)
+#      added as "track", the window listing the
 #      link to Bell left out. Its export there has the first's World edits
 #      and names only Score outside it.
 #   3. B's New tab lists both packages: "track" added at once as track_2
@@ -37,6 +38,7 @@
 #   teleporter's target B's Score, no link to Bell; local/beacon A's,
 #   local/marker B's own; kitboss/brick and the heightmap rows taken.
 # Screenshots, kept with KEEP_TMP=1: $t/a_new.png (A's New tab),
+# $t/a_scenes.png (A's Scenes window),
 # $t/a_publish.png, $t/b_added.png (what was left out), $t/b_new.png (B's
 # New tab), $t/b_other.png (the other game's question)
 #   util/kit_scene_package_check.sh
@@ -173,6 +175,11 @@ added_closed() # the window listing what was left out closed
 {
 	step 10 "kit editor: the scene added closed" "frames 3" 'click Button "OK"'
 }
+scenes() # the Scenes window (the scene list's Scenes...)
+{
+	cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 3"
+	step 10 "kit editor: the Scenes window's rows" 'click Text "Scenes..."'
+}
 pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add from a file...
 {
 	local f=$1 re=$2
@@ -262,12 +269,15 @@ step 10 "kit editor: terrain: " \
 	'event kit_edit {"op": "terrain", "tool": "raise", "x": 4, "y": 0, "z": 4, "size": 2, "strength": 5, "stroke": 1}'
 step 20 "kit editor: [0-9]+ scene packages listed" "frames 3" 'click Button "New"'
 cmd "frames 5" "screenshot $t/a_new.png"
-step 20 "kit editor: Exported to .*track\.scene\.zip" "frames 3" 'click Button "Export this scene"'
+# (4z37i) the Scenes window's Export and Publish of the selected scene
+scenes
+cmd "frames 5" "screenshot $t/a_scenes.png"
+step 20 "kit editor: Exported to .*track\.scene\.zip" "frames 3" 'click Button "Export track"'
 z=$t/cu_a/exports/track.scene.zip
 [ -s "$z" ] || fail "no $z ($CL)"
 grep -aqE "kitboss exports the scene track: [0-9]+ files, [0-9]+ entities \(2 named outside it\), [1-9][0-9]* cells, [1-9][0-9]* heightmap samples" "$SL" ||
 	fail "the export's line: $(grep -a "exports the scene" "$SL") ($SL)"
-step 10 "kit editor: publish this scene: [0-9]+ goal warnings" "frames 3" 'click Button "Publish this scene..."'
+step 10 "kit editor: publish this scene: [0-9]+ goal warnings" "frames 3" 'click Button "Publish track..."'
 if ! grep -aq "kit editor: publish this scene: 0 goal warnings" "$CL"; then
 	step 10 "kit editor: published with goal warnings" "frames 3" 'click Button "Publish anyway"'
 fi
@@ -329,7 +339,10 @@ put_type marker "$(marker '#40ff40')"
 pick bad.scene.zip "kit editor: Scene refused: the archive: not a scene package's file: x/evil.lua"
 m=$(mark "$SL")
 mc=$(mark "$CL")
-pick track.scene.zip "kit editor: Added the scene track "
+# (4z37i) by the Scenes window's Import a scene...
+scenes
+step 10 "The file picker at .*/exports" 'click Button "Import a scene..."'
+step 60 "kit editor: Added the scene track " "frames 3" 'click Button "track.scene.zip"'
 await "$SL" "$m" 10 "kitboss adds the scene track \(kitboss/track 1\.0\.0\): [0-9]+ entities, 1 links or entity parameters left out, 1 types added, 1 kept as the game's, 1 rows \(0 kept as the game's, 0 refused\), 0 textures, [1-9][0-9]* heightmap samples"
 await "$SL" "$m" 10 "World track: the template's [1-9][0-9]* edited cells in [0-9]+ sections \(0 left out\)"
 await "$SL" "$m" 10 "The scene track's local/marker differs from the project's"

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~5 min (2026-11-15)
-# covers: builtin/kit/kit.cpp extensions/weave/init.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp src/impl/aitta.cpp src/client/web/index.html util/web_drive.js
+# covers: builtin/kit/kit.cpp extensions/weave/init.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp apps/workbench/main/client_lua/init.lua src/impl/aitta.cpp src/client/web/index.html util/web_drive.js
 # [KIT_PROJECT_EXPORT] A Workbench project exported as a template and made
 # a project again, copied and renamed. One server, kitboss (the admin) on a
 # headless weston's Xwayland of the check's own (its clipboard carries the
@@ -21,25 +21,31 @@
 #      file in <user>/exports, its files those export_template answers. The
 #      file unzipped packs (`buildat aitta pack`) and installs; with a
 #      texture not named by its hash, refused at pack.
-#   3. Games..., New "imported", Start from: From a file..., Create, the
+#   3. Games..., Import a game from a file... (4z37i: New with Start from:
+#      From a file... picked), "imported", Create, the
 #      picker, the file: the server switches; the project opens Stopped in
 #      the editor, its entities, links, type, rows and voxels the export's,
 #      and its own export semantically the first one (edits.bin's cells and
-#      heightmap samples the same). Export this game there too.
+#      heightmap samples the same). Export this game there too, from the
+#      Games list's right column (the running game's).
 #   4. Games..., "project", Copy...: the name prefilled (project_1), Copy;
 #      the copy's rows the original's. By MCP with the Builder token,
 #      list_games refused; with the Admin one listed, the running project
 #      copied (its rows), a taken name and the running one's rename refused,
 #      project_1 renamed.
 #   5. [KIT_EXPORT_WEB_CHECK] The web client (headless Chrome; skipped
-#      without web/ or Chrome), kitboss in "imported": Export this game
-#      caught as the browser's download, byte for byte 3.'s native export of
-#      it; Games..., New "webimport", From a file..., the browser's
+#      without web/ or Chrome), kitboss in "imported": Games..., the running
+#      game's Export this game caught as the browser's download, byte for
+#      byte 3.'s native export of it; Import a game from a file...,
+#      "webimport", the browser's
 #      picker given the download: the server switches, and the page again
 #      finds it Stopped in the editor, its entities, links, type, rows and
 #      voxels the first export's (as 3.).
 # Screenshots, kept with KEEP_TMP=1: $t/export_entry.png (the palette's
-# New tab), $t/import_page.png (New, From a file...), $t/imported.png (the
+# New tab), $t/games_menu.png (Games..., its Import), $t/import_page.png
+# (New, From a file...), $t/games_panel.png (the running game's right
+# column, Export and Publish), $t/games_exported.png (its Exported
+# notice over the list), $t/imported.png (the
 # imported project in the editor), $t/copy.png (Copy...), and the web's:
 # $t/web_export.png (Exported), $t/web_import_page.png,
 # $t/web_imported.png
@@ -499,7 +505,10 @@ echo "ok: the project exported (the editor's file and export_template's the same
 # 3. Imported from the file
 menu
 step 10 "world_menu: the list shown, 2 worlds" "frames 3" 'click Button "Games..."'
-new_project imported "From a file..." file
+# (4z37i) the list's Import: New with From a file... picked
+cmd "frames 3" "screenshot $t/games_menu.png"
+step 10 "world_menu: import" 'click Button "Import a game from a file..."'
+cmd "frames 3" "keydown ctrl" "keypress a" "keyup ctrl" "text imported" "frames 2"
 cmd "frames 5" "screenshot $t/import_page.png"
 step 10 "The file picker at .*/exports" 'click Button "Create"'
 cmd "delay 500" "expect_error Disconnected from server: The server switches"
@@ -521,11 +530,16 @@ await "$CL" 0 60 "kit editor: edit mode on"
 await "$CL" 0 30 "kit: entity [0-9]+'s client part: beacon added"
 cmd "delay 1000" "frames 10" "screenshot $t/imported.png"
 mcp after "$tok" "$t/first" "$t/second" "$t/built.json" imported
-# Its export by the editor, for the web's download (5.)
-step 10 "Asking the user about " "frames 3" 'click Button "New"'
-step 10 "The user declined " "frames 3" 'click Button "Decline"'
+# Its export, for the web's download (5.): (4z37i) Games...' right
+# column for the running game, over the editor
+menu
+step 10 "world_menu: the list shown, 3 worlds" "frames 3" 'click Button "Games..."'
+step 10 "world_menu: the list shown" "frames 3" 'click Button "imported (running)"'
+cmd "frames 3" "screenshot $t/games_panel.png"
 step 20 "kit editor: Exported to .*imported.template.zip" 'click Button "Export this game"'
-echo "ok: imported, opened Stopped in the editor, its export the first's"
+cmd "frames 5" "screenshot $t/games_exported.png"
+step 10 "pause: the projects closed" "frames 3" "keypress Escape"
+echo "ok: imported (the Games list's Import), opened Stopped in the editor, its export the first's; exported again from the Games list"
 
 # 4. Copy and rename
 menu
@@ -559,19 +573,14 @@ if [ -n "$web" ]; then
 	# (no longer the first builder in "imported": the pause menu's Edit)
 	cat > "$t/web1.steps" <<'J'
  ["waitlog_any", "pause: the menu shown", 30], ["frames", 3],
- ["click", "Button", "Edit"], ["waitlog_any", "kit editor: edit mode on", 20], ["frames", 10],
- ["click", "Button", "New"], ["waitlog", "Asking the user about ", 10], ["frames", 3],
- ["click", "Button", "Decline"], ["waitlog", "The user declined ", 10], ["frames", 3],
+ ["click", "Button", "Games..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
+ ["click", "Button", "imported (running)"], ["waitlog", "world_menu: the list shown", 10], ["frames", 3],
  ["click", "Button", "Export this game"],
  ["waitlog", "kit editor: Exported imported.template.zip \\([0-9]+ KiB\\): see your downloads", 20],
  ["downloaded", "imported.template.zip", 20], ["frames", 3],
  ["shot", "${OUT}/web_export.png"],
- ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
- ["click", "Button", "Games..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
- ["click", "Button", "New game..."], ["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+ ["click", "Button", "Import a game from a file..."], ["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
  ["selall"], ["frames", 2], ["type", "webimport"], ["frames", 2],
- ["click", "DropDownList", "▼", 512, 350], ["wait", 300], ["frames", 3],
- ["click", "Text", "From a file..."], ["waitlog", "world_menu: template picked: file", 10], ["frames", 3],
  ["shot", "${OUT}/web_import_page.png"],
  ["file", "${OUT}/imported.template.zip"],
  ["click", "Button", "Create"],
@@ -595,7 +604,7 @@ J
 	page web2
 	mcp after "$tok" "$t/first" "$t/third" "$t/built.json" webimport
 	cp "$t"/web1/web_*.png "$t"/web2/web_*.png "$t/"
-	echo "ok: the download imported on the web through New's From a file..., opened Stopped in the editor, its export the first's"
+	echo "ok: the download imported on the web through the Games list's Import, opened Stopped in the editor, its export the first's"
 	webpass=" On the web too: the export the browser's download, byte for byte the native one, imported through the picker."
 else
 	echo "SKIPPED: 5., the web: no Chrome or web/buildat.wasm"

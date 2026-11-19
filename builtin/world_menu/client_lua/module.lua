@@ -28,6 +28,9 @@
 -- "rename"; and what the app adds: footer(left) under the list,
 -- under(add, left) after New, panel(add, right, name, head) before Play,
 -- where add(label, action) is a button in the screen's keyboard walk.
+-- The server's way in: M.running_panel(add, close), the app's buttons on
+-- the running world's right column; a field's file choice is the list's
+-- Import ... from a file... too.
 local magic = require("buildat/extension/urho3d")
 local ui_utils = require("buildat/extension/ui_utils")
 ui_utils = ui_utils.safe or ui_utils
@@ -446,8 +449,9 @@ local served = {}
 
 -- A new world's name and the app's options; `preset` the index of the
 -- app's preset whose options fill the fields ([SKELDAT_HIGH_SCORES]),
--- `typed` the name typed before it was picked
-local function draw_new(state, preset, typed)
+-- `typed` the name typed before it was picked; `start` options set where
+-- no preset is (the list's Import: the file choice)
+local function draw_new(state, preset, typed, start)
 	local menu, root = screen(served, "new world")
 	-- A preset picked (draw_new again), a file being picked
 	-- ([KIT_PROJECT_EXPORT]: {name, options})
@@ -456,7 +460,8 @@ local function draw_new(state, preset, typed)
 	local name = edit_on(menu.window, typed or
 			(#state.worlds == 0 and state.noun or ""))
 	local presets = state.presets or {}
-	local from = preset and presets[preset] and presets[preset].options or {}
+	local from = preset and presets[preset] and presets[preset].options or
+			start or {}
 	if #presets > 0 then
 		local list = {{"(none)", "0"}}
 		for i, p in ipairs(presets) do
@@ -536,7 +541,7 @@ local function draw_new(state, preset, typed)
 		if picked then
 			local p = picked
 			picked = nil
-			draw_new(state, p ~= 0 and p or nil, name:GetText())
+			draw_new(state, p ~= 0 and p or nil, name:GetText(), start)
 		end
 		if not picking then
 			return
@@ -644,6 +649,18 @@ buildat.sub_packet("world_menu:list", function(data)
 		waiting("Deleting...")
 	end
 	served.under = function(add)
+		-- (kit_plan 4z37i) Import: New with the first choice that is a file
+		-- picked (Workbench's Start from: From a file...)
+		for _, f in ipairs(state.fields) do
+			local v = next(f.files or {})
+			if v then
+				add("Import a " .. state.noun .. " from a file...", function()
+					log:info("world_menu: import")
+					draw_new(state, nil, nil, {[f.key] = v})
+				end)
+				break
+			end
+		end
 		if running then
 			add("Close " .. state.noun, function()
 				log:info("world_menu: close " .. running)
@@ -666,6 +683,11 @@ buildat.sub_packet("world_menu:list", function(data)
 			if v then
 				text_on(right, f.label .. ": " .. v, fit(420))
 			end
+		end
+		-- (kit_plan 4z37i) M.running_panel(add, close): the app's buttons for
+		-- the running one (Workbench's Export and Publish)
+		if name == running and M.running_panel then
+			M.running_panel(add, close)
 		end
 	end
 	served.noun = state.noun

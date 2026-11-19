@@ -23,10 +23,12 @@ to its end, and util/pack_templates.sh packs them for an Aitta with the
 caller's key.
 
 A game moves between servers as a template [KIT_PROJECT_EXPORT]: the
-editor's palette, New tab, Export this game (a builder's) saves its
+editor's palette, New tab, Export this game (a builder's; Games...' right
+column has it and Publish this game... for the running game) saves its
 start (what Stop goes back to: no round state, no kept state) as
 <name>.template.zip, a download on the web and <user>/exports natively;
-New's "Start from", From a file... (the browser's picker, natively
+New's "Start from", From a file... (Games...' Import a game from a
+file... opens New with it picked; the browser's picker, natively
 <user>/exports) makes a game of one, checked as a template's install is,
 opened Stopped in the editor. The zip is a template package (doc/aitta.txt,
 Templates), all rights reserved by the exporting account; what it carries

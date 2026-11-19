@@ -244,7 +244,7 @@ if phase == "main":
         "checkpoint", "list_checkpoints", "restore_checkpoint", "diff",
         "playtest", "playtest_report", "start", "stop", "try_input",
         "watch", "clear_kept", "keep", "export_template",
-        "export_scene",
+        "export_scene", "import_scene",
         "publish_game", "publish_scene", "publish_kit_package", "list_aitta",
         "install_from_aitta"], names
     for t in tools:
@@ -496,6 +496,18 @@ elif phase == "visuals":
         return isinstance(v, list) and any(has_note(x) for x in v)
     ex = json.loads(call(tok, "export_scene"))
     assert has_note(json.loads(ex["files"]["composition.json"])), ex["files"]["composition.json"][:2000]
+    # (4z37i) import_scene: the files back as a new scene;
+    # a file no scene package has, a bad base64, none: refused. Removed after
+    im = json.loads(call(tok, "import_scene", {"files": ex["files"],
+        "base64": ex["base64"]}))
+    assert im["scene"] != first and im["what"], im
+    assert im["scene"] in state(tok)["scenes"], im
+    call(tok, "import_scene", {"files": dict(ex["files"], **{"run.sh": "x"}),
+        "base64": ex["base64"]}, error=True)
+    call(tok, "import_scene", {"files": ex["files"], "base64": {"edits.bin":
+        "not base64!"}}, error=True)
+    call(tok, "import_scene", {}, error=True)
+    call(tok, "delete_scene", {"name": im["scene"]})
     call(tok, "set_comments", {"id": 999999, "text": "x"}, error=True)
     # put_texture: checked as the editor's upload; a voxel type wearing it
     def png(w, h):
