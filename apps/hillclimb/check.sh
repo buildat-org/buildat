@@ -798,6 +798,9 @@ echo "  a public server: a player's params refused; rounds of 10 min, a local ga
 mp_server pause_srv BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 cat > "$t/pause.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
+# Off the menus: a row under the mouse is selected by its hover, and the
+# mouse starts where the window's system put it
+mouse_pos 5 5
 delay 3000
 keypress Tab
 wait_log 5000 hillclimb: the hill menu shown
@@ -825,6 +828,10 @@ screenshot $t/pause.png
 click Button "Settings..."
 wait_log 5000 pause: settings shown
 delay 1000
+# Server... is below the page's fold at 800x500: scrolled to
+mouse_pos 400 250
+$(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+delay 500
 click Button "Server..."
 delay 1500
 keypress Escape

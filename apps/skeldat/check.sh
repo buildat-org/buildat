@@ -1174,11 +1174,15 @@ PY
 # it stands, beside a bone block, which does not burn; one 20 off with no
 # bones round it, which does as it walks in. Both marked, as the marker
 # skull a skeleton puts in the next column on seeing a player would keep
-# the sun off it too
+# the sun off it too. The first walled in by stone (which keeps no sun
+# off) round the block: its light form reads its column's bones only, not
+# the block, and before the body came it once stepped out of the block's
+# reach
 log23="$t/srv23.log"
+pen=$(walls "-1 5" "0 5" "1 5" "-1 6" "-1 7" "0 7" "1 7")
 BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
-	BUILDAT_SKELDAT_TEST="skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
+	BUILDAT_SKELDAT_TEST="${pen}skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
 	start_server "$log23" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv23" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log23)"
@@ -1333,7 +1337,11 @@ undrawn=$(grep -ac "client1 lets the bow go undrawn" "$s1")
 python3 -I - "$t/bow1.log" "$s1" <<'PY' || fail "the bow's draws: $speeds, $undrawn undrawn ($s1, $t/bow1.log)"
 import re, sys
 held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
-srv = [float(a or b) for a, b in re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())]
+srv_lines = re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())
+srv = [float(a or b) for a, b in srv_lines]
+# The server's verdict by its line: its hold is printed to 0.01, so a
+# 0.091 it let go undrawn reads "0.10"
+undrawn = [bool(b) for a, b in srv_lines]
 assert len(held) == len(srv) and len(held) >= 7, (held, srv)
 # [SK_BOW_DRAW_SLOW_HOST] The client's slowest frame average (its "frames
 # N ms" lines): its draw is its frames' time steps, smoothed, the
@@ -1341,8 +1349,8 @@ assert len(held) == len(srv) and len(held) >= 7, (held, srv)
 # 4 frames a second)
 frames = [float(x) / 1000 for x in re.findall(r"skeldat: frames ([\d.]+) ms", open(sys.argv[1], errors="replace").read())]
 apart = max([0.15] + frames)
-for h, s in zip(held, srv):
-    assert abs(h - s) <= apart and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s, apart)
+for h, s, u in zip(held, srv, undrawn):
+    assert abs(h - s) <= apart and (u == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s, u, apart)
 # The tap is one frame at least (a mouse_up waits for the frame that read
 # the down, [SEQ_HOLD_FRAME]): under 0.5, or two of the client's slowest
 # frame average (0.47 at 2 to 4 frames a second)
@@ -2959,7 +2967,7 @@ PY
 # no shelter line. A skeleton in lava (walled in) burns in lava 4 hp a
 # second (two burns a second apart at least: a test marker over a voxel
 # not loaded yet floats, and the lava can run out), no "is in water"; one
-# in water dies at once. The fixtures clear of seed 2's trees (tree_at;
+# in water (walled in as well) dies at once. The fixtures clear of seed 2's trees (tree_at;
 # (29,3) and (-23,-22) the nearest, (32,25) the cave skeleton's), whose
 # sections can be made after a marker went up and put a crown through a
 # room.
@@ -3006,7 +3014,11 @@ lava=$(for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
 # The player in a stone column 3 high, roofed, which no arrow passes
 box=$(for d in "-1 -1" "0 -1" "1 -1" "-1 0" "1 0" "-1 1" "0 1" "1 1"; do
 	for k in 1 2 3; do printf 'marker %s skeldat:stone 0; ' "$d"; done; done)
-test="$box$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
+# The water walled in too, and its skeleton with it: on the open flat the
+# water spreads and the skeleton walks off at once (for the room's
+# shelter), and in a loaded run its body was first stepped out of it
+pond=$(walls "19 -21" "20 -21" "21 -21" "19 -20" "21 -20" "19 -19" "20 -19" "21 -19")
+test="$box$(room 30 -6 x)$(room 0 30 z)${lava}${pond}marker 20 -20 skeldat:water_source; "
 test="${test}marker 0 0 skeldat:stone 2; "
 test="${test}skeleton 36 -6; skeleton -25 0 marked; skeleton 0 31; cave_skeleton 34 32; skeleton -12 -20; skeleton 20 -20"
 # [SKELDAT_CHECK_WAITS] The lava's burns are read by the log's times, and

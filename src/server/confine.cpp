@@ -45,6 +45,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 {
 	return "this platform has no box for a build";
 }
+void make_build_cgroup(){}
 void start_camera_launcher(core::Config &config, const ss_ &module_path){}
 }
 
@@ -55,6 +56,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 {
 	return "this platform has no box for a build";
 }
+void make_build_cgroup(){}
 // simplified: no camera on Windows (Kit says so); a launcher there is a
 // job object's child started before the AppContainer
 void start_camera_launcher(core::Config &config, const ss_ &module_path){}
@@ -827,7 +829,7 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &sdk)
 // gets memory.max (build_memory()), no swap, pids.max BUILD_NPROC and
 // memory.oom.group (one OOM kill ends the whole build). Its path, or ""
 // and why not
-static ss_ make_build_cgroup(ss_ &why)
+static ss_ build_cgroup_of(ss_ &why)
 {
 	ss_ line;
 	{
@@ -876,6 +878,21 @@ static ss_ make_build_cgroup(ss_ &why)
 	return build;
 }
 
+void make_build_cgroup()
+{
+	ss_ why;
+	const ss_ build = build_cgroup_of(why);
+	if(build.empty()){
+		unsetenv("BUILDAT_BUILD_CGROUP");
+		log_v(MODULE, "No cgroup for a build: %s", cs(why));
+	} else {
+		setenv("BUILDAT_BUILD_CGROUP", build.c_str(), 1);
+		log_i(MODULE, "A build's cgroup: %s (memory.max %i MiB, pids.max "
+				"%i)", cs(build), (int)(build_memory() >> 20),
+				(int)BUILD_NPROC);
+	}
+}
+
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	// Landlock restricts the calling thread and what it starts; a thread
@@ -884,19 +901,11 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	if(threads != 1)
 		return "the sandbox is made before any thread starts, and "+
 				itos(threads)+" are running";
-	// [AITTA_BUILD_MEM] Before the box, which reads /sys only; the build
-	// moves itself in through BUILDAT_BUILD_CGROUP and the rule below
-	ss_ no_cgroup;
-	const ss_ build_cgroup = make_build_cgroup(no_cgroup);
-	if(build_cgroup.empty()){
-		unsetenv("BUILDAT_BUILD_CGROUP");
-		log_v(MODULE, "No cgroup for a build: %s", cs(no_cgroup));
-	} else {
-		setenv("BUILDAT_BUILD_CGROUP", build_cgroup.c_str(), 1);
-		log_i(MODULE, "A build's cgroup: %s (memory.max %i MiB, pids.max "
-				"%i)", cs(build_cgroup), (int)(build_memory() >> 20),
-				(int)BUILD_NPROC);
-	}
+	// [AITTA_BUILD_MEM] Made before the box (make_build_cgroup(), from
+	// main()), which reads /sys only; the build moves itself in through
+	// BUILDAT_BUILD_CGROUP and the rule below
+	const char *cg = getenv("BUILDAT_BUILD_CGROUP");
+	const ss_ build_cgroup = cg ? cg : "";
 
 	const int abi = syscall(SYS_landlock_create_ruleset, nullptr, 0,
 			LANDLOCK_CREATE_RULESET_VERSION);

@@ -29,6 +29,13 @@ namespace server
 	ss_ confine(core::Config &config, const ss_ &module_path,
 			int *exit_code);
 
+	// [AITTA_BUILD_MEM] The cgroup of --build-wasm's builds, where the
+	// server's own is delegated to it (Linux): made before confine() and
+	// before the camera's launcher is forked, while the server is alone in
+	// its cgroup. Sets or unsets BUILDAT_BUILD_CGROUP, which confine()
+	// reads.
+	void make_build_cgroup();
+
 	// [WEB_LOCAL_AITTA] The box of a publish's build of a release's
 	// .wasm (build_wasm_job() below): Linux only. Reads the
 	// system's programs and libraries and read_dirs, writes job_dir only;

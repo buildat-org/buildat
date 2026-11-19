@@ -557,6 +557,10 @@ int main(int argc, char *argv[])
 	// directories to read
 	server::find_wasm_toolchain(config);
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
+	// [AITTA_BUILD_MEM] The builds' cgroup before the camera's launcher is
+	// forked: it would share the server's cgroup, which is then refused
+	if(!unconfined)
+		server::make_build_cgroup();
 	// [KIT_AGENT_NEXT_1] The camera's launcher, outside the box and before
 	// any thread (confine.h)
 	if(!config.get<bool>("compile_only") && !free_run && !boxed)

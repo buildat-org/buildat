@@ -70,11 +70,15 @@ a("selall"); fr(2); a("type", "webboss"); fr(2); a("key", "Tab"); fr(2)
 a("type", "checkpass12"); fr(2); a("key", "Tab"); fr(2)
 a("type", "checkpass12"); fr(2); a("key", "Tab"); fr(2)
 a("type", "${SETUP_CODE}"); fr(2); a("key", "Tab"); fr(2)
-a("key", "Enter"); a("waitlog", "Joined as webboss", 30); a("wait", 1000)
+a("key", "Enter"); a("waitlog", "Joined as webboss", 30)
+# The ntfy question's Server window opens over the plan picker with the
+# join, and has the keys while it is on top: answered first, then the
+# picker's name field tapped
+a("waitlog_any", "server window: the page ntfy", 30); fr(3)
+a(tap, "Button", "Don't add"); a("waitlog", "server window: closed", 10); fr(5)
+a(tap, "LineEdit", ""); fr(3)
 a("type", "phoneplan"); a("key", "Enter")
 a("waitlog", "Entered the plan phoneplan", 30)
-a("waitlog_any", "server window: the page ntfy", 30); fr(3)
-a(tap, "Button", "Don't add"); fr(5)
 a(tap, "Button", "Start editing")
 if touch:
     a("waitlog", "fp shell on", 20)
