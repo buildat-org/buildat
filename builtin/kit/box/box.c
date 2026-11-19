@@ -53,7 +53,9 @@
 **                        = {id...}, send = {{id, input, value[, by]}...},
 **                        log = {line...}, app = {{what, value}...}, build =
 **                        {entities, voxels} (on_build's: a prefab's
-**                        members, [KIT_GENERATORS]), respawn = true
+**                        members, [KIT_GENERATORS]; its request's
+**                        max_children and entities), generate = {{id,
+**                        params}...} (c:generate), respawn = true
 **                        (c:respawn()), [KIT_CTF] died = {by, type},
 **                        respawn_waiting = true, hurt = {{player, amount,
 **                        fraction, type}...}, explode = {{x, y, z, radius,
@@ -779,9 +781,14 @@ static const char PRELUDE[] =
 "	-- [KIT_GENERATORS] on_build's children (a prefab's members 1..., the\n"
 "	-- host checks them as a prefab's), their links and a voxel box\n"
 "	local build = {entities = {}}\n"
+"	-- ([KIT_GENERATORS] 4z37f: the type's `children` at most; the scene's\n"
+"	-- entities to read, move.lua's library to check what it makes)\n"
+"	local most = req.max_children or 63\n"
+"	c.entities = req.entities or {}\n"
+"	if req.handler == 'on_build' then c.move = move end\n"
 "	function c:child(t)\n"
 "		if type(t) ~= 'table' or type(t.type) ~= 'string' then error('child: {type = name, pos = {x, y, z}, ...}', 2) end\n"
-"		if #build.entities >= 63 then error('child: 63 a build at most', 2) end\n"
+"		if #build.entities >= most then error('child: ' .. most .. ' a build at most', 2) end\n"
 "		local pos = t.pos or {0, 0, 0}\n"
 "		if type(pos) ~= 'table' then error('child: pos is {x, y, z}', 2) end\n"
 "		if t.params ~= nil and type(t.params) ~= 'table' then error('child: params is a table', 2) end\n"
@@ -789,16 +796,30 @@ static const char PRELUDE[] =
 "		build.entities[id] = {id = id, parent = tonumber(t.parent) or 0,\n"
 "			name = t.name ~= nil and tostring(t.name):sub(1, 64) or nil,\n"
 "			pos = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0},\n"
-"			yaw = tonumber(t.yaw),\n"
+"			yaw = tonumber(t.yaw), pitch = tonumber(t.pitch), roll = tonumber(t.roll),\n"
 "			components = {{type = t.type, params = t.params or {}, links = {}}}}\n"
 "		return id\n"
 "	end\n"
+"	-- (to: a child's number, 0 itself, or {id = n} an entity of c.entities)\n"
 "	function c:link(from, output, to, input)\n"
 "		local e = build.entities[tonumber(from) or 0]\n"
 "		if not e then error('link: from a child, by the number child gave', 2) end\n"
 "		local l = e.components[1].links\n"
 "		if #l >= 64 then error('link: 64 a child at most', 2) end\n"
-"		l[#l + 1] = {output = tostring(output), to = tonumber(to) or 0, input = tostring(input)}\n"
+"		if type(to) == 'table' then\n"
+"			l[#l + 1] = {output = tostring(output), to_entity = tonumber(to.id) or 0, input = tostring(input)}\n"
+"		else\n"
+"			l[#l + 1] = {output = tostring(output), to = tonumber(to) or 0, input = tostring(input)}\n"
+"		end\n"
+"	end\n"
+"	-- [KIT_GENERATORS] (4z37f) in play: a generator it reaches built again\n"
+"	-- live with these parameters over its own (a seed: a new layout), the\n"
+"	-- round's alone\n"
+"	local gens = {}\n"
+"	function c:generate(id, params)\n"
+"		if params ~= nil and type(params) ~= 'table' then error('generate: (id, {param = value...})', 2) end\n"
+"		if #gens >= 4 then error('generate: 4 a run at most', 2) end\n"
+"		gens[#gens + 1] = {tonumber(id) or 0, params or {}}\n"
 "	end\n"
 "	-- simplified: a voxel's param and tint 0 (a cell is a name)\n"
 "	function c:voxel_box(t)\n"
@@ -839,6 +860,7 @@ static const char PRELUDE[] =
 "	if #sounds > 0 then fx.sounds = sounds end\n"
 "	if #sessions > 0 then fx.sessions = sessions end\n"
 "	if req.handler == 'on_build' then fx.build = build end\n"
+"	if #gens > 0 then fx.generate = gens end\n"
 "	return json(fx)\n"
 "end\n"
 "-- [KIT] stage 4h: the movement library (client_lua/move.lua), and a\n"
