@@ -217,11 +217,20 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
     memset(imageData, 0, (size_t)(image->GetWidth() * image->GetHeight()));
     allocator_.Reset(FONT_TEXTURE_MIN_SIZE, FONT_TEXTURE_MIN_SIZE, textureWidth, textureHeight);
 
+    // Buildat: only ASCII rendered up front, the rest as text asks for it
+    // (the mutable glyph path below): every glyph of Overpass was 150 ms a
+    // size natively, and a Kit scene's HUD asks for a dozen sizes on joining
+    bool skipped = false;
     for (unsigned i = 0; i < charCodes.Size(); ++i)
     {
         unsigned charCode = charCodes[i];
         if (charCode == 0)
             continue;
+        if (charCode > 127)
+        {
+            skipped = true;
+            continue;
+        }
 
         if (!LoadCharGlyph(charCode, image))
         {
@@ -229,6 +238,7 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
             break;
         }
     }
+    hasMutableGlyph_ = hasMutableGlyph_ || skipped;
 
     SharedPtr<Texture2D> texture = LoadFaceTexture(image);
     if (!texture)
@@ -327,6 +337,11 @@ const FontGlyph* FontFaceFreeType::GetGlyph(unsigned c)
         glyph.used_ = true;
         return &glyph;
     }
+
+    // Buildat: a character the font lacks draws nothing, as when every glyph
+    // was loaded up front (not the font's missing-glyph box)
+    if (face_ && c != 32 && !FT_Get_Char_Index((FT_Face)face_, c))
+        return 0;
 
     if (LoadCharGlyph(c))
     {
