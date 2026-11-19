@@ -23160,6 +23160,7 @@ struct Module: public interface::Module, public Interface
 		}
 		session_ops();
 		playtest_tick();
+		round_controls_tick();
 		rules_watch();
 		if(!m_watches.empty())
 			watch_flush();
@@ -41223,6 +41224,9 @@ struct Module: public interface::Module, public Interface
 		j.set("running", m_session.running);
 		j.set("by", m_session.by);
 		j.set("persistent", m_host.persistent);
+		// (4z37i) round_controls_tick()'s
+		j.set("rounds", m_rc_rounds);
+		j.set("bots", m_rc_bots);
 		// The builds the last Stop discarded, until the next Play, and
 		// whether builds are always kept
 		j.set("discarded", discarded_counts());
@@ -45040,6 +45044,47 @@ struct Module: public interface::Module, public Interface
 		if(!n)
 			return refuse("no bots made in play");
 		log_i(MODULE, "%s removed all bots (%zu)", cs(p.name), n);
+	}
+
+	// (4z37i) Whether End all rounds and Remove all bots have anything to
+	// do (a game session; a bot made in play in the default or one), in the
+	// editor state ("rounds", "bots"), sent to the builders as either turns.
+	// simplified: reckoned twice a second (a walk of each round's entities),
+	// not at each session's start and end and each bot's making and removal
+	bool m_rc_rounds = false, m_rc_bots = false;
+	int64_t m_rc_at = 0;
+	void round_controls_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(now - m_rc_at < 500000)
+			return;
+		m_rc_at = now;
+		bool rounds = false, bots = false;
+		sv_<uint64_t> sids = {0};
+		for(auto &s : m_sessions)
+			if(!s.second->draft && !s.second->bench){
+				rounds = true;
+				sids.push_back(s.first);
+			}
+		for(uint64_t sid : sids){
+			SessionScope sc(*this, sid);
+			for(auto &e : m_entities)
+				if(e.second.made && is_bot(e.second)){
+					bots = true;
+					break;
+				}
+			if(bots)
+				break;
+		}
+		if(rounds == m_rc_rounds && bots == m_rc_bots)
+			return;
+		m_rc_rounds = rounds;
+		m_rc_bots = bots;
+		each_session([&]{
+			for(auto &o : m_peers)
+				if(can_edit(o.first))
+					send_state(o.first);
+		});
 	}
 
 	// A bot gone with what is under it, what it carried and drove let go

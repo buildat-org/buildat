@@ -13,7 +13,9 @@
 #   3. kitboss in edit mode: the template's bot items are out of the pause
 #      menu, Kit's "End all rounds" and "Remove all bots" in it. Remove all
 #      bots takes the two and their round's copies; End all rounds ends
-#      session 1. Pressed again, each is refused: nothing left.
+#      session 1. Pressed again, each is refused: nothing left; (4z37i)
+#      neither is in the menu then (menu.png with them, menu_none.png
+#      without).
 #   util/kit_builder_round_controls_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -138,6 +140,14 @@ pressed "Remove all bots" "kitboss removed all bots \(4\)"
 pressed "End all rounds" "Session 1 ended by kitboss"
 step 10 "refused: end_rounds: no round is running" 'event kit_edit {"op": "end_rounds"}'
 step 10 "refused: remove_bots: no bots made in play" 'event kit_edit {"op": "remove_bots"}'
+# (4z37i) Nothing left: neither in the menu (the editor state's rounds and
+# bots, sent as they turn)
+await "$t/boss.log" 0 10 "kit editor: rounds running: no, bots in play: no"
+menu
+await "$t/boss.log" "$M" 10 "pause: the items"
+items=$(tail -c +$((M + 1)) "$t/boss.log" | grep -a "pause_me: pause: the items" | tail -1)
+case "$items" in *"all rounds"*|*"all bots"*) fail "End all rounds or Remove all bots with nothing to do: $items";; esac
+cmd "screenshot $t/menu_none.png" "keypress Escape" "frames 3"
 cmd quit
 exec 3>&-
 wait $CLIENT 2>/dev/null
