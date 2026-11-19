@@ -83,14 +83,14 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A picture of the play following a player, on the players' screens.",
+		what = "A view of the game that follows a player, on the players' screens.",
 		keywords = "lobby camera spectate watch viewport",
 		inputs = {
-			follow = "The player who set it off is in play (followed after those before).",
-			unfollow = "The player who set it off is out of play.",
+			follow = "Marks the player who set it off as in play, followed after those before.",
+			unfollow = "Marks the player who set it off as out of play.",
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 	},
 	inputs = {follow = "none", unfollow = "none", show = "none", hide = "none",

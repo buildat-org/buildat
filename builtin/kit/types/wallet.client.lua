@@ -37,7 +37,7 @@ return {
 		text.width = math.max(200, math.floor(magic.ui.root.width / 2) - 200 - 12)
 		text:SetText("Money: " .. (free and "free" or m) ..
 				(part ~= "" and "\nHolding: " .. held ..
-				" (right click a face of your ship)" or "") ..
+				" (right-click a face of your ship)" or "") ..
 				(note ~= "" and "\n" .. note or ""))
 		if key == "part" then
 			e:log("holding part " .. part)

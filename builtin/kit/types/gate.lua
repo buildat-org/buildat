@@ -17,11 +17,11 @@ return {
 	state = {open = {default = false, shared = true}},
 	about = {
 		group = "Building",
-		what = "A wall that only links open and shut; solid while shut.",
+		what = "A wall opened and shut only by its links; solid while shut.",
 		inputs = {
 			open = "Opens it.",
 			close = "Shuts it.",
-			toggle = "Opens it if shut, else shuts it.",
+			toggle = "Opens it if shut, otherwise shuts it.",
 		},
 		outputs = {
 			opened = "It opened.",

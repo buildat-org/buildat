@@ -33,10 +33,10 @@ end
 return {
 	version = 1,
 	about = {
-		what = "A ground vehicle's movement: whoever holds its entity's seat drives it.",
+		what = "A ground vehicle's movement: the player in its entity's seat drives it.",
 		inputs = {
-			throttle = "Gas while nobody holds its seat. Value: 1 gas to -1 brake and back.",
-			steer = "Steers while nobody holds its seat. Value: 1 right to -1 left.",
+			throttle = "Sets the gas while nobody is in its seat. Value: 1 gas to -1 brake and reverse.",
+			steer = "Steers while nobody is in its seat. Value: 1 right to -1 left.",
 		},
 	},
 	component = true,

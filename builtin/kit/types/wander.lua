@@ -7,10 +7,10 @@
 return {
 	version = 1,
 	about = {
-		what = "A creature behaviour: it walks to a point near where it started, now and then.",
+		what = "A creature behaviour: now and then, it walks to a point near where it started.",
 		inputs = {
 			enable = "Wanders again.",
-			disable = "Wanders no more.",
+			disable = "Stops wandering.",
 		},
 	},
 	component = true,

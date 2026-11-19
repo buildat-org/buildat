@@ -18,9 +18,9 @@ return {
 	},
 	state = {owner = {default = 0, shared = true}},
 	about = {
-		what = "Who builds on a free voxel object in play, and what a voxel costs.",
+		what = "Who may build on a free voxel object in play, and what a voxel costs.",
 		inputs = {
-			own = "Makes who sent it the owner.",
+			own = "Makes the player who sent it the owner.",
 		},
 	},
 	inputs = {own = "none"},

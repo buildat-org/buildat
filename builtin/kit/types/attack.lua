@@ -33,13 +33,13 @@ end
 return {
 	version = 1,
 	about = {
-		what = "A creature behaviour: it chases its senses' target and hits them in reach.",
+		what = "A creature behaviour: it chases the target its senses found and hits it within reach.",
 		inputs = {
 			enable = "Attacks again.",
-			disable = "Attacks no more.",
+			disable = "Stops attacking.",
 		},
 		outputs = {
-			hit = "It hit its target. Value: their entity.",
+			hit = "It hit its target. Value: the target's entity.",
 		},
 	},
 	component = true,

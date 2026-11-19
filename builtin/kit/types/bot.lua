@@ -395,13 +395,13 @@ end
 return {
 	version = 1,
 	about = {
-		what = "A bot: it does the goals a player would, one at a time.",
+		what = "A bot: it works through the goals a player would, one at a time.",
 		inputs = {
-			ask = "Asks the player who set it off for its knobs in a dialog.",
+			ask = "Shows the player who set it off a dialog for its settings.",
 			skill = "Sets a driving bot's skill. Value: 0 to 100 (%).",
 		},
 		outputs = {
-			stuck = "It cannot do its goal. Value: why.",
+			stuck = "It cannot reach its goal. Value: the reason.",
 		},
 	},
 	component = true,

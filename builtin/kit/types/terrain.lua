@@ -63,7 +63,7 @@ return {
 	about = {
 		group = "World",
 		keywords = "world ground mapgen",
-		what = "What the world is generated from: generator, seed, materials, biome.",
+		what = "What the world is generated from: the generator, seed, materials and biome.",
 	},
 	root = true,
 	world = true,

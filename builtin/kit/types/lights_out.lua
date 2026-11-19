@@ -32,7 +32,7 @@ return {
 	state = {lit = {default = 0, shared = true}},
 	about = {
 		group = "Logic",
-		what = "A puzzle: a board of tiles, a press flips a tile and its neighbours.",
+		what = "A puzzle board of tiles: a press flips a tile and its neighbours.",
 		inputs = {
 			add = "Changes the lit count. Value: a number; its tiles send 1 or -1.",
 		},

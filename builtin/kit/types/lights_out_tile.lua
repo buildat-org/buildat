@@ -16,7 +16,7 @@ return {
 			toggle = "Flips it.",
 		},
 		outputs = {
-			pressed = "A player used it; it flips only by its links.",
+			pressed = "A player used it; it flips only through its links.",
 			changed = "It flipped. Value: 1 lit, -1 dark.",
 		},
 	},

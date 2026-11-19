@@ -53,8 +53,8 @@ return {
 		group = "Logic",
 		what = "A gate between signals: and, or, xor, not, latch or pulse.",
 		inputs = {
-			a = "Sets a. Value: false, 0, \"\" and \"off\" are off, anything else (none too) on.",
-			b = "Sets b, a latch's reset. Value: as a's.",
+			a = "Sets a. Value: false, 0, \"\" and \"off\" are off; anything else, or none, is on.",
+			b = "Sets b (a latch's reset). Value: as for a.",
 			a_off = "Sets a off.",
 			b_off = "Sets b off.",
 		},

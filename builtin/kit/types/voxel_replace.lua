@@ -69,11 +69,11 @@ return {
 	gizmo = {shape = "box", size = 0.2, color = "#a060e0"},
 	about = {
 		group = "World",
-		what = "A find-and-replace in a box of cells, which off undoes.",
+		what = "A find-and-replace in a box of cells; off undoes it.",
 		inputs = {
-			on = "Makes every find cell replace, remembering them.",
-			off = "Turns back those still holding replace.",
-			toggle = "On if off, else off.",
+			on = "Replaces every `find` cell with `replace`, remembering them.",
+			off = "Turns those still holding `replace` back.",
+			toggle = "Turns it on if off, otherwise off.",
 		},
 		outputs = {
 			changed = "It switched. Value: true on, false off.",

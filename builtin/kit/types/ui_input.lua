@@ -70,11 +70,11 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A line of text a player enters on their screen.",
+		what = "A field where a player enters a line of text on their screen.",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 		outputs = {
 			entered = "A player entered a line. Value: the text.",

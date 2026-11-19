@@ -120,9 +120,9 @@ return {
 	about = {
 		group = "World",
 		keywords = "settings",
-		what = "The game's rules: damage, building, the inventory, respawns, Kit's HUD.",
+		what = "The game's rules: damage, building, the inventory, respawns and Kit's HUD.",
 		inputs = {
-			respawn = "Respawns every player waiting. Value: not read; respawn must be on_signal.",
+			respawn = "Respawns every waiting player. Value: not read; `respawn` must be on_signal.",
 		},
 	},
 	inputs = {respawn = "any"},

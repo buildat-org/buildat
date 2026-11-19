@@ -50,12 +50,12 @@ return {
 	about = {
 		what = "What a creature sees: the nearest player in range, in its view and in sight.",
 		inputs = {
-			enable = "Senses again.",
-			disable = "Senses nothing; a target is lost.",
+			enable = "Starts sensing again.",
+			disable = "Stops sensing; any target is lost.",
 		},
 		outputs = {
 			spotted = "A player became its target. Value: their entity.",
-			lost = "Its target went: out of range or sight, or dead.",
+			lost = "It lost its target: out of range or sight, or dead.",
 		},
 	},
 	component = true,

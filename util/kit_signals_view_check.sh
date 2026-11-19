@@ -650,8 +650,8 @@ PY
 		"linked $TIMER.done -> $LEVER.toggle"
 	want "$l" "add link: out of $LEVER by its off" "add link: into $LEVER by its toggle" \
 		"signals: the text of row in off at " "signals: the text of signal $LEVER.on $COUNTER.count at "
-	wantp "$l" "the text of row in off at .*: Sets it off"
-	wantp "$l" "the text of signal $LEVER.on $COUNTER.count at .*: It flipped on"
+	wantp "$l" "the text of row in off at .*: Turns it off"
+	wantp "$l" "the text of signal $LEVER.on $COUNTER.count at .*: It turned on"
 	echo "ok: a row opens the Add link form either way; the whole text on hover, of a row and of a link's signal"
 	grep -a "signals: a sideways bar: true" "$l" && fail "a sideways bar in 1024x700 ($l)"
 	mv "$l" "$t/kitdocs1.log"

@@ -30,7 +30,7 @@ return {
 		group = "Players",
 		what = "Gives players items at a round's start or at each spawn.",
 		outputs = {
-			given = "A player got them.",
+			given = "A player got the items.",
 		},
 	},
 	outputs = {given = "none"},

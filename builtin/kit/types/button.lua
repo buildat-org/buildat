@@ -21,7 +21,7 @@ return {
 		what = "A plate a player presses by using it; it stays down for its hold time.",
 		outputs = {
 			pressed = "A player pressed it.",
-			released = "It came back up, its hold time later.",
+			released = "It came back up after its hold time.",
 		},
 	},
 	outputs = {pressed = "none", released = "none"},

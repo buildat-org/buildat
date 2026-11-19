@@ -239,15 +239,15 @@ return {
 	},
 	about = {
 		group = "Game",
-		what = "Something to do, a HUD line and a marker while it is active: reach a box, use an object, or a signal.",
+		what = "A task, with a HUD line and a marker while active: reach a box, use an object, or wait for a signal.",
 		inputs = {
-			activate = "Activates it, for who set this off (to everyone: for all). Value: unused.",
-			complete = "Does it, while active, as reaching or using it would. Value: unused.",
-			cancel = "Deactivates it, not done: activate may bring it back. Value: unused.",
+			activate = "Activates it for the player who set it off, or for all if sent to everyone. Value: unused.",
+			complete = "Completes it while active, as reaching or using it would. Value: unused.",
+			cancel = "Deactivates it without completing it; activate can bring it back. Value: unused.",
 		},
 		outputs = {
 			activated = "It became active.",
-			done = "It was done. Value: the player's name, or none.",
+			done = "It was completed. Value: the player's name, or none.",
 		},
 	},
 	inputs = {activate = "any", complete = "any", cancel = "any"},

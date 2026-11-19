@@ -75,14 +75,14 @@ return {
 	},
 	about = {
 		group = "Game",
-		what = "Once armed, waits out its fuse, explodes and is gone.",
+		what = "Once armed, it waits out its fuse, then explodes and is gone.",
 		inputs = {
 			arm = "Starts the fuse.",
 			explode = "Explodes at once.",
 		},
 		outputs = {
 			armed = "The fuse started.",
-			exploded = "It went off, just before it is gone. Value: where, a position.",
+			exploded = "It went off, just before it is gone. Value: its position.",
 		},
 	},
 	inputs = {arm = "none", explode = "none"},

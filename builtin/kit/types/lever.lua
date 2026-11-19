@@ -18,15 +18,15 @@ return {
 	state = {on = {default = false, shared = true}},
 	about = {
 		group = "Logic",
-		what = "On or off, flipped by a player's use; green while on.",
+		what = "A lever, on or off, flipped when a player uses it; green while on.",
 		inputs = {
 			toggle = "Flips it.",
-			on = "Sets it on.",
-			off = "Sets it off.",
+			on = "Turns it on.",
+			off = "Turns it off.",
 		},
 		outputs = {
-			on = "It flipped on.",
-			off = "It flipped off.",
+			on = "It turned on.",
+			off = "It turned off.",
 		},
 	},
 	inputs = {toggle = "none", on = "none", off = "none"},

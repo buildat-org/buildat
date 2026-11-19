@@ -23,7 +23,7 @@ return {
 		outputs = {
 			entered = "A player walked in. Value: how many are in it now.",
 			left = "A player walked out. Value: how many are in it now.",
-			empty = "The last one left.",
+			empty = "The last player left.",
 		},
 	},
 	outputs = {entered = "number", left = "number", empty = "none"},

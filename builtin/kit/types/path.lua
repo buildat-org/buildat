@@ -10,7 +10,7 @@ return {
 	gizmo = {shape = "sphere", size = 0.3, color = "#40c0ff"},
 	about = {
 		group = "Game",
-		what = "A line for bots to drive along (a race's racing line), a loop through its points in their order.",
+		what = "A line for bots to drive along, such as a race's racing line: a loop through its points in order.",
 		keywords = "racing line route waypoints bot",
 	},
 	params = {

@@ -13,10 +13,10 @@ local BODY = {r = 0.5, h = 1}
 return {
 	version = 1,
 	about = {
-		what = "A turret's movement: a seat's holder turns, raises and fires it on its parent.",
+		what = "A turret's movement on its parent: the player in its seat turns, raises and fires it.",
 		inputs = {
-			steer = "Turns it while nobody holds its seat. Value: 1 right to -1 left.",
-			throttle = "Raises it while nobody holds its seat. Value: 1 raise to -1 lower.",
+			steer = "Turns it while nobody is in its seat. Value: 1 right to -1 left.",
+			throttle = "Raises it while nobody is in its seat. Value: 1 raise to -1 lower.",
 		},
 	},
 	component = true,

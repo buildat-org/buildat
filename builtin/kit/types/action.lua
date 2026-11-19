@@ -18,7 +18,7 @@ return {
 	state = {presses = {default = 0, shared = true}},
 	about = {
 		group = "Players",
-		what = "A key the players press; its signals are as by that player.",
+		what = "A key the players press; its signals come from the player who pressed it.",
 		outputs = {
 			pressed = "The key went down.",
 			released = "The key came up.",

@@ -28,7 +28,7 @@ return {
 	gizmo = {shape = "box", size = 0.3, color = "#8090e0"},
 	about = {
 		group = "Building",
-		what = "A backdrop layer for side views: what is put under it (polygons, parts) is drawn moving with the camera by 1 - follow (0: as far as the sky, 1: the world; follow_y up and down, along z in a top-down game with kit/controls' plane horizontal, 1 by default) and repeated every `repeat` m along x (0: once), never met. Placed where it looks right with the camera at the layer's x. E.g. {\"follow\": 0.2, \"repeat\": 128} with a far skyline polygon under it.",
+		what = "A backdrop layer for side views. What is under it (polygons, parts) moves with the camera by 1 - follow (0: as far as the sky, 1: like the world; follow_y does the same up and down, or along z in a top-down game with kit/controls' plane horizontal, 1 by default). It repeats every `repeat` m along x (0: once), and nothing collides with it. Place it where it looks right with the camera at the layer's x. E.g. {\"follow\": 0.2, \"repeat\": 128} with a far skyline polygon under it.",
 		keywords = "backdrop background skyline scenery scroll depth layer",
 	},
 }

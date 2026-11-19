@@ -27,7 +27,7 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A button in the players' pause menu; to \"player\": shown and hidden for each player alone.",
+		what = "A button in the players' pause menu; with `to` \"player\", shown and hidden for each player separately.",
 		inputs = {
 			show = "Puts it in the menu.",
 			hide = "Takes it out of the menu.",

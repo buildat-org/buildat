@@ -11,7 +11,7 @@ return {
 	state = {inside = {default = {}}},
 	about = {
 		group = "Items",
-		what = "Holds one item, its wear kept: a player puts one in or takes it out.",
+		what = "Holds one item, keeping its wear: a player puts one in or takes it out.",
 		outputs = {
 			put = "A player put one in.",
 			taken = "A player took it out.",
