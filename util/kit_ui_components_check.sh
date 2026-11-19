@@ -578,12 +578,26 @@ pl=$t/drive/page.log
 grep -aq "OFF SCREEN" "$pl" && fail "a UI component off the screen on the web by finger ($pl)"
 grep -aq "UI button 4 pressed by webfinger" "$s" && grep -aq "kit/ui_panel 7: shown for webfinger" "$s" ||
 	fail "the web player's tap did not press the button and show their dialog ($s)"
-# The bottom button over the touch bars: its foot above the bars' top
-foot=$(grep -aoP 'kit: ui 4 button at \d+,\K\d+ \d+x\d+' "$pl" | tail -1 |
-	awk '{ split($2, s, "x"); print $1 + s[2] }')
-bars=$(grep -aoP 'kit: ui touch bars at y \K\d+' "$pl" | tail -1)
-[ -n "$foot" ] && [ -n "$bars" ] && [ "$foot" -le "$bars" ] ||
-	fail "the bottom button (foot $foot) not over the touch bars ($bars; $pl)"
+# The bottom button clear of the touch bars: [KIT_TOUCH_THUMBS] lifts it
+# over the stacks under its own stretch only (the stacks in the corners),
+# so its box (UI units) against each stack's (pixels)
+python3 -I - "$pl" <<'PY' || fail "the bottom button under the touch bars ($pl, $t/drive/touch.png)"
+import re, sys
+s = open(sys.argv[1], errors="replace").read()
+b = re.findall(r"kit: ui 4 button at (-?\d+),(-?\d+) (\d+)x(\d+) in (\d+)x\d+ .* shown", s)
+st = re.findall(r"kit: the touch stacks of (\d+)x\d+: .*; right (.*); world's (.*); left (.*)", s)
+assert b and st, ("no button or stacks", len(b), len(st))
+x, y, w, h, uw = map(int, b[-1])
+k = int(st[-1][0]) / uw
+btn = (x * k, y * k, w * k, h * k)
+print("  the bottom button %s px, the stacks %s" % (btn, st[-1][1:]))
+for r in st[-1][1:]:
+    rx, ry, rw, rh = map(int, r.split())
+    if rw == 0 or rh == 0:
+        continue
+    assert btn[0] + btn[2] <= rx or rx + rw <= btn[0] or \
+        btn[1] + btn[3] <= ry or ry + rh <= btn[1], (btn, r)
+PY
 [ -s "$t/drive/touch.png" ] || fail "no screenshot $t/drive/touch.png"
 # [KIT_PANEL_LEFTOVERS] The dialog's text (8, at the middle's height: [KIT_HUD_LEFTOVERS]) clear of
 # its Close (9): the panel taller than its default 15 vmin for the touch-sized button
