@@ -470,8 +470,17 @@ magic.SubscribeToEvent("Update", function(_, d)
 	-- [KIT_PHONE_EDITING] A touchscreen's over the hotbar and what stands on
 	-- it, the bars' width free (the sweep of 2026-11-12: it ran into the
 	-- hotbar's slots)
-	local top = TOUCH and kit.own_stack_top and kit.own_stack_top()
-	local right = not top and kit.touch_bar_left() or magic.ui.root.width
+	-- ([KIT_TOUCH_THUMBS] left of Kit's stack at the lower right, over its
+	-- stack at the lower left)
+	local lt, lr = nil, nil
+	if TOUCH and kit.touch_left_top then
+		lt, lr = kit.touch_left_top()
+	end
+	local right = kit.touch_bar_left() or magic.ui.root.width
+	local top = TOUCH and kit.own_stack_top and kit.own_stack_top(lr or 10, right)
+	if lt then
+		top = math.min(top or lt, lt)
+	end
 	local w = math.max(100, right - 10 - 12)
 	if help_text.width ~= w then
 		help_text:SetFixedWidth(w)

@@ -470,7 +470,8 @@ local function make(r, id, parent, in_panel)
 end
 
 -- Where an element of w x h goes in a box of pw x ph by its anchor and
--- x, y: kept in the box. lift: the bottom's room taken (touch bars)
+-- x, y: kept in the box. lift: the bottom's room taken (touch bars), a
+-- number or ([KIT_TOUCH_THUMBS]) lift(x0, x1) over the element's stretch
 local function place(u, w, h, pw, ph, lift, V)
 	local a = tostring(u.anchor or "top_left")
 	local x, y = num(u.x, 0, -400, 400) * V, num(u.y, 0, -400, 400) * V
@@ -482,17 +483,18 @@ local function place(u, w, h, pw, ph, lift, V)
 	else
 		px = (pw - w) / 2 + x
 	end
+	px = math.max(0, math.min(pw - w, px))
 	if a:find("top") then
 		py = y
 	elseif a:find("bottom") then
 		py = ph - h - y
-		if lift > 0 then
-			py = math.min(py, ph - lift - h - 4)
+		local l = type(lift) == "function" and lift(px, px + w) or lift
+		if l > 0 then
+			py = math.min(py, ph - l - h - 4)
 		end
 	else
 		py = (ph - h) / 2 + y
 	end
-	px = math.max(0, math.min(pw - w, px))
 	py = math.max(0, math.min(ph - h, py))
 	return math.floor(px), math.floor(py)
 end
@@ -572,13 +574,18 @@ end
 -- hotbar there the hotbar's too: its unit is a finger's, not its percents.
 -- simplified: by the default order, hotbar, item line, health, hint, as far
 -- as they were dragged or not
-local function own_lift(name, V)
+-- ([KIT_TOUCH_THUMBS] x0, x1: the bars over that stretch only; the stacks
+-- stand in the corners)
+local function own_lift(name, V, x0, x1)
 	local r = magic.ui.root
 	local top = TOUCH and M.touch_bar_top and M.touch_bar_top()
 	if not top or (M.hud_area and M.hud_area()) then
 		return 0
 	end
-	local lift = math.max(0, r.height - top)
+	if x0 then
+		top = M.touch_bar_top(x0, x1)
+	end
+	local lift = top and math.max(0, r.height - top) or 0
 	local line = math.max(16, 2.4 * V)
 	local over = name == "item_line" and 1 or name == "health" and 2 or
 			name == "hint" and 3 or nil
@@ -588,10 +595,11 @@ end
 -- [KIT_PHONE_EDITING] The top (UI y) of what stands on a finger's bars (the
 -- hotbar, its item line, the health), for an app's own lines over them; nil
 -- with no bars (the sweep of 2026-11-12: Workbench's hint ran into the
--- hotbar). simplified: by own_lift's default order, the hotbar's room kept
--- with no hotbar
-function M.own_stack_top()
-	local lift = own_lift("hint", vmin())
+-- hotbar); [KIT_TOUCH_THUMBS] x0, x1 (UI): the line's stretch, bars beside
+-- it not counted. simplified: by own_lift's default order, the hotbar's room
+-- kept with no hotbar
+function M.own_stack_top(x0, x1)
+	local lift = own_lift("hint", vmin(), x0, x1)
 	if lift == 0 then
 		return nil
 	end
@@ -602,7 +610,9 @@ end
 function M.own_place(name, w, h)
 	local bx, by, bw, bh = hud_box()
 	local V = vmin()
-	local x, y = place(own_ui(name), w, h, bw, bh, own_lift(name, V), V)
+	local x, y = place(own_ui(name), w, h, bw, bh, function(x0, x1)
+		return own_lift(name, V, x0, x1)
+	end, V)
 	return x + bx, y + by
 end
 
@@ -1352,13 +1362,15 @@ local function update()
 			it.n = nil
 		end
 	end
+	-- ([KIT_TOUCH_THUMBS] over an element's stretch: the stacks stand in
+	-- the corners. simplified: the tallest bar's over it, not its rectangle's)
 	local lift = 0
 	if TOUCH and M.touch_bar_top then
 		local top = M.touch_bar_top()
-		lift = top and not (M.hud_area and M.hud_area()) and
-				math.max(0, root.height - top) or 0
-		-- simplified: the whole width's bottom, though the bars are at
-		-- the lower right only; the bars' own rectangle is the upgrade
+		lift = top and not (M.hud_area and M.hud_area()) and function(x0, x1)
+			local t = M.touch_bar_top(x0, x1)
+			return t and math.max(0, root.height - t) or 0
+		end or 0
 		if top ~= bars_at then
 			bars_at = top
 			log:info("kit: ui touch bars at y " .. tostring(top))
@@ -1694,7 +1706,9 @@ local function update()
 					-- Menu over it)
 					x, y = place(u, w, h, r.pw, r.ph,
 							pr and (pr.full and not E.editing and lift or 0) or
-							r.own and own_lift(r.own, V) or lift, V)
+							r.own and function(x0, x1)
+								return own_lift(r.own, V, x0, x1)
+							end or lift, V)
 				end
 				if pr then
 					x, y = x + pad, y + pad + r.top

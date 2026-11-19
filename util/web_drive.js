@@ -104,6 +104,13 @@
 //                           one tapped at b while it is there, the first
 //                           moved on to a2 and up: Luanti's right click
 //                           while a stack is carried (Chrome only)
+//   ["touch", kind, points] one touch event, kind touchStart, touchMove or
+//                           touchEnd, points [[x, y, id] | [type, label, id]...]
+//                           (a label's: where the click by it would go, found
+//                           once and kept: the page answers no find while a
+//                           finger is down; kind "find" only finds): Chrome's
+//                           every point down for a start or a move, those that
+//                           lift for an end; nothing awaited (Chrome only)
 //   ["viewport", w, h]      the page that size from here on, as a phone's
 //                           on-screen keyboard makes it (Chrome only)
 //   ["turn", o]             the phone turned: o "landscape" or "portrait",
@@ -568,6 +575,8 @@ async function chrome() {
 			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
 					touchPoints: []});
 		},
+		touch: (type, touchPoints) => c.send("Input.dispatchTouchEvent", {type,
+				touchPoints}),
 		rdrag: (...a) => ops.mouse_drag("right", 2, ...a),
 		ldrag: (...a) => ops.mouse_drag("left", 1, ...a),
 		mouse_drag: async (button, buttons, x0, y0, x1, y1) => {
@@ -802,6 +811,7 @@ async function find(b, type, label, hx, hy) {
 		process.exit(2);
 	}
 	let failed = null;
+	const touch_at = {};
 	const out = args.vars.OUT;
 	for (const [op, ...args] of steps) {
 		const [a, c] = args;
@@ -891,6 +901,22 @@ async function find(b, type, label, hx, hy) {
 				const [x, y] = await find(b, a, c);
 				console.log(op + ": " + a + " \"" + c + "\" from " + x + ", " + y);
 				await b.ops.drag(x, y, ...args.slice(2));
+			} else if (op === "touch") {
+				// One touch event as it is: its points [x, y, id] or
+				// [type, label, id] (where the click by label would go)
+				// (a label's place kept from its first: the page does not
+				// answer a find while a finger is down)
+				const pts = [];
+				for (const p of c) {
+					const k = p[0] + "\n" + p[1];
+					if (typeof p[0] === "string" && !touch_at[k])
+						touch_at[k] = await find(b, p[0], p[1]);
+					const [x, y] = typeof p[0] === "string" ? touch_at[k] : p;
+					pts.push({x, y, id: p[2]});
+				}
+				console.log("touch: " + a + " " + JSON.stringify(pts));
+				if (a !== "find")
+					await b.ops.touch(a, pts);
 			} else if (op === "at_log") {
 				// The last console line matching a: its two numbers (pixels)
 				const re = new RegExp(a);

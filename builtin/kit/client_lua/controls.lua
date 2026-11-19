@@ -34,13 +34,17 @@
 -- click's use without its dig); a gamepad's left stick
 -- moves, its right one looks, A jumps, X uses, B leaves a seat; a free
 -- cursor turns the view with the right button held, the wheel zooms a
--- chase or top-down camera. A touchscreen
+-- chase or top-down camera, kept per camera mode and movement on this client
+-- (Kit's storage kit_zoom: across races, rounds and rejoins). A touchscreen
 -- (BUILDAT_TOUCH=1, floorplanner's walking): a stick at the lower left
--- walks (a car: steers), a drag elsewhere turns, a tap is the left click
--- at the finger and a finger held still the right; the bar at the lower
--- right: Jump (a car: Gas and Brake; the movement's touch_buttons, held,
--- for Jump), Exit in a seat, the world's actions
--- (held while pressed), the app's.
+-- walks (a car: steers), a drag elsewhere turns, two fingers pinch the zoom
+-- as the wheel does, a tap is the left click
+-- at the finger and a finger held still the right; [KIT_TOUCH_THUMBS] a
+-- stack at the lower right, thumb-sized (thumb()): from the top the app's
+-- (Menu) and Exit in a seat half as high, the movement's touch_buttons, Jump
+-- (a car: Brake, Gas lowest); the world's actions (held while pressed) a
+-- stack above it, or left of it where that does not fit; the movement's
+-- touch_axes a stack at the lower left, the stick beside it.
 -- For a drive: "event kit_body" logs the body and the corrections (and the
 -- side or top_down camera's followed point and lead).
 -- [KIT_TOP_DOWN] kit/controls' plane horizontal (C.ctl.horizontal, M.level_plane):
@@ -69,7 +73,7 @@ local C = {on = false, ctl = nil, def = nil, src = nil, s = nil, seq = 0,
 	corrections = 0, signals = {}, shake = 0, fov = nil, fov_tween = nil,
 	glitch = 0, glitch_s = 0, flash = 0, flash_color = nil, cam = nil,
 	route = nil, use_at = nil, fingers = {}, stick = nil, gas = 0,
-	touch_jump = false, touch_held = {}, bar = nil, bar_kind = nil,
+	touch_jump = false, touch_held = {}, touch_axis = {}, rows = {}, bar = nil, bar_kind = nil,
 	classes = {}}
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 local PI = math.pi
@@ -575,6 +579,10 @@ local function log_body()
 			tostring(C.s and C.s.surface or "none"), tostring(C.s and C.s.friction)))
 	-- [KIT_SAME_STATE] the body packets whose steps were taken again
 	log:info(string.format("kit: body replayed %d of %d acks", C.replays or 0, C.acks))
+	-- ([KIT_TOUCH_THUMBS] (4) the camera's zoom, the input held)
+	log:info(string.format("kit: zoom %.3f (%s), input f %s r %s, yaw %s", C.zoom,
+			tostring(C.zoom_key), tostring(C.last_i and C.last_i.f),
+			tostring(C.last_i and C.last_i.r), tostring(C.s and C.s.yaw)))
 	-- [KIT_SIDE_LEAD] the side camera's middle and its lead
 	if C.side_at and C.side_lead then
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
@@ -1421,6 +1429,9 @@ local function gather()
 			end
 		end
 		f = f + C.gas
+		-- [KIT_TOUCH_THUMBS] the movement's touch_axes, held
+		f = f + (C.touch_axis.f or 0)
+		r = r + (C.touch_axis.r or 0)
 		if C.touch_jump or C.touch_held.jump then
 			jump = 1
 		end
@@ -1482,6 +1493,7 @@ local function gather()
 			end
 		end
 	end
+	C.last_i = i
 	return i
 end
 
@@ -1601,6 +1613,47 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 	click(x, y, b == magic.MOUSEB_LEFT)
 end)
 
+-- [KIT_TOUCH_THUMBS] (4) The zoom the player chose, kept per camera mode and
+-- movement ("<mode>:<type> <zoom>" lines in Kit's storage kit_zoom: the game's
+-- on this client), so a race, a round or a rejoin starts where they left it.
+-- Written half a second after the last change (zoom_tick)
+local ZOOMS = nil
+local function zoom_key()
+	return camera_mode() .. ":" .. tostring(C.type or "none")
+end
+local function zooms()
+	if not ZOOMS then
+		ZOOMS = {}
+		for k, v in (buildat.storage_read("kit_zoom") or ""):gmatch("(%S+) (%S+)") do
+			ZOOMS[k] = tonumber(v)
+		end
+	end
+	return ZOOMS
+end
+local function set_zoom(z)
+	C.zoom = math.max(0.3, math.min(3, z))
+	zooms()[C.zoom_key or zoom_key()] = C.zoom
+	C.zoom_save = buildat.get_time_us() + 500000
+end
+local function zoom_tick()
+	local k = zoom_key()
+	if k ~= C.zoom_key then
+		C.zoom_key = k
+		C.zoom = zooms()[k] or 1
+		log:info(string.format("kit: the zoom %.3f for %s", C.zoom, k))
+	end
+	if C.zoom_save and buildat.get_time_us() > C.zoom_save then
+		C.zoom_save = nil
+		local l = {}
+		for key, v in pairs(zooms()) do
+			l[#l + 1] = key .. " " .. string.format("%.3f", v)
+		end
+		local ok, err = buildat.storage_write("kit_zoom", table.concat(l, "\n"))
+		log:info(string.format("kit: the zoom %.3f kept for %s", C.zoom, k) ..
+				(ok and "" or ", not: " .. tostring(err)))
+	end
+end
+
 magic.SubscribeToEvent("MouseWheel", function(_, data)
 	if not C.on or E.editing or paused() or camera_mode() == "first_person" then
 		return
@@ -1609,7 +1662,7 @@ magic.SubscribeToEvent("MouseWheel", function(_, data)
 	-- many small events zoom as far as a notch's)
 	local w = data:GetInt("Wheel")
 	local notches = math.max(-10, math.min(10, M.wheel_left.web and w / 10 or w))
-	C.zoom = math.max(0.3, math.min(3, C.zoom * 0.9 ^ notches))
+	set_zoom(C.zoom * 0.9 ^ notches)
 end)
 
 local function exit_seat()
@@ -1779,8 +1832,8 @@ end
 
 local function on_ui(x, y)
 	local sc = magic.ui.scale
-	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
-		if b.visible then
+	for _, b in ipairs({C.bar or false, C.abar or false, C.lbar or false, C.mbar or false}) do
+		if b and b.visible then
 			local p, s = b.screenPosition, b.size
 			if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
 					y / sc < p.y + s.y then
@@ -1792,13 +1845,25 @@ local function on_ui(x, y)
 			or (E.editing and M.over_ui(x, y)) or (M.ui_at and M.ui_at(x, y))
 end
 
+-- [KIT_TOUCH_THUMBS] A thumb's button side, UI pixels: 16 mm (the phone test
+-- of 2026-11-19: 15 to 18) at a phone's 160 CSS pixels an inch (a CSS pixel
+-- about as big to the eye on any screen: app.cpp's apply_ui_scale; natively
+-- under BUILDAT_TOUCH=1 one to a device pixel)
+local function thumb()
+	local density = tonumber(buildat.display_density and buildat.display_density()) or 1
+	local css = magic.ui.scale / math.max(0.1, density)
+	return math.floor(16 / 25.4 * 160 / css)
+end
+
 -- A row of buttons {label, pressed or nil, released} at the lower right,
--- y up from the bottom
-local function button_row(list, y, least)
+-- y up from the bottom; [KIT_TOUCH_THUMBS] side s: a column of them s wide,
+-- each s high ({..., half = true}: half that)
+local function button_row(list, y, least, s)
 	local bar = magic.ui.root:CreateChild("Window")
 	bar.defaultStyle = K.STYLE
 	bar:SetStyleAuto()
-	bar:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(6, 6, 6, 6))
+	bar:SetLayout(s and magic.LM_VERTICAL or magic.LM_HORIZONTAL, 4,
+			magic.IntRect(6, 6, 6, 6))
 	bar:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
 	bar:SetPosition(-8, -y)
 	bar.opacity = 0.92
@@ -1812,13 +1877,48 @@ local function button_row(list, y, least)
 		t:SetText(b[1])
 		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		btn.minWidth = math.max(least or 0, t.width + 16)
-		btn:SetName("touch bar " .. b[1])
-		if b[2] then
-			magic.SubscribeToEvent(btn, "Pressed", b[2])
+		if s then
+			btn:SetFixedSize(s, b.half and math.floor(s / 2) or s)
+			-- (a fifth of the side, less where the label is wider)
+			local px = math.max(8, math.floor(s / 5))
+			t:SetFontSize(px)
+			if t.width > s - 10 then
+				t:SetFontSize(math.max(8, math.floor(px * (s - 10) / t.width)))
+			end
 		end
-		magic.SubscribeToEvent(btn, "Released", b[3])
+		btn:SetName("touch bar " .. b[1])
 	end
+	if s then
+		-- (a column no wider than its buttons: the labels' widths before
+		-- their font was set widened it)
+		bar:SetFixedWidth(s + 12)
+	end
+	-- (pressed and released by the finger: touch_button)
+	C.rows[#C.rows + 1] = {bar = bar, list = list}
 	return bar
+end
+
+-- [KIT_TOUCH_THUMBS] The bars' button under x, y (pixels) {label, pressed or
+-- nil, released}, nil: none. A press is the finger's that made it, not the
+-- button's under it (the phone test of 2026-11-19: Gas held, the finger slid
+-- off it and lifted, stayed pressed): pressed as it goes down, released as
+-- that finger lifts wherever it is (Urho3D's Button lets go as the finger
+-- leaves it and sends no Released for a finger lifted off it), so two
+-- fingers hold two buttons, each its own
+local function touch_button(x, y)
+	local sc = magic.ui.scale
+	for _, row in ipairs(C.rows) do
+		local bar, list = row.bar, row.bar.visible and row.list
+		for i = 1, list and bar:GetNumChildren() or 0 do
+			local btn = bar:GetChild(i - 1)
+			local p, s = btn.screenPosition, btn.size
+			if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
+					y / sc < p.y + s.y then
+				return list[i]
+			end
+		end
+	end
+	return nil
 end
 
 local function labels(list)
@@ -1846,49 +1946,80 @@ local function touch_buttons()
 	return l
 end
 
+-- [KIT_TOUCH_THUMBS] The movement's touch_axes {{label, "f" | "r", value}...}:
+-- a stack at the lower left, top to bottom, each holding that input at that
+-- value (-1 to 1) while pressed, on top of the stick's
+local function touch_axes()
+	local l = {}
+	for _, b in ipairs(type(decl().touch_axes) == "table" and decl().touch_axes or {}) do
+		if type(b) == "table" and type(b[1]) == "string" and
+				(b[2] == "f" or b[2] == "r") and tonumber(b[3]) then
+			l[#l + 1] = {b[1], b[2], math.max(-1, math.min(1, tonumber(b[3])))}
+		end
+	end
+	return l
+end
+
 -- [KIT_PHONE_EDITING] stage 4b: edit, the editor's touch mode walking
 -- (wr, the world's rect in pixels): the movement's own buttons only, at
--- the touch size, at the world's lower right
+-- the touch size, at the world's lower right (simplified: a row there, as
+-- before the thumbs' stacks of play)
 local function make_bar(wr)
 	local tb = touch_buttons()
 	local tb_kind = ""
 	for _, b in ipairs(tb or {}) do
 		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2]
 	end
+	local ax = touch_axes()
+	for _, b in ipairs(ax) do
+		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2] .. b[3]
+	end
 	local edit = wr ~= nil
+	local root = magic.ui.root
 	local kind = touch_kind() .. (M.seated() and ":seat" or "") .. ":" ..
-			M.keys_version() .. (tb and ":tb" .. tb_kind or "") ..
-			(edit and ":edit" or "")
+			M.keys_version() .. (tb and ":tb" or "") .. tb_kind ..
+			(edit and ":edit" or string.format(":%dx%d", root.width, root.height))
 	if C.bar and C.bar_kind == kind then
 		return
 	end
 	if C.bar then
+		local kept = {}
+		for _, row in ipairs(C.rows) do
+			if row.menu then
+				kept[#kept + 1] = row
+			end
+		end
+		C.rows = kept
 		C.bar:Remove()
 		C.abar:Remove()
+		C.lbar:Remove()
 	end
 	C.bar_kind = kind
 	C.touch_held = {}
+	C.touch_axis = {}
+	-- (the stack's order, top to bottom: rank 1 the app's and Exit, half
+	-- high; 2 the movement's; 3 Brake; 4 Gas, lowest under the thumb)
 	local list = {}
 	if touch_kind() == "drive" then
 		list[#list + 1] = {"Brake", function() C.gas = -1 end,
-			function() C.gas = 0 end}
+			function() C.gas = 0 end, rank = 3}
 		list[#list + 1] = {"Gas", function() C.gas = 1 end,
-			function() C.gas = 0 end}
+			function() C.gas = 0 end, rank = 4}
 	end
 	if tb then
 		for _, b in ipairs(tb) do
 			local input = b[2]
 			list[#list + 1] = {b[1], function() C.touch_held[input] = true end,
-				function() C.touch_held[input] = nil end}
+				function() C.touch_held[input] = nil end, rank = 2}
 		end
 	elseif touch_kind() ~= "tap" and touch_kind() ~= "drive" then
-		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end}
+		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end, rank = 2}
 	end
 	if M.seated() then
-		list[#list + 1] = {"Exit", nil, exit_seat}
+		list[#list + 1] = {"Exit", nil, exit_seat, rank = 1, half = true}
 	end
 	for _, b in ipairs(not edit and O.buttons or {}) do
-		list[#list + 1] = {b[1], nil, b[2]}
+		list[#list + 1] = {b[1], nil, b[2], rank = 1, half = true}
 	end
 	-- [KIT_INPUT_ACTIONS] the world's actions, held while pressed: a row
 	-- of their own above (the bar not reaching into the app's help line)
@@ -1899,37 +2030,91 @@ local function make_bar(wr)
 			function() M.press_action(name, true) end,
 			function() M.press_action(name, false) end}
 	end
-	C.bar = button_row(list, 8, edit and 48)
-	C.abar = button_row(acts, 8 + C.bar.height + 6)
+	local lefts = {}
+	for _, b in ipairs(not edit and ax or {}) do
+		local input, v = b[2], b[3]
+		lefts[#lefts + 1] = {b[1], function() C.touch_axis[input] = v end,
+			function() if C.touch_axis[input] == v then C.touch_axis[input] = nil end end}
+	end
+	if edit then
+		C.bar = button_row(list, 8, 48)
+		C.abar = button_row({}, 8)
+		C.lbar = button_row({}, 8)
+	else
+		-- [KIT_TOUCH_THUMBS] The thumbs' side: thumb(), less where the stack
+		-- would be over 0.92 of the height (a landscape phone's), 40 at least
+		local col = {}
+		for rank = 1, 4 do
+			for _, b in ipairs(list) do
+				if b.rank == rank then
+					col[#col + 1] = b
+				end
+			end
+		end
+		local full, half = 0, 0
+		for _, b in ipairs(col) do
+			if b.half then half = half + 1 else full = full + 1 end
+		end
+		local room = root.height * 0.92 - 16 - 12 - 4 * math.max(0, #col - 1)
+		local s = math.max(40, math.floor(math.min(thumb(),
+				room / math.max(1, full + half / 2))))
+		C.bar = button_row(col, 8, nil, s)
+		-- (the world's actions over it where they fit, else beside it)
+		local a_h = 12 + #acts * (s + 4) - 4
+		local over = C.bar.height + 6 + a_h <= root.height * 0.92 - 16
+		C.abar = button_row(acts, over and 8 + C.bar.height + 6 or 8, nil, s)
+		if not over then
+			C.abar:SetPosition(-8 - C.bar.width - 6, -8)
+		end
+		C.lbar = button_row(lefts, 8, nil, s)
+		C.lbar:SetAlignment(magic.HA_LEFT, magic.VA_BOTTOM)
+		C.lbar:SetPosition(8, -8)
+		C.thumb = s
+	end
 	C.bar_at = nil
 	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
-			labels(acts))
+			labels(acts) .. (#lefts > 0 and "; the left: " .. labels(lefts) or ""))
 end
 
 -- [KIT_UI_COMPONENTS] Their top (UI y; nil: none): a UI component at the
--- bottom stays over them
-function M.touch_bar_top()
+-- bottom stays over them; [KIT_TOUCH_THUMBS] with x0, x1 (UI) those over
+-- that stretch only (the stacks stand in the corners)
+local function bars()
+	return {C.bar or false, C.abar or false, C.lbar or false, C.mbar or false}
+end
+function M.touch_bar_top(x0, x1)
 	local y = nil
 	-- ([KIT_SCENE_PACKAGES] the Menu over a full screen too: the screen above it)
-	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
-		if b and b.visible then
-			y = math.min(y or b.screenPosition.y, b.screenPosition.y)
+	for _, b in ipairs(bars()) do
+		local p = b and b.visible and b.screenPosition
+		if p and (not x0 or (p.x < x1 and p.x + b.width > x0)) then
+			y = math.min(y or p.y, p.y)
 		end
 	end
 	return y
 end
 
 -- [KIT_TOUCH_HELP_JUMP] Where the touch bars begin at the lower right
--- (UI units), the leftmost of the two shown; nil with none: an app's help
--- line ends before it
+-- (UI units), the leftmost of those shown; nil with none: an app's help
+-- line ends before it ([KIT_TOUCH_THUMBS] and the stack at the lower left:
+-- kit.touch_left_top())
 function M.touch_bar_left()
 	local x = nil
-	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
+	for _, b in ipairs({C.bar or false, C.abar or false, C.mbar or false}) do
 		if b and b.visible then
 			x = math.min(x or b.screenPosition.x, b.screenPosition.x)
 		end
 	end
 	return x
+end
+-- [KIT_TOUCH_THUMBS] The top and the right (UI) of the stack at the lower
+-- left, nil: none
+function M.touch_left_top()
+	if not (C.lbar and C.lbar.visible) then
+		return nil
+	end
+	local p = C.lbar.screenPosition
+	return p.y, p.x + C.lbar.width
 end
 
 if TOUCH then
@@ -1942,6 +2127,16 @@ if TOUCH then
 		local f = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 			ui = on_ui(x, y)}
 		C.fingers[id] = f
+		-- [KIT_TOUCH_THUMBS] a bar's button: this finger's till it lifts
+		f.btn = touch_button(x, y)
+		if f.btn then
+			f.ui = true
+			log:info("kit: touch button " .. f.btn[1] .. " down by finger " .. id)
+			if f.btn[2] then
+				f.btn[2]()
+			end
+			return
+		end
 		if f.ui or (E.editing and M.view() ~= "walk") then
 			f.ui = true
 			return
@@ -1963,20 +2158,39 @@ if TOUCH then
 			end
 			return
 		end
+		-- ([KIT_TOUCH_THUMBS] the stick's room right of the stack at the lower
+		-- left: a finger on the stack is its button's, on_ui)
 		local w, h = screen()
-		if not C.stick and touch_kind() ~= "tap" and x < w * 0.45 and
+		local lw = C.lbar and C.lbar.visible and C.lbar.width * magic.ui.scale or 0
+		if not C.stick and touch_kind() ~= "tap" and x < w * 0.45 + lw and
 				y > h * 0.55 then
 			f.stick = true
 			C.stick = {f = 0, r = 0}
+			return
+		end
+		-- [KIT_TOUCH_THUMBS] (4) A second free finger: the two pinch the zoom
+		-- (a chase, top-down or side camera's, as the wheel)
+		if camera_mode() ~= "first_person" and not E.editing then
+			for oid, g in pairs(C.fingers) do
+				if oid ~= id and not g.ui and not g.stick then
+					C.pinch = {a = oid, b = id, d0 = math.max(1, math.sqrt(
+						(x - g.x) ^ 2 + (y - g.y) ^ 2)), z0 = C.zoom}
+					f.moved, g.moved = true, true
+					break
+				end
+			end
 		end
 	end)
 	magic.SubscribeToEvent("TouchMove", function(_, data)
 		local f = C.fingers[data:GetInt("TouchID")]
-		if not f or f.ui then
+		if not f then
 			return
 		end
 		local x, y = data:GetInt("X"), data:GetInt("Y")
 		f.x, f.y = x, y
+		if f.ui then
+			return
+		end
 		if math.abs(x - f.x0) + math.abs(y - f.y0) > 8 * magic.ui.scale then
 			f.moved = true
 		end
@@ -1986,6 +2200,14 @@ if TOUCH then
 			local r = math.min(w, h) * 0.1
 			C.stick.r = math.max(-1, math.min(1, (x - f.x0) / r))
 			C.stick.f = math.max(-1, math.min(1, -(y - f.y0) / r))
+			return
+		end
+		local pn = C.pinch
+		local a, b = pn and C.fingers[pn.a], pn and C.fingers[pn.b]
+		if a and b then
+			-- (spread: nearer, as the wheel up)
+			set_zoom(pn.z0 * pn.d0 / math.max(1, math.sqrt((a.x - b.x) ^ 2 +
+					(a.y - b.y) ^ 2)))
 			return
 		end
 		-- The mouse sensitivity's, at half of 0.2 (floorplanner's)
@@ -2001,8 +2223,17 @@ if TOUCH then
 		if not f then
 			return
 		end
+		if f.btn then
+			log:info(string.format("kit: touch button %s up by finger %d at %d,%d",
+					f.btn[1], id, f.x, f.y))
+			f.btn[3]()
+		end
 		if f.stick then
 			C.stick = nil
+		end
+		if C.pinch and (C.pinch.a == id or C.pinch.b == id) then
+			C.pinch = nil
+			log:info(string.format("kit: pinched the zoom to %.3f", C.zoom))
 		end
 		-- (the editor's touch mode walking: for a check)
 		if E.editing and (f.stick or (f.moved and not f.ui)) then
@@ -2620,6 +2851,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.bar.visible = (not E.editing and not full) or
 				(wr ~= nil and C.bar:GetNumChildren() > 0)
 		C.abar.visible = not E.editing and not full and #M.world_actions() > 0
+		C.lbar.visible = not E.editing and not full and C.lbar:GetNumChildren() > 0
 		-- [KIT_SCENE_PACKAGES] Over a full screen (the touch bar hidden) the
 		-- app's pause menu a Menu button of Kit's own at the bar's corner,
 		-- unless the screen has a button of its own for it
@@ -2632,6 +2864,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 					E.menu.open()
 				end
 			end}}, 8)
+			C.rows[#C.rows].menu = true
 			C.mbar.visible = false
 		end
 		if C.mbar and C.mbar.visible ~= mo then
@@ -2652,9 +2885,24 @@ magic.SubscribeToEvent("Update", function(_, data)
 				local p = C.bar.screenPosition
 				log:info(string.format("kit: the touch bar in the world at %d %d %d %d",
 						p.x * sc, p.y * sc, C.bar.width * sc, C.bar.height * sc))
+			else
+				-- (for a check: the stacks' rects, pixels, and the side in
+				-- CSS pixels and in mm at thumb()'s 160 an inch)
+				local function rect(b)
+					local p = b.screenPosition
+					return string.format("%d %d %d %d", p.x * sc, p.y * sc,
+							b.width * sc, b.height * sc)
+				end
+				local css = C.thumb * sc / math.max(0.1, tonumber(
+						buildat.display_density and buildat.display_density()) or 1)
+				log:info(string.format("kit: the touch stacks of %dx%d: side %d " ..
+						"(%.0f CSS px, %.1f mm); right %s; world's %s; left %s",
+						r.width * sc, r.height * sc, C.thumb * sc, css,
+						css / 160 * 25.4, rect(C.bar), rect(C.abar), rect(C.lbar)))
 			end
 		end
 	end
+	zoom_tick()
 	-- The steps
 	local riding = M.riding()
 	if C.s and not C.ready and (riding or floor_ready()) then
