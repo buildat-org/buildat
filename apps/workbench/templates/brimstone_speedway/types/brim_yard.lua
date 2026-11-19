@@ -4,7 +4,8 @@
 -- built children: the road (dirt, `width` across), concrete walls along both
 -- edges and tyre walls round the outside of each bend, a corner's `runoff`
 -- (metres of loose gravel on the bend's outside, the wall moved out by it,
--- tapering back along the straights either side), mud and an oil slick
+-- tapering back along the straights either side, kept out between two
+-- bends' on one side when under JOIN m of wall is left), mud and an oil slick
 -- across the line, the finish line 6 m ahead of the race's pole (the
 -- local/brim_race in its scene: its place), a checkpoint in the middle of
 -- the straight into each corner whose `checkpoint` is 1 (in the lap's order
@@ -21,6 +22,7 @@ local PI = math.pi
 -- tops at 0.555 (the road, the run-off) and 0.5875 (mud, oil, the line)
 local Y_ROAD, D_ROAD, Y_PATCH, D_PATCH = 0.5, 0.11, 0.5625, 0.05
 local WALL = 1.5 -- the walls' thickness
+local JOIN = 25 -- under this much wall between two bends' run-off on one side: joined
 local YARD = {118, 82} -- the fence's half sizes
 local MUD = {{9, 9}, {10, 7}, {8, 10}, {9, 8}} -- a patch's width and length, in turn
 local RUST = {"#7a3b1e", "#4e5a3a", "#5b4a3a", "#6a2020", "#3a4a5a", "#8a6a2a"}
@@ -111,10 +113,15 @@ local function pieces(B)
 		-- 4 times its width; into this one: up from 0 over 2 times
 		local lx = math.min(4 * b0.ro, 0.45 * len)
 		local ln = math.min(2 * b1.ro, 0.45 * len)
+		-- Both bends' run-off on one side with under JOIN m of wall between
+		-- the tapers: kept out across the straight at the smaller of the two,
+		-- no wall stub between them
+		local m = b0.s == b1.s and b0.ro > 0 and b1.ro > 0 and len - lx - ln < JOIN and
+			math.min(b0.ro, b1.ro) or 0
 		local function off(side, d)
-			local o = 0
+			local o = side == -b1.s and m or 0
 			if side == -b0.s and lx > 0 and d < lx then
-				o = b0.ro * (1 - d / lx)
+				o = math.max(o, b0.ro * (1 - d / lx))
 			end
 			if side == -b1.s and ln > 0 and d > len - ln then
 				o = math.max(o, b1.ro * (1 - (len - d) / ln))
@@ -122,7 +129,10 @@ local function pieces(B)
 			return o
 		end
 		local ds = {0}
-		for _, d in ipairs({lx, len - ln}) do
+		-- (where the tapers meet the joined width, if any)
+		local j0 = m > 0 and lx * (1 - m / b0.ro) or lx
+		local j1 = m > 0 and len - ln * (1 - m / b1.ro) or len - ln
+		for _, d in ipairs({j0, j1}) do
 			if d > 0.5 and d < len - 0.5 then
 				ds[#ds + 1] = d
 			end

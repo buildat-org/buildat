@@ -1914,6 +1914,18 @@ end
 -- simplified: the extents of the overlay with no ID logged in, whether
 -- shown or not, as a script is not told F9's state ([TRUST_CODE]); each ID
 -- logged in adds a row that can cover the × again (Escape still closes).
+-- (4z37h) A button b (text t) that is a thing to pick (an entity, a scene),
+-- not an action: no bevel, its text at the left, a cyan fill (stronger under
+-- the pointer), selected amber with a bar at the left (res/style.xml's
+-- Selectable). The user's: "they don't look like a label and they don't
+-- need a separate select button". Actions keep Button's look
+function M.safe.selectable(b, t, selected)
+	b:SetStyle(selected and "SelectableSelected" or "Selectable")
+	b.blendMode = magic.BLEND_ALPHA
+	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	t:SetPosition(selected and 7 or 4, 0)
+end
+
 local OVERLAY_W, OVERLAY_BOTTOM = 384, 49
 local has_overlay = buildat.get_env("BUILDAT_PAGE_HTTPS") == nil
 function M.safe.close_glyph(parent, window, on_close)

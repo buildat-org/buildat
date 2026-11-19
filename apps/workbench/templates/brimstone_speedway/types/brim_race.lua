@@ -36,6 +36,11 @@
 -- the leader, the wrecks and the finish.
 -- The music (`music`, a kit/music on the root above the lobby's): played to
 -- a player from their run's start to its end or their leaving.
+-- (4z37h) The pause menu's Retry (`retry`, a kit/pause_menu_action to the
+-- player, linked to the lobby's again): shown in a time trial and to a
+-- racer alone on the grid or in a race, hidden otherwise (one player can't
+-- restart a shared race); a lone racer's Retry ends the race at once, so
+-- they are back on the grid. To lobby (the lobby's lobby) forfeits a race.
 local PAINTS = 6
 local WEAPONS = {gun = 6, mines = 3, boost = 1}
 local NAMES = {gun = "Gun", mines = "Mines", boost = "Ram boost"}
@@ -97,6 +102,20 @@ end
 local function music(c, by, on)
 	if c.params.music ~= 0 then
 		c:send(c.params.music, on and "play" or "stop", nil, by)
+	end
+end
+
+-- Retry shown to by or not
+local function retry(c, by, on)
+	if c.params.retry ~= 0 then
+		c:send(c.params.retry, on and "show" or "hide", nil, by)
+	end
+end
+
+-- Retry to each racer: only one racing alone may
+local function retry_racers(c)
+	for _, b in ipairs(c.state.racers) do
+		retry(c, b, #c.state.racers == 1)
 	end
 end
 
@@ -272,6 +291,7 @@ local function enter(c, by)
 		for _, b in ipairs(c.state.racers) do
 			show(c, b, view(c, b))
 		end
+		retry_racers(c)
 	else
 		r.mode = "trial"
 		r.count = 3
@@ -281,12 +301,15 @@ local function enter(c, by)
 		c:teleport(slot(c, 1), {yaw = c.yaw or 0})
 		c:log(c:name(by), "starts a time trial")
 		show(c, by, r, "3")
+		retry(c, by, true)
 	end
 end
 
 -- The race over: the grid open again
 local function race_over(c, why)
 	c:log("the race is over:", why)
+	-- (ended in its countdown: none to GO)
+	c:after(nil, "count")
 	for _, by in ipairs(c.state.racers) do
 		local r = view(c, by)
 		if not r.done then
@@ -515,6 +538,7 @@ return {
 		mine = {type = "entity", default = 0},
 		scorch = {type = "entity", default = 0},
 		music = {type = "entity", default = 0},
+		retry = {type = "entity", default = 0},
 		gun_damage = {type = "number", default = 3, min = 0, max = 100},
 		mine_damage = {type = "number", default = 9, min = 0, max = 100},
 		ram_damage = {type = "number", default = 6, min = 0, max = 100},
@@ -685,10 +709,16 @@ return {
 			if r.mode == "race" then
 				drop_racer(c, by)
 				c:speed(by, 1)
-				if c.state.phase == "running" then
+				if c.state.phase ~= "grid" and #c.state.racers == 0 then
+					-- (the last one out: over now, a Retry's entered next
+					-- finds the grid open)
+					race_over(c, "nobody left")
+				elseif c.state.phase == "running" then
 					rank(c)
 				end
+				retry_racers(c)
 			end
+			retry(c, by, false)
 			if c.params.grid_screen ~= 0 then
 				c:send(c.params.grid_screen, "hide", nil, by)
 			end

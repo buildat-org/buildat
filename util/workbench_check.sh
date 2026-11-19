@@ -1347,7 +1347,7 @@ click Button "Entities"
 frames 3
 click Button "Scene (*"
 wait_log 5000 kit editor: list Scene
-click Button "Select*"
+click Button "select 7"
 wait_log 5000 (kit/terrain
 frames 3
 screenshot @T@/inspector_world.png

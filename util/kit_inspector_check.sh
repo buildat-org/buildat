@@ -137,7 +137,7 @@ wait_log 10000 entities, 1 to undo
 frames 5
 click Button "Entities"
 frames 3
-click Button "Select"
+click Button "select 3"
 wait_log 5000 kit editor: selected 3
 frames 5
 click DropDownList "▼" 965 178

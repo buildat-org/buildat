@@ -4,6 +4,9 @@
 -- "pressed" as by them, so a link acts on that player (a kit/spawner's
 -- "spawn" takes them there). "show" and "hide" (or `shown`) put it in the
 -- menu or take it out, for everyone in the round it is in; in play only.
+-- (4z37h) `to` "player": show and hide for the player who set them off
+-- alone (a kit/lobby's entered and left: Retry and To lobby in a run),
+-- `shown` everyone's start.
 -- simplified: `order` is read when the item first reaches a client; a
 -- changed order shows at the client's next join
 return {
@@ -15,13 +18,16 @@ return {
 		order = {cat = "hud", type = "number", default = 50, min = 1,
 			max = 99},
 		shown = {cat = "hud", type = "bool", default = true},
+		to = {type = "string", default = "everyone",
+			choices = {"everyone", "player"}},
 	},
 	state = {
 		shown = {default = true, shared = true, param = "shown"},
+		own = {default = {}, per_player = true},
 	},
 	about = {
 		group = "UI",
-		what = "A button in the players' pause menu.",
+		what = "A button in the players' pause menu; to \"player\": shown and hidden for each player alone.",
 		inputs = {
 			show = "Puts it in the menu.",
 			hide = "Takes it out of the menu.",
@@ -37,8 +43,13 @@ return {
 			c.state.shown = c.params.shown
 		end
 	end,
-	on_input = function(c, input)
-		c.state.shown = input == "show"
+	on_input = function(c, input, value, by)
+		if c.params.to == "player" and c.player then
+			c.state.own[by] = {shown = input == "show"}
+			c:log(input, "for", c:name(by))
+		else
+			c.state.shown = input == "show"
+		end
 	end,
 	on_ui = function(c, phase, by)
 		if phase == "pressed" then

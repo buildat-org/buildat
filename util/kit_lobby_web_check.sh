@@ -19,7 +19,7 @@
 #     The Loop) and Kit's touch Menu over the full screen (menu_over.png),
 #     tapped: the pause menu (menu.png) with its "Server <VERSION>" label
 #     ([SERVER_VERSION_SHOWN]: a tap finds it), Continue; a kit/ui_button of
-#     action pause_menu placed on the lobby screen (93): no touch Menu
+#     action pause_menu placed on the lobby screen (95): no touch Menu
 #     over it, the button opening the menu (menu_button.png); The Loop
 #     tapped: its scene (loop.png), its gems and finish by the editor's
 #     try, the result card (result.png).
@@ -91,10 +91,10 @@ cat > "$t/phone.json" <<'J'
 	["event", "kit_edit {\"op\": \"mode\", \"on\": false}"],
 	["waitlog", "kit editor: edit mode off", 10],
 	["waitlog", "kit: ui full screen 45 up", 10],
-	["waitlog_any", "kit: ui 93 button .* shown, layer 45: \"Menu\"", 10], ["frames", 10],
+	["waitlog_any", "kit: ui 95 button .* shown, layer 45: \"Menu\"", 10], ["frames", 10],
 	["shot", "${OUT}/menu_button.png"],
 	["tap", "Button", "Menu"],
-	["waitlog", "kit: ui button 93 pressed \\(action pause_menu\\)", 10],
+	["waitlog", "kit: ui button 95 pressed \\(action pause_menu\\)", 10],
 	["waitlog", "pause: the menu shown", 10], ["frames", 5],
 	["tap", "Button", "Continue"], ["waitlog", "pause: the menu closed", 10], ["frames", 5],
 	["eval", "console.log('CHECK: tracks'), 'mark'"],
