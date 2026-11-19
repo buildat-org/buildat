@@ -127,6 +127,13 @@ set_() # <param>=<json>...: of the entity just placed
 	done
 }
 BOB=1000001
+# The sync after the flood: its 1500 live particles are clamped to the
+# biggest (8 m, growing 100 m/s for 10 s), each over the whole screen, and
+# software GL (llvmpipe: the check box's Xvfb, a headless weston) draws a
+# frame of them in ~0.9 s (2026-11-19; small ones: no frame over 0.1 s).
+# The answer is behind the ~500 bursts sent before it, drained 20 ms a
+# frame (state.cpp's packet_drain_us): a few such frames
+FLOOD_SYNC=10000
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -250,7 +257,7 @@ wait_log_any 5000 kit: effect 14 of 14 square
 delay 300
 keypress L
 wait_log 10000 kit: effect 0 of 256 square
-sync 2000
+sync $FLOOD_SYNC
 delay 1000
 quit
 EOF
@@ -271,7 +278,7 @@ delay 300
 keypress U
 wait_log 10000 kit: effect 14 of 14 square
 wait_log 60000 kit: effect 0 of 256 square
-sync 1000
+sync $FLOOD_SYNC
 quit
 EOF
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
