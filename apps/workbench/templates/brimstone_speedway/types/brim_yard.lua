@@ -159,10 +159,13 @@ end
 -- line (LINE) at RL_N points, each moved across the road (held RL_IN m inside
 -- its edges) to where the line bends least: again and again toward what its
 -- neighbours two either side make straightest (the second differences'
--- least squares), at a coarse spacing first, then the fine. It runs wide
--- into a bend, cuts its inside and runs wide out.
+-- least squares), at a coarse spacing first, then the fine, each until no
+-- point moves RL_SETTLED m in a round (RL_ROUNDS at most). It runs wide
+-- into a bend, cuts its inside and runs wide out. (200 rounds a spacing
+-- took 70 % of a build and put the Bone Yard near the build's budget;
+-- settled, it ends within 0.25 m of that line at well under half the cost)
 -- simplified: the road's width only, never the run-off's
-local RL_N, RL_IN = 120, 2.8
+local RL_N, RL_IN, RL_SETTLED, RL_ROUNDS = 120, 2.8, 0.005, 200
 local function racing_line(LINE, W)
 	local N, n = #LINE, math.min(RL_N, math.floor(#LINE / 3))
 	local C, Q, d = {}, {}, {}
@@ -184,7 +187,8 @@ local function racing_line(LINE, W)
 		return C[k][1] + Q[k][1] * d[k], C[k][2] + Q[k][2] * d[k]
 	end
 	for _, span in ipairs({3, 2, 1}) do
-		for _ = 1, 200 do
+		for _ = 1, RL_ROUNDS do
+			local moved = 0
 			for k = 1, n do
 				local ax, az = at(k - span)
 				local bx, bz = at(k + span)
@@ -193,7 +197,12 @@ local function racing_line(LINE, W)
 				local tx = (4 * (ax + bx) - cx - ex) / 6
 				local tz = (4 * (az + bz) - cz - ez) / 6
 				local v = (tx - C[k][1]) * Q[k][1] + (tz - C[k][2]) * Q[k][2]
-				d[k] = v < -lim and -lim or v > lim and lim or v
+				v = v < -lim and -lim or v > lim and lim or v
+				moved = math.max(moved, math.abs(v - d[k]))
+				d[k] = v
+			end
+			if moved < RL_SETTLED then
+				break
 			end
 		end
 	end
