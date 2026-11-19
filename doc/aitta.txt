@@ -311,11 +311,15 @@ Two more manifest fields, and no "dependencies":
                                       "<author>/<its name>"
 
 It is not installed in the client. Kit's "Export this scene" (the
-palette's New tab) writes <scene>.scene.zip, and "Publish this scene..."
-writes it into <user>/dev_apps/<name> and opens the publish screen on it.
+palette's New tab; the scene list's Scenes... has Export <scene> for the
+one selected) writes <scene>.scene.zip, and "Publish this scene..."
+(Scenes...' Publish <scene>...) writes it into <user>/dev_apps/<name> and
+opens the publish screen on it.
 The New tab lists the Aittas' scene packages, this game's first; one
 made for another game is added after a yes ("its types may differ").
-"Add from a file..." (the scene list) takes a zip. The server
+"Add from a file..." (the scene list), Scenes...' Import a scene... and
+a row's Add here... (under it) take a zip; an agent's import_scene takes
+export_scene's files, zipped and checked the same. The server
 checks a fetched one's signature and asks its Aitta whose key it is, as a
 Kit package's, and then: the scene gets the next free name of its own
 (track, track_2, ...) and new ids; a link or entity parameter onto an

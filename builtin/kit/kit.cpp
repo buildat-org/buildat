@@ -33640,11 +33640,28 @@ struct Module: public interface::Module, public Interface
 				"has from above on an entity \"Rules from above\"; \"outside\": "
 				"the entities outside it its links "
 				"and entity parameters name, by name), the custom types, rows "
-				"and textures it uses, edits.bin (each scene's World's). The scene "
-				"list's Add from a file... takes the zip into another game.",
+				"and textures it uses, edits.bin (each scene's World's). The "
+				"Scenes window's Import a scene... takes the zip into another "
+				"game, import_scene these files.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
 				""},
+			// (kit_plan 4z37i)
+			{"import_scene", "import_scene", "Adds a scene package as a new "
+				"scene, as the Scenes window's Import a scene... adds a file: "
+				"export_scene's files and base64 (of this game or another), "
+				"checked as a file is (its files, sizes, meta.json's kind and "
+				"version). Its name the next free one (track, track_2...), its "
+				"entities new ids; a link or entity parameter onto an entity "
+				"outside it goes to this game's entity of that name, none: left "
+				"out (dropped); its custom types and rows this game has are kept "
+				"as this game's (kept). Running: added unlisted. Answers {what, "
+				"scene, dropped, kept}.",
+				R"J({"type": "object", "properties": {
+				"files": {"type": "object", "description": "export_scene's files: {path: text}"},
+				"base64": {"type": "object", "description": "export_scene's base64: {path: bytes}"},
+				"parent": {"type": "string", "description": "The scene it goes under; none: the root"}},
+				"required": ["files"]})J", ""},
 			{"list_games", "=projects", "The app's games (its saves): "
 				"each one's name, bytes on disk and whether it runs. An admin "
 				"token's, as the Games page is an admin's.",
@@ -34061,6 +34078,46 @@ struct Module: public interface::Module, public Interface
 		m_agent_box->later.erase(peer);
 	}
 
+	// (kit_plan 4z37i) import_scene: export_scene's files and base64 zipped
+	// and added as the editor's Import a scene... adds a file
+	// (add_scene_data()'s checks); the answer kit:scene's
+	ss_ agent_import_scene(size_t peer, const json::Value &a, bool &failed)
+	{
+		failed = true;
+		sv_<std::pair<ss_, ss_>> files;
+		size_t total = 0;
+		for(const char *k : {"files", "base64"}){
+			const json::Value &o = a.get(k);
+			if(!o.is_undefined() && !o.is_object())
+				return ss_("Refused: ")+k+" is not an object";
+			for(json::Iterator it(o); o.is_object() && it; ++it){
+				const ss_ name = it.key().substr(0, 201);
+				if(name.empty() || name.size() > 200 || !(*it).is_string())
+					return ss_("Refused: ")+k+": "+name.substr(0, 80)+": not text, "
+							"or a name past 200 bytes";
+				ss_ data = (*it).as_string();
+				if(k[0] == 'b' && !unbase64((*it).as_string(), data))
+					return "Refused: base64: "+name+" is not base64";
+				total += data.size();
+				if(files.size() >= 4096 || total > MAX_SCENE_UNPACKED)
+					return "Refused: past 4096 files or "+
+							itos(MAX_SCENE_UNPACKED >> 20)+" MiB";
+				files.push_back({name, data});
+			}
+		}
+		if(files.empty())
+			return "Refused: no files (export_scene's files and base64)";
+		json::Value s = json::object();
+		const ss_ why = add_scene_data(peer, interface::aitta::zip_files(files),
+				s, jstr(a, "parent").substr(0, 64));
+		log_i(MODULE, "A scene by agent peer %zu %s: %s", peer, why.empty() ?
+				"added" : "refused", cs(why.empty() ? jstr(s, "what") : why));
+		if(!why.empty())
+			return "Refused: "+why;
+		failed = false;
+		return s.stringify();
+	}
+
 	ss_ agent_tool(const accounts::Interface::AgentToken &at,
 			const AgentTool &t, const json::Value &args, bool &failed)
 	{
@@ -34101,6 +34158,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op[0] == '=')
 			return agent_read(p, peer, op, a, failed);
+		if(op == "import_scene")
+			return agent_import_scene(peer, a, failed);
 		if(op == "view")
 			return agent_view(p, peer, a, failed);
 		if(op.compare(0, 5, "play_") == 0)
@@ -41739,6 +41798,10 @@ struct Module: public interface::Module, public Interface
 			return keep(p, j, refuse);
 		if(op == "always_keep")
 			return set_always_keep(p, j, refuse);
+		// (4z37i) The game's start as a file: Workbench's Games list's too,
+		// the tools on or not
+		if(op == "export_project")
+			return export_project(peer, p, refuse);
 		if(!p.editing)
 			return refuse("not in edit mode");
 		if(op == "focus")
@@ -41811,8 +41874,6 @@ struct Module: public interface::Module, public Interface
 			return copy_op(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
-		if(op == "export_project")
-			return export_project(peer, p, refuse);
 		if(op == "export_scene")
 			return export_scene(peer, p, j, refuse);
 		// [KIT_SERVER_PUBLISH]
