@@ -20201,10 +20201,25 @@ struct Module: public interface::Module, public Interface
 		ss_ answer, error;
 		bool runaway = false;
 		int64_t spent = 0;
+		// (4z37i) "kit:generating" {"on"} to those in its scene (every
+		// scene's for one on the root) around the run: their client says
+		// Generating... while it lasts past 0.3 s (ui.lua)
+		ss_ gen_scene;
+		scene_of(e, &gen_scene);
+		auto generating = [&](bool on){
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &o : m_peers)
+					if(gen_scene.empty() || o.second.scene == gen_scene)
+						inetwork->send(o.first, "kit:generating",
+								on ? "{\"on\": true}" : "{\"on\": false}");
+			});
+		};
+		generating(true);
 		m_building = true;
 		const bool called = box_call(request_of(e, e.comps[comp], r), answer,
 				error, &runaway, &spent);
 		m_building = false;
+		generating(false);
 		if(spent_out)
 			*spent_out = spent;
 		auto it = m_entities.find(e.id);

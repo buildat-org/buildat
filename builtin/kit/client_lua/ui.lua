@@ -2277,9 +2277,21 @@ end
 -- a full screen; the pause menu over it (hidden there, it came back for the
 -- round trip after Run)
 local stopped = {said = nil}
+-- (4z37i) A generator running for this player's scene (the server's
+-- "kit:generating"): since when (get_time_us), nil: none
+local generating = nil
+buildat.sub_packet("kit:generating", function(data)
+	local on = data:find('"on": true', 1, true) ~= nil
+	generating = on and (generating or buildat.get_time_us()) or nil
+end)
+
+-- The stopped notice, or (4z37i) Generating... over it once a generator
+-- has run 0.3 s (a short one says nothing)
 local function stopped_notice()
 	local s = nil
-	if E.state_seen and not E.running and not E.editing and not M.hud_off() then
+	if generating and buildat.get_time_us() - generating > 300000 then
+		s = "Generating..."
+	elseif E.state_seen and not E.running and not E.editing and not M.hud_off() then
 		s = "Stopped: the game is being built.\nIt starts when a builder runs it."
 		if E.can_edit and E.menu then
 			s = s .. "\nYou may run it: " .. (TOUCH and "Menu" or "Esc") ..
