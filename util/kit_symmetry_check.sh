@@ -120,6 +120,12 @@ EOF
 	edit '{"op": "set", "id": 45, "comp": 0, "param": "color", "value": "#ff0000"}'
 	edit '{"op": "move", "id": 5, "pos": [6, 1, 3]}'
 	edit '{"op": "prefab_reset", "id": 45, "comp": 0, "param": "color"}'
+	# [KIT_PARAM_AUDIT] slices set alone (the inspector's one field): the
+	# slice fitted to it (+x at 45 into halves' +x-z), not refused; undone
+	sym slices '"halves"'
+	echo 'event kit_edit {"op": "undo"}'
+	n=$((n - 1))
+	printf 'wait_log 10000 entities, %d to undo\n' $n
 	edit '{"op": "delete", "id": 4}'
 	echo 'quit'
 } > "$t/boss1.cmds"
