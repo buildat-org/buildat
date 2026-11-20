@@ -1,0 +1,14 @@
+{
+	"kit": 1,
+	"api": 1,
+	"entities": [
+		{"id": 2, "name": "world", "kind": "scene"},
+		{"id": 3, "parent": 2, "name": "the land", "components": [{"type": "kit/terrain", "version": 2, "params": {"generator": "valleys", "seed": 1, "size": "infinite", "biome": "grassland", "caves": true, "decorations": true, "dig": "all", "place": "all"}}]},
+		{"id": 4, "parent": 1, "name": "game rules, the day and the night", "components": [{"type": "kit/game_rules", "version": 2, "params": {"peaceful": false, "building": "inventory", "on_death": "keep", "show_health": true}}, {"type": "kit/environment", "version": 1, "params": {"time": 8, "day_minutes": 20}, "links": [{"output": "dusk", "to": 7, "input": "enable"}, {"output": "dawn", "to": 7, "input": "disable"}, {"output": "dawn", "to": 7, "input": "clear"}]}, {"type": "kit/walker", "version": 1, "params": {"fall_damage": 1}}]},
+		{"id": 5, "parent": 1, "name": "players and builds kept", "components": [{"type": "kit/player_state", "version": 1, "params": {"remember": true, "keep_position": true, "keep_builds": true, "keep_inventory": true}}]},
+		{"id": 7, "parent": 2, "name": "creatures come at night", "components": [{"type": "kit/spawn_rule", "version": 2, "params": {"prefab": "kit/creature", "enabled": false, "every": 15, "max": 6, "radius": 24, "apart": 12, "on_voxels": "kit/grass, kit/dirt, kit/stone, kit/sand, kit/gravel"}}]},
+		{"id": 8, "parent": 2, "name": "a pickaxe and a sword", "components": [{"type": "kit/starting_kit", "version": 1, "params": {"items": "kit/pickaxe, kit/sword"}}]},
+		{"id": 9, "parent": 2, "name": "how to play", "components": [{"type": "kit/ui_text", "version": 2, "params": {"text": "Dig, and build with what you dig.|Creatures come at night.|You come back where you left off. F6 opens the tools.", "anchor": "bottom_left", "x": 2, "y": 7, "size": 1.5}}]}
+	],
+	"next_id": 10
+}

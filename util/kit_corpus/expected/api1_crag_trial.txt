@@ -1,0 +1,127 @@
+# util/kit_corpus_check.sh's record of api1/crag_trial (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 87 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#d6b76479/97d170e1
+4 1 kit/game_rules@2#9eb49df6/97d170e1
+5 1 kit/controls@1#d7fc9788/97d170e1
+6 1 local/crag_bike@1#6525b75f/436e5f04
+7 2 local/crag_run@1#1fb08565/fc5ddbee
+8 2 kit/spawner@2#6b3c0f9e/97d170e1
+9 2 kit/ui_text@2#30f4a073/97d170e1
+10 2 kit/sign@1#b671e4e2/97d170e1
+11 2 local/crag_gem@1#087ab3d4/d1482849
+12 2 local/crag_gem@1#087ab3d4/d1482849
+13 2 local/crag_gem@1#087ab3d4/d1482849
+14 2 kit/trigger_zone@1#48b89d85/5f0e8f8b
+15 2 kit/trigger_zone@1#cf3c572f/18a2260e kit/polygon@1#cb397686/97d170e1
+21 2 kit/polygon@1#27e91631/97d170e1
+22 2 kit/polygon@1#020c6d97/97d170e1
+23 2 kit/polygon@1#5f5fcd27/97d170e1
+24 2 kit/polygon@1#cb1fd6d3/97d170e1
+25 2 kit/polygon@1#3749548a/97d170e1
+26 2 kit/polygon@1#6d567237/97d170e1
+27 2 kit/polygon@1#4608ca9b/97d170e1
+28 2 kit/polygon@1#4b32cf41/97d170e1
+29 2 kit/polygon@1#8d91f53f/97d170e1
+30 2 kit/polygon@1#f01d306e/97d170e1
+31 2 kit/polygon@1#2c333311/97d170e1
+32 2 kit/polygon@1#c492b680/97d170e1
+33 2 kit/polygon@1#a8f68588/97d170e1
+34 2 kit/polygon@1#60777059/97d170e1
+35 2 kit/polygon@1#e0bf540e/97d170e1
+36 2 kit/polygon@1#e0bf540e/97d170e1
+37 2 kit/polygon@1#c21b8433/97d170e1
+38 2 kit/polygon@1#9977a991/97d170e1
+39 2 kit/polygon@1#3b5ce356/97d170e1
+40 2 kit/polygon@1#1800961b/97d170e1
+41 2 kit/polygon@1#e085e603/97d170e1
+42 2 kit/polygon@1#b4cb9348/97d170e1
+43 2 kit/sign@1#41878d19/97d170e1
+44 1 kit/lobby@1#c3b15a35/e69b28be
+45 1 kit/ui_panel@2#f8f7f7e3/97d170e1
+46 54 kit/ui_chat@1#2396464a/97d170e1
+47 45 kit/ui_scene_list@1#155b6b2e/dfde9cb7
+48 54 kit/ui_view@1#68f2bb1c/97d170e1
+50 1 kit/ui_panel@2#792cb20a/97d170e1
+51 50 kit/ui_text@2#6d979104/97d170e1
+52 50 kit/ui_button@2#34c77619/f517fe4d
+53 50 kit/ui_button@2#d5c82d7d/e8ba9f61
+54 45 kit/ui_panel@2#1424a47b/97d170e1
+55 2 kit/scene_info@1#f0971e56/97d170e1
+56 1 scene
+57 56 kit/scene_info@1#85ae4c98/97d170e1
+58 56 kit/terrain@2#d6b76479/97d170e1
+59 56 local/crag_run@1#77eeff21/8e69eafb
+60 56 kit/spawner@2#6b3c0f9e/97d170e1
+61 56 kit/ui_text@2#30f4a073/97d170e1
+62 56 kit/sign@1#b671e4e2/97d170e1
+63 56 kit/sign@1#41878d19/97d170e1
+64 56 local/crag_gem@1#087ab3d4/e887d204
+65 56 local/crag_gem@1#087ab3d4/e887d204
+66 56 local/crag_gem@1#087ab3d4/e887d204
+67 56 kit/trigger_zone@1#48b89d85/e72f68ec
+68 56 kit/trigger_zone@1#cf3c572f/27aa4a85 kit/polygon@1#cb397686/97d170e1
+69 56 kit/polygon@1#27e91631/97d170e1
+70 56 kit/polygon@1#910e25e6/97d170e1
+71 56 kit/polygon@1#15cad906/97d170e1
+72 56 kit/polygon@1#cb1fd6d3/97d170e1
+73 56 kit/polygon@1#3749548a/97d170e1
+74 56 kit/polygon@1#6d567237/97d170e1
+75 56 kit/polygon@1#4608ca9b/97d170e1
+76 56 kit/polygon@1#4b32cf41/97d170e1
+77 56 kit/polygon@1#8d91f53f/97d170e1
+78 56 kit/polygon@1#f01d306e/97d170e1
+79 56 kit/polygon@1#2c333311/97d170e1
+80 56 kit/polygon@1#c492b680/97d170e1
+81 56 kit/polygon@1#a8f68588/97d170e1
+82 56 kit/polygon@1#60777059/97d170e1
+83 56 kit/polygon@1#e0bf540e/97d170e1
+84 56 kit/polygon@1#e0bf540e/97d170e1
+85 56 kit/polygon@1#c21b8433/97d170e1
+86 56 kit/polygon@1#9977a991/97d170e1
+87 56 kit/polygon@1#3b5ce356/97d170e1
+88 56 kit/polygon@1#1800961b/97d170e1
+89 56 kit/polygon@1#e085e603/97d170e1
+90 56 kit/polygon@1#b4cb9348/97d170e1
+91 56 kit/polygon@1#605ac22b/97d170e1
+92 56 local/crag_gem@1#087ab3d4/e887d204
+93 1 kit/pause_menu_action@1#66f34b9c/f517fe4d
+94 1 kit/pause_menu_action@1#39241ec7/e8ba9f61
+[rows]
+type:local/crag_bike
+type:local/crag_gem
+type:local/crag_run
+[round]
+kit: World: the heightmap from (-96,-8) to (95,7)
+kit: World: flat 192x16, seed 0, biome rock, a heightmap, border void; ground 0 to 0, heights hash 9ad721c5; version 2, decorations 0 (hash 811c9dc5, 0 under the water); materials kit/default
+kit: World: 0 edited voxel sections over the heightmap
+kit: World: the heightmap from (-96,-8) to (95,7)
+kit: World: flat 192x16, seed 0, biome rock, a heightmap, border void; ground 0 to 0, heights hash 9ad721c5; version 2, decorations 0 (hash 811c9dc5, 0 under the water); materials kit/default
+kit: World: 0 edited voxel sections over the heightmap
+kit: Hosted: 88 entities, 87 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit/ui_scene_list 47: scenes: world=The Crags/buildat, loop=The Loop/celeron55
+kit/sign 43: shows "Best times?" by app
+kit/sign 63: shows "Best times?" by app
+[keys]
+kit/controls angle blur camera camera_frame dead_zone distance edit_view fov fov_time glitch height look_ahead look_velocity movement offset_x offset_y offset_z ortho plane pointer roll shake_amount shake_decay shake_far shake_near side_clip smoothing tint tint_amount to vignette yaw
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/lobby keep_own_body lobby_screen out_of_play over_screen
+kit/pause_menu_action label order shown to
+kit/polygon collision color depth edge_depth floor friction material own_look points surface voxel
+kit/scene_info author listed title
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/trigger_zone deadly size
+kit/ui_button action anchor background border closes color height label order shown size style to width x y
+kit/ui_chat anchor background border color height label lines order shown size style width x y
+kit/ui_panel anchor background border color gap height keyboard layout order screen shown size style title to width x y
+kit/ui_scene_list anchor background border color height order shown size style title to width x y
+kit/ui_text anchor background border color height order shown size style text to width x y
+kit/ui_view anchor background border color height order shown size style title width x y
+local/crag_bike damping gravity lean power rate speed stiffness substeps
+local/crag_gem own_look size
+local/crag_run start

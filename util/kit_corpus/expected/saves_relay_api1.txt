@@ -1,0 +1,51 @@
+# util/kit_corpus_check.sh's record of saves/relay_api1 (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 12 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#0753ad86/97d170e1
+4 1 kit/game_rules@2#9eb49df6/97d170e1
+5 2 kit/spawner@2#d3da9e6d/97d170e1
+6 2 kit/spawner@2#0d2e0d32/97d170e1
+7 2 kit/goal@1#b1955066/7b7af99b
+8 2 kit/timer@2#55756121/fef170e5
+9 2 kit/counter@1#85c6f1f8/6f9d6622
+10 2 local/tally@1#492f9b88/97d170e1
+11 2 local/posts@1#946322a1/97d170e1
+12 2 kit/music@1#28371848/97d170e1
+13 2 kit/ui_text@2#58dc1dcd/97d170e1
+[rows]
+type:local/posts
+type:local/tally
+[round]
+kit: World: flat 32x32, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 76efddc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 13 entities, 11 instances; 0 players, 5 entities made in the round
+kit: Entity 17's kit/creature_walker steps in play
+kit: Entity 18's kit/creature_walker steps in play
+kit: Play by app: a round from the start
+kit/goal 7: active from the start
+local/tally 10: round 2
+local/posts 11: posts: seed 11 count 3 last at -3
+kit/spawner 6: made 22 for app
+kit/bot 22: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit: Entity 22's kit/creature_walker steps in play
+kit/bot 22: goal 7 reach "Run to the flag"
+kit/timer 8: tick 1
+kit/counter 9: count 1 by app
+kit/timer 8: tick 2
+kit/counter 9: count 2 by app
+kit/goal 7: done for Bot 22 by Bot 22
+local/tally 10: finished by Bot 22 count 2 score 7 round 2
+kit/ui_text 13: show for Bot 22
+[keys]
+kit/counter own_look target
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/music autoplay mood priority song
+kit/spawner copy every max own_look players prefab spread
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/timer autostart interval repeats scope
+kit/ui_text anchor background border color height order shown size style text to width x y
+local/posts count reseed seed
+local/tally bonus own_look

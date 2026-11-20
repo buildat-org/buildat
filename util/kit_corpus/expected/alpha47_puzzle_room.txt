@@ -1,0 +1,116 @@
+# util/kit_corpus_check.sh's record of alpha47/puzzle_room (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 54 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#2a6de703/97d170e1
+4 1 kit/game_rules@2#9eb49df6/97d170e1
+5 2 kit/spawner@2#d3da9e6d/97d170e1
+6 2 kit/part@1#b6988b68/97d170e1
+7 2 kit/part@1#ba71b09d/97d170e1
+8 2 kit/part@1#ba71b09d/97d170e1
+9 2 kit/part@1#9913d61f/97d170e1
+10 2 kit/part@1#9913d61f/97d170e1
+11 2 kit/part@1#4ddfe9ca/97d170e1
+12 2 kit/part@1#9913d61f/97d170e1
+13 2 kit/part@1#9913d61f/97d170e1
+14 2 kit/part@1#4ddfe9ca/97d170e1
+15 2 kit/door@2#3e5d2b8d/97d170e1
+16 2 kit/door@2#3e5d2b8d/97d170e1
+17 2 kit/part@1#a11a4621/97d170e1
+18 2 kit/part@1#a11a4621/97d170e1
+19 2 kit/part@1#5ec60ccb/97d170e1
+20 2 kit/gate@2#83ed80c0/97d170e1
+21 2 kit/part@1#01c592cc/97d170e1
+22 2 kit/button@2#16b602a9/5f8b7f9e
+23 2 kit/logic@1#88498428/0095fb77
+24 2 kit/sign@1#2115e6e8/97d170e1
+25 2 kit/sign@1#56f87b11/97d170e1
+26 2 kit/part@1#bb0f8023/97d170e1
+27 2 kit/lever@2#4ec82a3f/19247dd1
+28 2 kit/part@1#bb0f8023/97d170e1
+29 2 kit/lever@2#4ec82a3f/9097c6e4
+30 2 kit/part@1#bb0f8023/97d170e1
+31 2 kit/lever@2#4ec82a3f/862e3c1d
+32 2 kit/logic@1#8194637d/14e51f72
+33 2 kit/logic@1#a563bb7c/d82ccf38
+34 2 kit/logic@1#8194637d/0d89fd63
+35 2 kit/sign@1#5501e800/97d170e1
+36 2 kit/part@1#9ad10358/97d170e1
+37 2 kit/sign@1#6ae4ef8f/97d170e1
+38 2 kit/part@1#ce4ff024/97d170e1
+39 2 kit/part@1#b2b8106f/97d170e1
+40 2 kit/part@1#ce4ff024/97d170e1
+41 2 kit/part@1#b2b8106f/97d170e1
+42 2 kit/part@1#ce4ff024/97d170e1
+43 2 kit/part@1#b2b8106f/97d170e1
+44 2 kit/part@1#ce4ff024/97d170e1
+45 2 kit/part@1#b2b8106f/97d170e1
+46 2 kit/goal@1#f88a8b0b/676ff6cc
+47 2 kit/goal@1#4711698b/32469721
+48 2 kit/goal@1#7e080a86/260b4a74
+49 2 kit/goal@1#e45b5904/f7979959
+50 2 kit/ui_text@2#81da1cba/97d170e1
+51 2 kit/goal@1#57675ab1/7466def4
+52 2 kit/spawner@2#f5b7730a/97d170e1
+53 2 kit/pause_menu_action@1#32cefbf1/45a8136f
+54 2 kit/pause_menu_action@1#a1e4a007/e70eecbd
+55 2 kit/ui_panel@2#385dbdb3/97d170e1
+[rows]
+[round]
+kit: World: flat 48x48, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 02b7edc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 55 entities, 53 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit/logic 33: not on
+kit/goal 46: waits for activate
+kit/goal 47: active from the start
+kit/goal 48: waits for activate
+kit/goal 49: waits for activate
+kit/goal 51: waits for activate
+kit/spawner 52: made 56 for app
+kit/bot 56: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit: Entity 56's kit/creature_walker steps in play
+kit/bot 56: goal 47 use "Press the red button"
+kit/bot 56: uses 22 for goal 47
+kit/button 22: pressed by Bot 56 times 1
+kit/goal 47: done for Bot 56 by Bot 56
+kit/logic 23: pulse on by Bot 56
+kit/goal 48: active for Bot 56
+kit/gate 20: opened by Bot 56
+kit/bot 56: goal 48 reach "The gate is open: run through it"
+kit/goal 48: done for Bot 56 by Bot 56
+kit/goal 51: active for Bot 56
+kit/bot 56: goal 51 use "Flip lever A"
+kit/bot 56: uses 27 for goal 51
+kit/lever 27: flipped on by Bot 56
+kit/goal 51: done for Bot 56 by Bot 56
+kit/goal 49: active for Bot 56
+kit/bot 56: goal 49 signal "Find which two levers open the door"
+kit/logic 23: pulse off
+kit/gate 20: shut by Bot 56
+kit/bot 56: uses 31 for goal 49
+kit/lever 31: flipped on by Bot 56
+kit/logic 32: and on by Bot 56
+kit/logic 34: and on by Bot 56
+kit/door 16: opened by Bot 56
+kit/goal 49: done for Bot 56 by Bot 56
+kit/goal 46: active for Bot 56
+kit/bot 56: goal 46 reach "Leave through the door"
+kit/goal 46: done for Bot 56 by Bot 56
+kit/ui_text 50: show for Bot 56
+[keys]
+kit/button color color_down hold own_look sound_press use
+kit/door close_after material mirror own_look size sound_close sound_open use
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/gate material own_look size
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/lever own_look use
+kit/logic mode time
+kit/part collision color material own_look rotation shape size voxel
+kit/pause_menu_action label order shown to
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/ui_panel anchor background border color gap height keyboard layout order screen shown size style title to width x y
+kit/ui_text anchor background border color height order shown size style text to width x y

@@ -1,0 +1,12 @@
+{
+	"kit": 1,
+	"api": 1,
+	"entities": [
+		{"id": 2, "parent": 1, "name": "world", "kind": "scene"},
+		{"id": 3, "parent": 2, "name": "World", "components": [{"type": "kit/terrain", "version": 2, "params": {"biome": "grassland", "decorations": false, "depth": 64, "generator": "noise", "height": 3, "level": 4, "surface": "heightmap", "width": 64}}]},
+		{"id": 4, "parent": 2, "name": "kit/timer 4", "components": [{"type": "kit/timer", "version": 2, "params": {"interval": 0.5}, "links": [{"output": "tick", "to": 5, "input": "count"}]}]},
+		{"id": 5, "parent": 2, "name": "Score", "pos": [6, 9, 4], "components": [{"type": "kit/counter", "version": 1, "params": {"target": 3}}]},
+		{"id": 6, "parent": 2, "name": "local/beacon 6", "pos": [8, 9, 4], "components": [{"type": "local/beacon", "version": 1, "params": {"glow": 5}}]}
+	],
+	"next_id": 7
+}

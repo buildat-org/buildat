@@ -1,0 +1,19 @@
+{
+	"kit": 1,
+	"api": 1,
+	"entities": [
+		{"id": 2, "parent": 1, "name": "world", "kind": "scene"},
+		{"id": 3, "parent": 2, "name": "the field", "components": [{"type": "kit/terrain", "version": 2, "params": {"dig": "none", "place": "none", "generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 32, "depth": 32}}]},
+		{"id": 4, "parent": 1, "name": "game rules", "components": [{"type": "kit/game_rules", "version": 2, "params": {"peaceful": true, "slots": 0, "hotbar": 0, "show_health": false}}]},
+		{"id": 5, "parent": 2, "name": "start", "pos": [-3, 1, -8], "components": [{"type": "kit/spawner", "version": 2, "params": {"players": true}}]},
+		{"id": 6, "parent": 2, "name": "runners' spawner", "pos": [-3, 1, -8], "components": [{"type": "kit/spawner", "version": 2, "params": {"prefab": "kit/bot", "max": 2}}]},
+		{"id": 7, "parent": 2, "name": "goal: the flag", "pos": [-3, 1, 8], "components": [{"type": "kit/goal", "version": 1, "params": {"size": [3, 3, 3], "autostart": true, "text": "Run to the flag", "marker_label": "Flag"}, "links": [{"output": "done", "to": 10, "input": "finish"}, {"output": "done", "to": 13, "input": "show"}]}]},
+		{"id": 8, "parent": 2, "name": "the clock", "components": [{"type": "kit/timer", "version": 2, "params": {"autostart": true}, "links": [{"output": "tick", "to": 9, "input": "count"}]}]},
+		{"id": 9, "parent": 2, "name": "ticks", "pos": [-5, 2, -8], "components": [{"type": "kit/counter", "version": 1, "params": {}, "links": [{"output": "changed", "to": 10, "input": "count"}]}]},
+		{"id": 10, "parent": 2, "name": "the tally", "pos": [-5, 1, -6], "components": [{"type": "local/tally", "version": 1, "params": {"bonus": 5}}]},
+		{"id": 11, "parent": 2, "name": "posts", "pos": [3, 1, 0], "components": [{"type": "local/posts", "version": 1, "params": {"count": 3, "seed": 7, "reseed": 11}}]},
+		{"id": 12, "parent": 2, "name": "music", "components": [{"type": "kit/music", "version": 1, "params": {"song": "jam 1\n# A two-bar hum for the relay\ntitle Relay Hum\ntempo 120\nsteps 16\nbeat 4\n\ninst lead osc wave=sine a=0.01 d=0.2 s=0.5 r=0.2\ninst kick kick tone=50 pdrop=3 pdecay=0.05 click=0.05 d=1 s=0\ntrack lead inst=lead gain=-12\ntrack kick inst=kick gain=-6\n\npattern a bars=2\nlead: C4 . E4 . G4 . E4 . C4 . E4 . G4 . E4 .\nlead: D4 . F4 . A4 . F4 . D4 . F4 . A4 . F4 .\nkick: X . . . x . . . X . . . x . . .\nkick: X . . . x . . . X . . . x . . .\n\nsection main: a\nplay main\nloop main\n"}}]},
+		{"id": 13, "parent": 2, "name": "well run", "components": [{"type": "kit/ui_text", "version": 2, "params": {"shown": false, "text": "At the flag!", "to": "player", "anchor": "bottom", "y": 26, "size": 2.4}}]}
+	],
+	"next_id": 14
+}

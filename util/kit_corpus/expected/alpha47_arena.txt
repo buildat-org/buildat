@@ -1,0 +1,128 @@
+# util/kit_corpus_check.sh's record of alpha47/arena (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 90 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#0753ad86/97d170e1
+4 2 kit/spawner@2#2f075759/97d170e1
+5 2 kit/part@1#996c43ce/97d170e1
+6 2 kit/part@1#3c4ebd3a/97d170e1
+7 2 kit/arena@3#d1b6d56e/3b691aea
+8 2 kit/sign@1#18433c70/97d170e1
+9 2 kit/sign@1#d2251f20/97d170e1
+10 2 kit/part@1#3c5ba33d/97d170e1
+11 2 kit/part@1#3c5ba33d/97d170e1
+12 2 kit/part@1#3c5ba33d/97d170e1
+13 2 kit/part@1#3c5ba33d/97d170e1
+14 1 scene
+15 14 kit/terrain@2#2a6de703/97d170e1
+16 14 kit/team@1#459f83f5/fd5634be
+17 16 kit/starting_kit@1#86dcf718/97d170e1
+18 16 kit/region@1#27ccf814/97d170e1
+19 16 kit/part@1#347eb754/97d170e1
+20 16 kit/part@1#2a533596/97d170e1
+21 16 kit/part@1#82166b0e/97d170e1
+22 16 kit/part@1#99cca76f/97d170e1
+23 16 kit/part@1#cfbdab0e/97d170e1
+24 16 kit/part@1#82166b0e/97d170e1
+25 16 kit/part@1#99cca76f/97d170e1
+26 16 kit/part@1#cfbdab0e/97d170e1
+27 14 kit/team@1#b706817a/8fb6cd2d
+28 27 kit/starting_kit@1#86dcf718/97d170e1
+29 27 kit/region@1#27ccf814/97d170e1
+30 27 kit/part@1#c1b1f2be/97d170e1
+31 27 kit/part@1#2a533596/97d170e1
+32 27 kit/part@1#82166b0e/97d170e1
+33 27 kit/part@1#99cca76f/97d170e1
+34 27 kit/part@1#551e9acb/97d170e1
+35 27 kit/part@1#82166b0e/97d170e1
+36 27 kit/part@1#99cca76f/97d170e1
+37 27 kit/part@1#551e9acb/97d170e1
+38 16 kit/part@1#f7481b7f/97d170e1
+39 16 kit/button@2#43db7231/e386a406
+40 14 kit/goal@1#17c042eb/97d170e1
+41 14 kit/goal@1#4b98acd2/c91a146e
+42 27 kit/part@1#f7481b7f/97d170e1
+43 27 kit/button@2#8997795a/68d02426
+44 14 kit/goal@1#c9736550/97d170e1
+45 14 kit/goal@1#72d6c9a7/182862a9
+46 14 kit/part@1#f343d9db/97d170e1
+47 14 kit/part@1#db9ee3a9/97d170e1
+48 14 kit/part@1#f343d9db/97d170e1
+49 14 kit/part@1#db9ee3a9/97d170e1
+50 14 kit/part@1#db9ee3a9/97d170e1
+51 14 kit/part@1#db9ee3a9/97d170e1
+52 14 kit/ui_text@2#769971a4/97d170e1
+53 14 kit/ui_text@2#e0795132/97d170e1
+54 1 scene
+55 54 kit/terrain@2#586b7999/97d170e1
+56 54 kit/team@1#459f83f5/9d7a2e89
+57 56 kit/starting_kit@1#86dcf718/97d170e1
+58 56 kit/region@1#27ccf814/97d170e1
+59 56 kit/part@1#347eb754/97d170e1
+60 56 kit/part@1#952a22b2/97d170e1
+61 56 kit/part@1#69b766a9/97d170e1
+62 56 kit/part@1#99cca76f/97d170e1
+63 56 kit/part@1#cfbdab0e/97d170e1
+64 56 kit/part@1#69b766a9/97d170e1
+65 56 kit/part@1#99cca76f/97d170e1
+66 56 kit/part@1#cfbdab0e/97d170e1
+67 54 kit/team@1#b706817a/5b665274
+68 67 kit/starting_kit@1#86dcf718/97d170e1
+69 67 kit/region@1#27ccf814/97d170e1
+70 67 kit/part@1#c1b1f2be/97d170e1
+71 67 kit/part@1#952a22b2/97d170e1
+72 67 kit/part@1#69b766a9/97d170e1
+73 67 kit/part@1#99cca76f/97d170e1
+74 67 kit/part@1#551e9acb/97d170e1
+75 67 kit/part@1#69b766a9/97d170e1
+76 67 kit/part@1#99cca76f/97d170e1
+77 67 kit/part@1#551e9acb/97d170e1
+78 56 kit/part@1#f7481b7f/97d170e1
+79 56 kit/button@2#43db7231/33687750
+80 54 kit/goal@1#e8232d6d/97d170e1
+81 54 kit/goal@1#67ee5202/7e907ac7
+82 67 kit/part@1#f7481b7f/97d170e1
+83 67 kit/button@2#8997795a/c67e42d6
+84 54 kit/goal@1#0a09d602/97d170e1
+85 54 kit/goal@1#c1f8379d/b96f690d
+86 54 kit/part@1#3bde2706/97d170e1
+87 54 kit/part@1#3bde2706/97d170e1
+88 54 kit/part@1#33130e98/97d170e1
+89 54 kit/part@1#33130e98/97d170e1
+90 54 kit/ui_text@2#769971a4/97d170e1
+91 54 kit/ui_text@2#e0795132/97d170e1
+[rows]
+[round]
+kit: World: flat 32x32, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 76efddc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: World: flat 48x48, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 02b7edc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: World: flat 48x48, seed 0, biome desert, voxels, border wall; ground 0 to 0, heights hash 02b7edc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 91 entities, 87 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit/region 18: holds dig none, place none, enter all, pvp all, damage all, use others
+kit/region 29: holds dig none, place none, enter all, pvp all, damage all, use others
+kit/goal 40: waits for activate
+kit/goal 41: waits for activate
+kit/goal 44: waits for activate
+kit/goal 45: waits for activate
+kit/region 58: holds dig none, place none, enter all, pvp all, damage all, use others
+kit/region 69: holds dig none, place none, enter all, pvp all, damage all, use others
+kit/goal 80: waits for activate
+kit/goal 81: waits for activate
+kit/goal 84: waits for activate
+kit/goal 85: waits for activate
+[keys]
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/button color color_down hold own_look sound_press use
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/part collision color material own_look rotation shape size voxel
+kit/region capture damage dig enter owner owners place pvp resize_time show_border size use
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/starting_kit clear items when
+kit/team color friendly_fire name own_look win_score
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/ui_text anchor background border color height order shown size style text to width x y

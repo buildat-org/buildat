@@ -1,0 +1,40 @@
+# util/kit_corpus_check.sh's record of made/export_check (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 5 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#e7f8845b/97d170e1
+4 2 kit/timer@2#ac5870bb/458d46bc
+5 2 kit/counter@1#b009f421/97d170e1
+6 2 local/beacon@1#492f9b88/97d170e1
+[rows]
+item:kitboss/blade
+prefab:kitboss/pair
+sound:kitboss/chime
+texture:ae1bb6ecad4b1134
+type:local/beacon
+voxel:kitboss/brick
+voxel:kitboss/mossy
+voxel:kitboss/redstone
+weave:kitboss/moss
+[round]
+kit: World: 37 edited heightmap samples in the save
+kit: World: 37 edited heightmap samples kept over the generated map, 176 blended round them, 0 off the map
+kit: World: the heightmap from (-32,-32) to (31,31)
+kit: World: noise 64x64, seed 0, biome grassland, a heightmap, border void; ground 3 to 5, heights hash 4bec9e9d; version 2, decorations 0 (hash 811c9dc5, 0 under the water); materials kit/default
+kit: World: 0 edited voxel sections over the heightmap
+kit: Hosted: 6 entities, 4 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit/timer 4: started by app every 0.5 s
+kit/timer 4: tick 1
+kit/counter 5: count 1 by app
+kit/timer 4: tick 2
+kit/counter 5: count 2 by app
+kit/timer 4: tick 3
+kit/counter 5: count 3 by app
+kit/counter 5: reached 3
+[keys]
+kit/counter own_look target
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/timer autostart interval repeats scope
+local/beacon glow own_look

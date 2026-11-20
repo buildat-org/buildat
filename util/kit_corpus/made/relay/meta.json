@@ -1,0 +1,14 @@
+{
+	"kind": "template",
+	"author": "corpus",
+	"name": "relay",
+	"title": "Relay",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"kit_api": 1,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "A small game a builder made, for util/kit_corpus_check.sh: runners (bots) to a flag, a clock counting, a score kept over rounds, signposts by a generator, a song.",
+	"game": "corpus/relay",
+	"buildat_version": "0.8.0-alpha.51"
+}

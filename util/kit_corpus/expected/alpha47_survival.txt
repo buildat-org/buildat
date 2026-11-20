@@ -1,0 +1,26 @@
+# util/kit_corpus_check.sh's record of alpha47/survival (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 7 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#a394cbaa/97d170e1
+4 1 kit/game_rules@2#b957f994/97d170e1 kit/environment@1#fce392c8/9f80a1b1 kit/walker@1#3463e6b0/97d170e1
+5 1 kit/player_state@1#13d73a36/97d170e1
+7 2 kit/spawn_rule@2#812a726c/97d170e1
+8 2 kit/starting_kit@1#81553cf4/97d170e1
+9 2 kit/ui_text@2#e18f92fc/97d170e1
+[rows]
+[round]
+kit: World: valleys infinite, seed 1, biome grassland, voxels, border void; ground 110 to 188, heights hash e81a99af; version 2, caves (2246 of 24576 sampled cells; 431 mouths, the first at (-15,-32) top 125, 0 under the sea kept shut), decorations 474 (hash e88fe470, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 8 entities, 8 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+[keys]
+kit/environment ambient cloud_cover cloud_height cloud_wind_dir cloud_wind_speed day_minutes fog_end fog_start gravity intensity latitude lighting moon north season sky stars sun time weather weather_fade
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/player_state carry keep_builds keep_inventory keep_position remember
+kit/spawn_rule apart apart_any despawn enabled every light_max light_min max on_voxels prefab radius
+kit/starting_kit clear items when
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/ui_text anchor background border color height order shown size style text to width x y
+kit/walker acceleration air_control auto_jump coyote_time fall_damage fall_safe gravity jump_buffer jump_height rate slope_limit speed step_height substeps
