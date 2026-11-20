@@ -27,7 +27,7 @@
 #      points param with a height a point) and 70 posts by its seed. A sign
 #      put under G by hand and one beside it (among the posts): G's Run
 #      (the edit op "build") keeps the posts clear of the one beside it
-#      (c.entities; c.move there), the posts it made before replaced (kept
+#      (c.entities; c.move_lib there), the posts it made before replaced (kept
 #      by member, the rest gone), both signs kept; Run with seed 2 and
 #      count 40 (one edit); undone: the seed 1 posts back. A corner without
 #      its height

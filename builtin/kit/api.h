@@ -662,7 +662,8 @@ namespace interface
 //   c.entities: the generator's scene's other entities, its own children
 //   left out, {id, name, types = {type...}, pos = {x, y, z} (the world's;
 //   none without a place), yaw}: to avoid or decorate hand-placed ones;
-//   c.move: move.lua's library, to check what it builds. An error() refuses
+//   c.move_lib: move.lua's library (the clients' kit.move_lib; not
+//   c:move), to check what it builds. An error() refuses
 //   the run (the edit with it), its text the reason. Run again on demand:
 //   the edit op {"op": "build", "id", "comp", "params"} (the editor's Run,
 //   MCP run_generator): params set first, then built whether they changed

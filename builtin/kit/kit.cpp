@@ -40018,7 +40018,7 @@ struct Module: public interface::Module, public Interface
 				"c:link(child, output, to, input) (to: a child's number, 0 the "
 				"generator, {id = n} an entity of the scene's), c:voxel_box{...}; "
 				"c.entities, the scene's other entities ({id, name, types, pos, "
-				"yaw}), to avoid or decorate; c.move, move.lua's library; its "
+				"yaw}), to avoid or decorate; c.move_lib, move.lua's library; its "
 				"type's children = n caps them (63 by default, 1023 at most); an error() "
 				"refuses the run, its text the reason. get_state's generators "
 				"lists them and their last run (children, kept, gone, its c:log "
