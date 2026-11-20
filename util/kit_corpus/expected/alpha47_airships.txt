@@ -1,6 +1,5 @@
 # util/kit_corpus_check.sh's record of alpha47/airships (RECORD=1 writes it)
 [warnings]
-W kit: World: kit/symmetry N at Play: N cells, N samples, N decorations differ from their source's image; N entities outside it in the other slices, not copied (N, N, N, N, N, N, N, N, ...)
 [composition]
 entities 53 (kit 1, api 1)
 2 1 scene
