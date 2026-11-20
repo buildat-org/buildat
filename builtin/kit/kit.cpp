@@ -1375,6 +1375,10 @@ struct Module: public interface::Module, public Interface
 	std::deque<Run> m_queue;
 	sm_<size_t, Peer> m_peers;
 	bool m_runtime_dirty = false;
+	// [KIT_EDIT_TICK] The composition's row to write (save_authored()), and
+	// when it was last written
+	bool m_authored_dirty = false;
+	int64_t m_authored_at = 0;
 	// Writes routed to owned voxels, from voxelworld's thread
 	std::mutex m_writes_mutex;
 	std::deque<Write> m_writes;
@@ -3432,7 +3436,7 @@ struct Module: public interface::Module, public Interface
 		json::Value pos = json::array();
 		for(int k = 0; k < 3; k++)
 			pos.append(w[k]);
-		j.set("pos", pos);
+		j.set("pos", std::move(pos));
 		j.set("yaw", a);
 		j.del_key("pitch");
 		j.del_key("roll");
@@ -4454,33 +4458,60 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// An entity's node at its place in the world, and those under it
-	void place_nodes(uint64_t id, int depth = 0)
+	void place_nodes(uint64_t id)
 	{
-		auto it = m_entities.find(id);
-		if(it == m_entities.end())
-			return;
-		Entity &e = it->second;
-		if(e.node){
-			double w[3];
-			Turn q;
-			{
-				// [KIT_MOVING_OBJECTS] a client moves it from there
-				AtRest rest(m_at_rest);
-				world_of(e, w, &q);
+		place_nodes(std::set<uint64_t>{id});
+	}
+	// [KIT_EDIT_TICK] (what is under each found once, each scene's nodes
+	// set in one access: a scan of every entity and an access for each node
+	// were most of placing a big generator's children)
+	void place_nodes(const std::set<uint64_t> &ids)
+	{
+		std::map<uint64_t, sv_<uint64_t>> under;
+		for(auto &p : m_entities)
+			if(p.second.has_pos && p.first != p.second.parent)
+				under[p.second.parent].push_back(p.first);
+		struct Place {
+			uint32_t node;
+			magic::Vector3 pos;
+			magic::Quaternion rot;
+		};
+		std::map<main_context::SceneReference, sv_<Place>> places;
+		std::set<uint64_t> done;
+		std::function<void(uint64_t, int)> place = [&](uint64_t id, int depth){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || !done.insert(id).second)
+				return;
+			Entity &e = it->second;
+			if(e.node){
+				double w[3];
+				Turn q;
+				{
+					// [KIT_MOVING_OBJECTS] a client moves it from there
+					AtRest rest(m_at_rest);
+					world_of(e, w, &q);
+				}
+				places[scene_of(e)].push_back(Place{e.node,
+						magic::Vector3(w[0], w[1], w[2]), q.q()});
 			}
-			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
-				magic::Node *n = sc->GetNode(e.node);
-				if(n){
-					n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
-					n->SetRotation(q.q());
+			if(depth > MAX_NEST || e.kind == "player")
+				return;
+			auto u = under.find(id);
+			for(size_t i = 0; u != under.end() && i < u->second.size(); i++)
+				place(u->second[i], depth + 1);
+		};
+		for(uint64_t id : ids)
+			place(id, 0);
+		for(auto &ps : places)
+			main_context::access(m_server, ps.first, [&](magic::Scene *sc){
+				for(const Place &pl : ps.second){
+					magic::Node *n = sc->GetNode(pl.node);
+					if(n){
+						n->SetPosition(pl.pos);
+						n->SetRotation(pl.rot);
+					}
 				}
 			});
-		}
-		if(depth > MAX_NEST || e.kind == "player")
-			return;
-		for(auto &p : m_entities)
-			if(p.second.parent == id && p.first != id && p.second.has_pos)
-				place_nodes(p.first, depth + 1);
 	}
 
 	// The cell an entity is in, the world's
@@ -5192,7 +5223,7 @@ struct Module: public interface::Module, public Interface
 			json::Value pos = json::array();
 			for(int k = 0; k < 3; k++)
 				pos.append(e.pos[k]);
-			j.set("pos", pos);
+			j.set("pos", std::move(pos));
 			if(e.yaw != 0)
 				j.set("yaw", e.yaw);
 			if(e.pitch != 0)
@@ -5212,7 +5243,7 @@ struct Module: public interface::Module, public Interface
 				json::Value ov = json::array();
 				for(const ss_ &o : in.overrides)
 					ov.append(o);
-				cj.set("overrides", ov);
+				cj.set("overrides", std::move(ov));
 			}
 			json::Value ls = json::array();
 			for(const Link &l : in.links){
@@ -5225,13 +5256,13 @@ struct Module: public interface::Module, public Interface
 				lj.set("input", l.input);
 				if(l.visible)
 					lj.set("visible", true);
-				ls.append(lj);
+				ls.append(std::move(lj));
 			}
-			cj.set("links", ls);
+			cj.set("links", std::move(ls));
 			put_rest(cj, in.rest);
-			comps.append(cj);
+			comps.append(std::move(cj));
 		}
-		j.set("components", comps);
+		j.set("components", std::move(comps));
 		put_rest(j, e.rest);
 		return j;
 	}
@@ -5399,13 +5430,18 @@ struct Module: public interface::Module, public Interface
 			// the round's place is never the composition's
 			// simplified: one under a moved one is placed (world) in the
 			// moved one's frame
+			// (a copy only for one moved: a deep copy of each was half the
+			// time)
 			auto h = m_seat_home.find(p.first);
+			if(h == m_seat_home.end()){
+				es.append(world ? world_row(*p.second) : entity_json(*p.second));
+				continue;
+			}
 			Entity e = *p.second;
-			if(h != m_seat_home.end())
-				home_put(e, h->second);
+			home_put(e, h->second);
 			es.append(world ? world_row(e) : entity_json(e));
 		}
-		c.set("entities", es);
+		c.set("entities", std::move(es));
 		c.set("next_id", (int64_t)m_next_id);
 		put_rest(c, m_comp_rest);
 		return c;
@@ -5555,8 +5591,9 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_peers)
 			keep_spot(p.first);
 		auto save = [&](){
-			n += m_runtime_dirty + m_marks_dirty.size();
+			n += m_runtime_dirty + m_authored_dirty + m_marks_dirty.size();
 			save_runtime();
+			save_authored(true);
 			save_marks();
 		};
 		save();
@@ -5569,7 +5606,23 @@ struct Module: public interface::Module, public Interface
 		}
 		if(n)
 			log_i(MODULE, "Kit: saved at the stop: %zu rows changed since the"
-					" last tick (the runtime, marks)", n);
+					" last tick (the runtime, the composition, marks)", n);
+	}
+
+	// [KIT_EDIT_TICK] The composition's row, which commit() leaves to the
+	// next tick (a big composition's took a quarter of an edit's tick), at
+	// most every AUTHORED_SAVE_US: an edit's in the save a tick to a second
+	// later. now: whatever the time (the stop)
+	static const int64_t AUTHORED_SAVE_US = 1000000;
+	void save_authored(bool now = false)
+	{
+		const int64_t t = interface::os::time_us();
+		if(!m_store || !m_authored_dirty || (!now && t - m_authored_at <
+				AUTHORED_SAVE_US))
+			return;
+		m_store->set("authored", authored_json().stringify());
+		m_authored_dirty = false;
+		m_authored_at = t;
 	}
 
 	void save_runtime()
@@ -20946,13 +20999,13 @@ struct Module: public interface::Module, public Interface
 					sl.append(jstr(ls.at(l), "output"));
 					sl.append(input);
 					sl.append(outside ? out_id : (int64_t)e.id);
-					self_links.append(sl);
+					self_links.append(std::move(sl));
 				}
-				cj.set("links", keep);
-				cs_.set_at(k, cj);
+				cj.set("links", std::move(keep));
+				cs_.set_at(k, std::move(cj));
 			}
-			m.set("components", cs_);
-			ms0.set_at(i, m);
+			m.set("components", std::move(cs_));
+			ms0.set_at(i, std::move(m));
 		}
 		pf.set("entities", ms0);
 		if(!check_prefab(pf, why, std::max(MAX_PREFAB, most))){
@@ -21052,6 +21105,21 @@ struct Module: public interface::Module, public Interface
 	uint64_t m_edit_next0 = 0;
 	int m_build_sync = 0;
 	const SlicedBuild *m_landing = nullptr;
+	// [KIT_EDIT_TICK] The editors whose state is to send, by session
+	std::set<std::pair<uint64_t, size_t>> m_state_due;
+	void send_due_states()
+	{
+		const std::set<std::pair<uint64_t, size_t>> due = m_state_due;
+		m_state_due.clear();
+		for(auto &d : due){
+			if(d.first && !m_sessions.count(d.first))
+				continue;
+			SessionScope sc(*this, d.first);
+			auto pi = m_peers.find(d.second);
+			if(pi != m_peers.end() && pi->second.editing)
+				send_state(d.second);
+		}
+	}
 
 	ss_ build_key(const Entity &e, size_t comp)
 	{
@@ -21214,10 +21282,10 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		const int64_t gap = m_tick_at ? now - m_tick_at : 0;
 		m_tick_at = now;
-		// (the gaps while it runs on: not the edit's before its first tick)
+		// (the gaps while it runs on, [KIT_EDIT_TICK] the edit's before its
+		// first tick too)
 		for(SlicedBuild &b : m_sliced)
-			if(b.slices >= 2)
-				b.gap = std::max(b.gap, gap);
+			b.gap = std::max(b.gap, gap);
 		const bool ran = !m_sliced.empty() && m_sliced.front().tick == m_tick_n;
 		m_tick_n++;
 		if(m_sliced.empty() || ran || !m_box)
@@ -21242,6 +21310,10 @@ struct Module: public interface::Module, public Interface
 		}
 		build_off(b);
 		build_land(b, st > 0, why);
+		// [KIT_EDIT_TICK] (kit_generators_check: what the landing adds to its
+		// tick)
+		log_i(MODULE, "Entity %s's build landed: its last slice and its rows "
+				"%.1f ms", cs(itos(b.id)), (interface::os::time_us() - now) / 1e3);
 	}
 
 	// b ended (ok: b.answer), in its session
@@ -21372,16 +21444,16 @@ struct Module: public interface::Module, public Interface
 		auto join = [&](uint64_t step){
 			if(!step || u.size() < 2 || u[u.size() - 2].serial != step)
 				return;
-			const Change nc = u.back();
+			Change nc = std::move(u.back());
 			u.pop_back();
 			Change &was = u.back();
 			// (an entity in both: the older's row, from before both)
 			std::set<uint64_t> had;
 			for(const auto &r : was.before)
 				had.insert(r.first);
-			for(const auto &r : nc.before)
+			for(auto &r : nc.before)
 				if(!had.count(r.first))
-					was.before.push_back(r);
+					was.before.push_back(std::move(r));
 			was.cells.insert(nc.cells.begin(), nc.cells.end());
 			was.samples.insert(nc.samples.begin(), nc.samples.end());
 			was.decor.insert(was.decor.end(), nc.decor.begin(), nc.decor.end());
@@ -21490,7 +21562,7 @@ struct Module: public interface::Module, public Interface
 			instantiate(pf, "", g, zero, 0, all, 0, &ids);
 			for(unsigned i = 0; i < all.size(); i++)
 				if(!others.count(i)){
-					rows.push_back(all[i]);
+					rows.push_back(std::move(all[i]));
 					row_member.push_back(i);
 				}
 		}
@@ -21591,10 +21663,10 @@ struct Module: public interface::Module, public Interface
 						lj.set("visible", true);
 					ls.append(lj);
 				}
-				cj.set("links", ls);
-				cs_.set_at(c, cj);
+				cj.set("links", std::move(ls));
+				cs_.set_at(c, std::move(cj));
 			}
-			row.set("components", cs_);
+			row.set("components", std::move(cs_));
 		}
 		// What a builder put under one that goes: under g, where it was
 		sv_<json::Value> moved;
@@ -21649,12 +21721,14 @@ struct Module: public interface::Module, public Interface
 		}
 		for(uint64_t id : gone)
 			change.push_back(std::make_pair(id, json::null()));
-		for(json::Value &row : rows)
-			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
-					row));
-		for(json::Value &row : moved)
-			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
-					row));
+		for(json::Value &row : rows){
+			const uint64_t id = (uint64_t)json::jint(row, "id", 0);
+			change.push_back(std::make_pair(id, std::move(row)));
+		}
+		for(json::Value &row : moved){
+			const uint64_t id = (uint64_t)json::jint(row, "id", 0);
+			change.push_back(std::make_pair(id, std::move(row)));
+		}
 		m_rb_rows = rows.size();
 		m_rb_kept = kept.size();
 		m_rb_gone = gone.size();
@@ -21751,8 +21825,8 @@ struct Module: public interface::Module, public Interface
 				} else {
 					again = n.id == force || ci >= it->second.comps.size() ||
 							it->second.comps[ci].type != n.comps[ci].type ||
-							it->second.comps[ci].params.stringify() !=
-							n.comps[ci].params.stringify();
+							!(it->second.comps[ci].params ==
+							n.comps[ci].params);
 				}
 				if(again){
 					gens.push_back(std::make_pair(n, ci));
@@ -24241,8 +24315,11 @@ struct Module: public interface::Module, public Interface
 			if(interface::os::time_us() - m_agents[id].last_us > agent_idle_us())
 				drop_agent(id, "idle");
 		}
-		if(!m_hosted || !m_box)
+		send_due_states();
+		if(!m_hosted || !m_box){
+			save_authored(); // (tick_round()'s, with no box)
 			return;
+		}
 		const int64_t tick_us = interface::os::time_us();
 		m_box->poll();
 		take_vouches();
@@ -24409,6 +24486,7 @@ struct Module: public interface::Module, public Interface
 						"is Stopped, its component does not run", w.p.getX(),
 						w.p.getY(), w.p.getZ(), cs(w.by));
 			save_runtime();
+			save_authored();
 			send_debug();
 			return;
 		}
@@ -24474,6 +24552,7 @@ struct Module: public interface::Module, public Interface
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
 		save_runtime();
+		save_authored();
 		save_marks();
 		send_debug();
 		send_costs(budget);
@@ -38348,6 +38427,11 @@ struct Module: public interface::Module, public Interface
 			ss_ why = !admin ? "the games are an admin's: an admin token's "
 					"(an admin's account, its scope Admin)" : !m_host.projects ?
 					"this app has no games" : "";
+			{
+				// [KIT_EDIT_TICK] a copy of this game has its last edits
+				SessionScope sc(*this, 0);
+				save_authored(true);
+			}
 			failed = !why.empty() || !m_host.projects(what, a, out, why);
 			log_i(MODULE, "%s: %s %s: %s", cs(p.name), cs(what),
 					cs(a.stringify().substr(0, 200)), failed ? cs("refused, "+why) :
@@ -42879,7 +42963,7 @@ struct Module: public interface::Module, public Interface
 			}
 			// The composition's types that are not in the palette, too:
 			// the inspector needs every instance's parameters and signals
-			json::Value types = pal;
+			json::Value types = std::move(pal);
 			for(auto &t : m_types)
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
@@ -43068,10 +43152,13 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		// [KIT_EDIT_MODE_FPS] What is as last sent goes by name only
+		// (the packet made of the keys' strings: each stringified once)
+		ss_ data;
 		if(pi != m_peers.end()){
 			std::map<ss_, ss_> &was = pi->second.state_sent;
 			std::map<ss_, ss_> now;
-			json::Value out = json::object(), same = json::array();
+			json::Value same = json::array();
+			data = "{";
 			for(json::Iterator it(j); it; ++it){
 				const ss_ k = it.key();
 				ss_ v = it.value().stringify();
@@ -43079,15 +43166,16 @@ struct Module: public interface::Module, public Interface
 				if(wi != was.end() && wi->second == v)
 					same.append(k);
 				else
-					out.set(k, it.value());
+					data += json::Value(k).stringify()+":"+v+",";
 				now[k] = std::move(v);
 			}
 			was = std::move(now);
-			out.set("same", same);
-			j = out;
+			data += "\"same\":"+same.stringify()+"}";
+		} else {
+			data = j.stringify();
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "kit:edit_state", j.stringify());
+			inetwork->send(peer, "kit:edit_state", data);
 		});
 	}
 
@@ -44945,8 +45033,14 @@ struct Module: public interface::Module, public Interface
 	void commit(const sv_<std::pair<uint64_t, json::Value>> &change_in,
 			std::deque<Change> *undo)
 	{
-		const sv_<std::pair<uint64_t, json::Value>> change =
-				ordered(change_in);
+		// (change_in's rows in order, not copied)
+		struct Row {
+			uint64_t first;
+			const json::Value &second;
+		};
+		sv_<Row> change;
+		for(size_t i : order_of(change_in))
+			change.push_back(Row{change_in[i].first, change_in[i].second});
 		// [KIT_SESSIONS_1] a draft's, for its Publish
 		if(in_draft())
 			for(const auto &c : change)
@@ -44983,6 +45077,8 @@ struct Module: public interface::Module, public Interface
 					break;
 			}
 		}
+		std::set<uint64_t> placed;
+		m_place_batch = &placed;
 		for(const auto &c : change){
 			if(undo){
 				auto it = m_entities.find(c.first);
@@ -44992,6 +45088,10 @@ struct Module: public interface::Module, public Interface
 			}
 			apply(c.first, c.second);
 		}
+		m_place_batch = nullptr;
+		show_nodes(m_show_batch);
+		m_show_batch.clear();
+		place_nodes(placed);
 		// [KIT_SYMMETRY] the copies as their sources are now, one undo (an
 		// undo's rows have them already)
 		if(undo)
@@ -45001,7 +45101,7 @@ struct Module: public interface::Module, public Interface
 		regions_sync(undo ? &back : nullptr, "");
 		if(undo){
 			back.serial = ++m_change_serial;
-			undo->push_back(back);
+			undo->push_back(std::move(back));
 			sliced_steps(*undo); // [KIT_BUILD_SLICED]
 			while(undo->size() > UNDO_MAX)
 				undo->pop_front();
@@ -45010,9 +45110,13 @@ struct Module: public interface::Module, public Interface
 		own_voxels();
 		pick_provider();
 		sync_free_objects();
-		m_store->set("authored", authored_json().stringify());
+		m_authored_dirty = true; // (save_authored())
+		// [KIT_EDIT_TICK] a sliced build's landing: the editors' state the
+		// next tick (send_due_states()), not in the landing's tick too
 		for(auto &p : m_peers)
-			if(p.second.editing)
+			if(p.second.editing && m_landing)
+				m_state_due.insert(std::make_pair(m_active, p.first));
+			else if(p.second.editing)
 				send_state(p.first);
 	}
 
@@ -45023,6 +45127,14 @@ struct Module: public interface::Module, public Interface
 			const sv_<std::pair<uint64_t, json::Value>> &change)
 	{
 		sv_<std::pair<uint64_t, json::Value>> out;
+		for(size_t i : order_of(change))
+			out.push_back(change[i]);
+		return out;
+	}
+	// (its order as indices into change: no copy of the rows)
+	sv_<size_t> order_of(const sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		sv_<size_t> out;
 		sv_<size_t> gone;
 		std::map<uint64_t, size_t> row;
 		for(size_t i = 0; i < change.size(); i++)
@@ -45045,11 +45157,11 @@ struct Module: public interface::Module, public Interface
 			auto ei = m_entities.find(change[i].first);
 			if(ei != m_entities.end() && going.count(ei->second.parent)){
 				done[i] = true;
-				out.push_back(change[i]);
+				out.push_back(i);
 			}
 		}
 		for(size_t i : gone)
-			out.push_back(change[i]);
+			out.push_back(i);
 		std::function<void(size_t, int)> put = [&](size_t i, int d){
 			if(done[i])
 				return;
@@ -45058,7 +45170,7 @@ struct Module: public interface::Module, public Interface
 					"parent", 0));
 			if(pi != row.end() && d < MAX_NEST + 2)
 				put(pi->second, d + 1);
-			out.push_back(change[i]);
+			out.push_back(i);
 		};
 		for(size_t i = 0; i < change.size(); i++)
 			if(!change[i].second.is_null())
@@ -45169,7 +45281,7 @@ struct Module: public interface::Module, public Interface
 				in.inside = was.inside;
 				json::Value old = json::object();
 				for(json::Iterator pi(in.params); pi; ++pi)
-					if((*pi).stringify() != was.params.get(pi.key()).stringify())
+					if(!(*pi == was.params.get(pi.key())))
 						old.set(pi.key(), was.params.get(pi.key()));
 				if(old.size())
 					changed.push_back(std::make_pair(i, old));
@@ -45211,7 +45323,7 @@ struct Module: public interface::Module, public Interface
 						under.push_back(c);
 					}
 		}
-		m_entities[id] = n;
+		m_entities[id] = std::move(n);
 		Entity &e = m_entities[id];
 		// Running, live: a new instance starts at once, and joins those in
 		// its scene. Stopped, it is at its start
@@ -45259,16 +45371,57 @@ struct Module: public interface::Module, public Interface
 			// A parameter its look is drawn from may have changed
 			const ss_ show = show_of(e).stringify();
 			const int pn = (int)parent_node_id(e);
-			each_node(e, [&](magic::Node *nd){
-				nd->SetVar(magic::StringHash("kit_show"), magic::Variant(show.c_str()));
-				nd->SetVar(magic::StringHash("kit_parent"), magic::Variant(pn));
-			});
+			if(m_place_batch)
+				m_show_batch.push_back(Show{id, show, pn});
+			else
+				show_nodes({Show{id, show, pn}});
 		}
 		for(uint64_t c : under)
 			if(wants_node(m_entities[c]))
 				make_node(m_entities[c]);
-		// [KIT_NESTING] it and what is under it where it is now
-		place_nodes(id);
+		// [KIT_NESTING] it and what is under it where it is now (commit()'s
+		// all at once after)
+		if(m_place_batch)
+			m_place_batch->insert(id);
+		else
+			place_nodes(id);
+	}
+	// [KIT_EDIT_TICK] commit()'s nodes placed and their looks set after its
+	// rows, each scene's in one access
+	std::set<uint64_t> *m_place_batch = nullptr;
+	struct Show {
+		uint64_t id;
+		ss_ show;
+		int parent;
+	};
+	sv_<Show> m_show_batch;
+	void show_nodes(const sv_<Show> &shows)
+	{
+		std::map<main_context::SceneReference, sv_<std::pair<uint32_t,
+				const Show*>>> by;
+		for(const Show &sh : shows){
+			auto it = m_entities.find(sh.id);
+			if(it == m_entities.end())
+				continue;
+			const Entity &e = it->second;
+			if(e.node)
+				by[scene_of(e)].push_back(std::make_pair(e.node, &sh));
+			for(auto &sn : e.nodes){
+				auto s = m_host.scenes.find(sn.first);
+				if(s != m_host.scenes.end())
+					by[s->second].push_back(std::make_pair(sn.second, &sh));
+			}
+		}
+		for(auto &b : by)
+			main_context::access(m_server, b.first, [&](magic::Scene *sc){
+				for(auto &ns : b.second)
+					if(magic::Node *n = sc->GetNode(ns.first)){
+						n->SetVar(magic::StringHash("kit_show"),
+								magic::Variant(ns.second->show.c_str()));
+						n->SetVar(magic::StringHash("kit_parent"),
+								magic::Variant(ns.second->parent));
+					}
+			});
 	}
 
 	// ---- [KIT_SESSIONS_1] Sessions (api.h): game sessions and builders'
@@ -45291,6 +45444,8 @@ struct Module: public interface::Module, public Interface
 		std::deque<Run> queue;
 		sm_<size_t, Peer> peers;
 		bool runtime_dirty = false;
+		bool authored_dirty = false;
+		int64_t authored_at = 0;
 		std::deque<Write> pending_voxels;
 		uint64_t provider = 0;
 		size_t provider_comp = 0;
@@ -45352,6 +45507,8 @@ struct Module: public interface::Module, public Interface
 		swap(m_queue, c.queue);
 		swap(m_peers, c.peers);
 		swap(m_runtime_dirty, c.runtime_dirty);
+		swap(m_authored_dirty, c.authored_dirty);
+		swap(m_authored_at, c.authored_at);
 		swap(m_pending_voxels, c.pending_voxels);
 		swap(m_provider, c.provider);
 		swap(m_provider_comp, c.provider_comp);

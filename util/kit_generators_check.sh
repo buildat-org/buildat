@@ -338,8 +338,10 @@ want "$s" "Entity $G's build under way dropped" \
 	"sample_kit/gen_posts $G: gen_posts: seed 1, $P1W posts" "work $W, the last post at $P1L" \
 	"ran $G's sample_kit/gen_posts, live_work $LW, reseed 7, seed 1, work $W, built $G again: $((3 + P1W)) children"
 grep -aq "gen_posts: seed 3," "$s" && fail "seed 3's build, replaced under way, ended ($s)"
-# (a tick's gap at most the tick, a slice and some)
-python3 -I - "$s" "$G" "$CHECK_RATE" <<'PY' || fail "a build's slices or the ticks' gap ($s)"
+# (a tick's gap at most the tick, a slice and some: [KIT_EDIT_TICK] the
+# edit's before its first slice's tick too; its landing's slice and rows
+# well under that)
+python3 -I - "$s" "$G" "$CHECK_RATE" <<'PY' || fail "a build's slices, the ticks' gap or its landing ($s)"
 import re, sys
 s, G, rate = open(sys.argv[1], errors="replace").read(), sys.argv[2], float(sys.argv[3])
 B = [tuple(map(float, m)) for m in re.findall(r"Entity %s's build ended: (\d+) slices, (\d+) ms, spent \d+ M units, "
@@ -347,7 +349,9 @@ B = [tuple(map(float, m)) for m in re.findall(r"Entity %s's build ended: (\d+) s
 assert len(B) == 3, B
 for n, ms, sl, gap in B:
 	assert n >= 3 and sl < 60 and gap < 1000 / rate + 120, (n, ms, sl, gap)
-print("ok: builds some ticks long: %s (slices, ms, the longest slice, the ticks' worst gap)" % B)
+L = [float(m) for m in re.findall(r"Entity %s's build landed: its last slice and its rows ([0-9.]+) ms" % G, s)]
+assert len(L) >= 3 and max(L) < 120, L
+print("ok: builds some ticks long: %s (slices, ms, the longest slice, the ticks' worst gap), landings %s ms" % (B, L))
 PY
 echo "ok: a build some ticks long lands as one call's would (the posts as Python draws them), an edit under way replaced by the next, one undo; no tick much past its slice"
 want "$s" "Entity $G generates $G live: its build under way" \
