@@ -53,6 +53,10 @@ static const int DIRT = 3, GRAVEL = 4;
 // The process's resident set in MB, -1 where /proc does not say
 static float rss_mb()
 {
+#ifdef _WIN32
+	// [WIN_KIT_BUILD] no /proc, and no sysconf to build against
+	return -1;
+#else
 	long pages = -1, resident = -1;
 	FILE *f = fopen("/proc/self/statm", "r");
 	if(!f)
@@ -62,6 +66,7 @@ static float rss_mb()
 	fclose(f);
 	return resident < 0 ? -1 :
 			resident * (sysconf(_SC_PAGESIZE) / 1024) / 1024.0f;
+#endif
 }
 
 static heightmap::Weights only(int material)

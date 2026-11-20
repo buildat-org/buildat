@@ -917,7 +917,9 @@ end
 local function add_edit(parent, value, secret)
 	local e = parent:CreateChild("LineEdit")
 	e:SetStyleAuto()
-	e.minHeight = 24
+	-- [WIN_TEXT_CLIPS] 28: its text's row (16 px) with the style's 4 px
+	-- borders; at 24 the bottom of "https://" was cut
+	e.minHeight = 28
 	e.minWidth = 200
 	e.textSelectable = true
 	-- **Every field here is the client's own** ([TRUST_COLOR]): in the

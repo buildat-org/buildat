@@ -2878,6 +2878,14 @@ local function draw_guide()
 	if narrow() and W.people then
 		y = math.max(y, W.people.height + 58)
 	end
+	-- [WIN_TEXT_CLIPS] and over Kit's own HUD frames under it
+	local rh, gw = magic.ui.root.height, guide_hud.width
+	local x0 = (magic.ui.root.width - gw) / 2
+	local top = s ~= "" and M.own_frames_top and
+			M.own_frames_top(x0, x0 + gw, rh - y - guide_hud.height)
+	if top then
+		y = math.max(y, rh - top + 4)
+	end
 	guide_hud:SetPosition(0, -y)
 end
 

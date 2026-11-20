@@ -246,6 +246,22 @@ smoke_test_wine() {
 		"$wine"server -k 2>/dev/null || true; exit 1
 	fi
 	kill -9 "$hc" 2>/dev/null || true; wait "$hc" 2>/dev/null || true
+	# [WIN_KIT_BUILD] A Kit app's modules by the shipped compiler: the
+	# prebuild is vanilla's, so kit.cpp was compiled for Windows nowhere,
+	# and from alpha.31 to alpha.49 no Kit app started there ("Failed to
+	# build module kit")
+	local t0=$SECONDS
+	(cd "$unpacked" && env BUILDAT_UNCONFINED=1 \
+		"$wine" bin/buildat_server.exe -m apps/workbench -P "$port" -l 3 --compile-only > "$dir/wb.log" 2>&1) &
+	local wb=$!
+	if ! wait_for_line "$dir/wb.log" "$wb" "compile-only: every module compiled" 900; then
+		echo "smoke test under Wine: Workbench's modules did not build; its log:" >&2
+		grep "Failed to build\|error:" "$dir/wb.log" | head -20 >&2
+		tail -5 "$dir/wb.log" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
+	wait "$wb" 2>/dev/null || true
+	echo "smoke test under Wine: Workbench's modules (kit's) built in $((SECONDS - t0)) s"
 	"$wine"server -k 2>/dev/null || true
 	[ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
 	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
@@ -265,7 +281,7 @@ smoke_test_wine() {
 	fi
 	# Reported, not a verdict, as the commands' end above
 	echo "smoke test under Wine: the client's voxelworld wasm: $(grep -o "wasm voxelworld: [a-z (]*" "$dir/cli.log" | tr '\n' ';')"
-	echo "smoke test under Wine passed: the server compiled every module and generated a section, the client joined and drew"
+	echo "smoke test under Wine passed: the server compiled every module and generated a section, the client joined and drew, a Kit app's modules built"
 }
 
 # One archive: a build tree configured for it, the install rules into a

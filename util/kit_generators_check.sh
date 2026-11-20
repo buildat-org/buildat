@@ -35,7 +35,7 @@
 #      live (its on_start's c:generate): seed 7's posts in the round, the
 #      sign under it kept; Stop: the authored ones back (the save's).
 #   6. (4z37i) Generating...: not for those builds (short); in the wasm
-#      interpreter gen_runaway's (some 0.7 s, cut by its meter) shown,
+#      interpreter gen_runaway's (some 2 s, cut by its meter) shown,
 #      then hidden ($t/generating.png).
 #
 #   util/kit_generators_check.sh
@@ -295,7 +295,7 @@ want "$s" "sample_kit/gen_posts $G: gen_posts: seed 7, $P7C posts" \
 check_save $G $((3 + P1C)) $H
 echo "ok: Play builds it again live from its reseed, Stop puts the authored ones back"
 # (4z37i) 6. Generating...: none for the builds above (each well under
-# 0.3 s); in the wasm interpreter gen_runaway's build runs some 0.7 s
+# 0.3 s); in the wasm interpreter gen_runaway's build runs some 2 s
 # before its meter cuts it: the notice shown, then hidden as it ends
 for l in "$t/boss1.log" "$t/boss2.log"; do
 	! grep -aq "stopped notice shown: Generating" "$l" || fail "Generating... for a short build ($l)"

@@ -56,6 +56,10 @@
 	#include <fcntl.h>
 	#include <sys/stat.h>
 	#include <unistd.h>
+#else
+	// [WIN_KIT_BUILD] camera_say()'s write and camera_read()'s read (mingw's;
+	// there no camera_launcher is given, so they are never called)
+	#include <io.h>
 #endif
 #define MODULE "kit"
 
@@ -1842,9 +1846,29 @@ struct Module: public interface::Module, public Interface
 		const bool interp = m_box->engine_name().compare(0, 11,
 				"interpreter") == 0;
 		// [KIT_GENERATORS] a build (in the editor, not a tick's) a call's
-		const int64_t slice = request[0] == 'D' || request[0] == 'L' ||
-				m_building ? m_box->budget() : request[0] == 'S' ?
-				m_box->budget() / 4 :
+		// [KIT_INTERP_BUDGETS] In the interpreter a body's batch gets
+		// INTERP_STEP of its quarter and a build INTERP_BUILD of the whole:
+		// both were cut there and disabled for good (Brimstone's cars, the
+		// Bone Yard). Measured (2026-11-20, this desk, Brimstone on
+		// Workbench): a car's step request costs 20-25 M units an input
+		// (rate 30, 4 substeps; 20-25 ms in the interpreter), 55-67 M with
+		// two, so a full batch (BATCH 8, a server behind) is some 200 M:
+		// past the quarter's 62.5 M (the interpreter passed it in a lap or
+		// two), within 250 M. The Bone Yard's corners edit costs 2.5 G units
+		// (108 ms compiled, of 4 G; 1.8-2.2 s in the interpreter), so a
+		// build of the compiled engine's whole 4 G stalls the server some
+		// 3 s there (the Windows box's CPU slower). INTERP_BUILD 16 is that
+		// BUDGET in the interpreter's units: what builds compiled builds
+		// there too. The builder's allowance (build_tokens: a build's units
+		// over budget()) keeps such stalls as rare in time as compiled
+		// ones: after the Bone Yard's build, 45 s to the next. simplified: a
+		// build stalls the server for its whole run; built across ticks is
+		// the upgrade (kit_plan 4z37p)
+		static const int64_t INTERP_STEP = 4, INTERP_BUILD = 16;
+		const int64_t slice = request[0] == 'D' || request[0] == 'L' ?
+				m_box->budget() :
+				m_building ? m_box->budget() * (interp ? INTERP_BUILD : 1) :
+				request[0] == 'S' ? m_box->budget() / 4 * (interp ? INTERP_STEP : 1) :
 				m_box->budget() / SLICE_DIV * (interp ? TICK_SLICES : 1);
 		m_box->set_call_budget(slice);
 		m_box->input = request;

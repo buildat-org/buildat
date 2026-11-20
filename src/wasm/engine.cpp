@@ -912,10 +912,10 @@ static ss_ upper(ss_ s)
 // A child of the process's ([CLIENT_WASM_WINDOWS]): args[0] the program,
 // each argument quoted (none here has a quote or ends in a backslash; one
 // that does is refused), in cwd (the process's when empty), its stdout and
-// stderr into out (an inheritable handle) and its stdin from NUL, those
-// two the only handles it inherits. Its environment is the process's with
-// the program's directory first in PATH (its tools' DLLs, as rccpp does)
-// and, when tmp is given, TMP and TEMP there. No window. In a job object
+// stderr into out (an inheritable handle) and its stdin an empty pipe,
+// those two the only handles it inherits. Its environment is the
+// process's with the program's directory first in PATH (its tools' DLLs,
+// as rccpp does) and, when tmp is given, TMP and TEMP there. No window. In a job object
 // of its own, from before it runs: the compile's memory (a process's),
 // CPU time (the job's) and process count, no error dialog, and killed when
 // the job's last handle closes -- the process's, however it ends. process
@@ -982,19 +982,28 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 		return false;
 	}
 
-	SECURITY_ATTRIBUTES sa;
-	memset(&sa, 0, sizeof sa);
-	sa.nLength = sizeof sa;
-	sa.bInheritHandle = TRUE;
-	HANDLE nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ |
-			FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
-	HANDLE inherit[2] = {out, nul};
+	// [WIN_APPCONTAINER_SPAWN] Its stdin an empty pipe's read end, the
+	// write end closed (end of file at once, as NUL gave): inside the
+	// AppContainer opening NUL is refused (error 5), and the invalid
+	// handle in the list failed CreateProcess, so a sandboxed server had no
+	// compiler. Inheritable only from here to the child's start, and only
+	// the handle list's two go to it
+	HANDLE in_rd = NULL, in_wr = NULL;
+	if(!CreatePipe(&in_rd, &in_wr, NULL, 0)){
+		why = "a pipe for the compile's stdin: "+last_error();
+		CloseHandle(job);
+		job = NULL;
+		return false;
+	}
+	CloseHandle(in_wr);
+	HANDLE inherit[2] = {out, in_rd};
 	SIZE_T size = 0;
 	InitializeProcThreadAttributeList(NULL, 1, 0, &size);
 	sv_<char> attr_buf(size);
 	LPPROC_THREAD_ATTRIBUTE_LIST attrs =
 			(LPPROC_THREAD_ATTRIBUTE_LIST)attr_buf.data();
-	bool ok = nul != INVALID_HANDLE_VALUE &&
+	bool ok = SetHandleInformation(in_rd, HANDLE_FLAG_INHERIT,
+			HANDLE_FLAG_INHERIT) &&
 			InitializeProcThreadAttributeList(attrs, 1, 0, &size);
 	const bool attrs_made = ok;
 	ok = ok && UpdateProcThreadAttribute(attrs, 0,
@@ -1004,7 +1013,7 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 	memset(&si, 0, sizeof si);
 	si.StartupInfo.cb = sizeof si;
 	si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-	si.StartupInfo.hStdInput = nul;
+	si.StartupInfo.hStdInput = in_rd;
 	si.StartupInfo.hStdOutput = out;
 	si.StartupInfo.hStdError = out;
 	si.lpAttributeList = attrs;
@@ -1017,8 +1026,7 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 		why = "CreateProcess: "+last_error();
 	if(attrs_made)
 		DeleteProcThreadAttributeList(attrs);
-	if(nul != INVALID_HANDLE_VALUE)
-		CloseHandle(nul);
+	CloseHandle(in_rd);
 	// Never run without its limits
 	if(ok && !AssignProcessToJobObject(job, pi.hProcess)){
 		why = "the compile could not be put under its limits: "+last_error();
@@ -1076,7 +1084,8 @@ static ss_ compiler_version(const ss_ &cmd)
 
 // A directory only this user can reach ([CLIENT_WASM] security: the cache
 // the process loads code from): made with a protected DACL granting this
-// user alone everything, inherited by what is made in it; or, there
+// user alone (and its AppContainer, in one) everything, inherited by what
+// is made in it; or, there
 // already, a directory (not a link) whose owner is this user, the same
 // DACL set on it again. false with why.
 static bool private_dir(const ss_ &path, ss_ &why)
@@ -1089,14 +1098,32 @@ static bool private_dir(const ss_ &path, ss_ &why)
 		return false;
 	}
 	const bool got = GetTokenInformation(token, TokenUser, &tu, sizeof tu, &n);
+	// [WIN_APPCONTAINER_SPAWN] In a sandboxed server's AppContainer its SID
+	// too: a box gets into a directory only if the DACL names it as well as
+	// the user, and the server and its compiles run in the box. Still this
+	// user's alone, and of the boxes this app's alone
+	DWORD in_box = 0;
+	union { TOKEN_APPCONTAINER_INFORMATION ac; char bytes[256]; } ta;
+	char *box = NULL;
+	const bool box_ok = !GetTokenInformation(token, TokenIsAppContainer,
+			&in_box, sizeof in_box, &n) || !in_box ||
+			(GetTokenInformation(token, TokenAppContainerSid, &ta, sizeof ta, &n) &&
+			ta.ac.TokenAppContainer &&
+			ConvertSidToStringSidA(ta.ac.TokenAppContainer, &box));
 	CloseHandle(token);
 	char *sid = NULL;
-	if(!got || !ConvertSidToStringSidA(tu.user.User.Sid, &sid)){
-		why = "the user's SID: "+last_error();
+	if(!got || !box_ok || !ConvertSidToStringSidA(tu.user.User.Sid, &sid)){
+		why = ss_(box_ok ? "the user's SID: " : "the AppContainer's SID: ")+
+				last_error();
+		if(box)
+			LocalFree(box);
 		return false;
 	}
-	const ss_ sddl = ss_("D:P(A;OICI;FA;;;")+sid+")";
+	const ss_ sddl = ss_("D:P(A;OICI;FA;;;")+sid+")"+
+			(box ? ss_("(A;OICI;FA;;;")+box+")" : ss_());
 	LocalFree(sid);
+	if(box)
+		LocalFree(box);
 	PSECURITY_DESCRIPTOR sd = NULL;
 	if(!ConvertStringSecurityDescriptorToSecurityDescriptorA(sddl.c_str(),
 			SDDL_REVISION_1, &sd, NULL)){
@@ -2060,8 +2087,11 @@ struct Engine::Impl
 	// ~0 for the start function; the meter at the budget before.
 	ss_ interp_call(uint32_t f, const uint64_t *a, uint64_t *r)
 	{
-		*i_meter = e.call_budget > 0 && e.call_budget < INTERP_BUDGET ?
-				e.call_budget : INTERP_BUDGET;
+		// [KIT_INTERP_BUDGETS] A budget asked for may be over the
+		// interpreter's own, up to the compiled engine's (the same units):
+		// Kit's builds and body batches, whose cost is units, not time
+		*i_meter = e.call_budget > 0 ? std::min<int64_t>(e.call_budget, BUDGET) :
+				INTERP_BUDGET;
 		wasm_val_t args[MAX_PARAMS], res[1];
 		memset(args, 0, sizeof args);
 		memset(res, 0, sizeof res);

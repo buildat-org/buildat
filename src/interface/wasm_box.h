@@ -21,8 +21,9 @@ namespace interface
 		// result
 		virtual ss_ call(const ss_ &export_name, uint32_t *result) = 0;
 		// The engine's whole budget for a call (its units differ between
-		// the interpreter and the compiled module), and a smaller one for
-		// the calls from now on (0: the whole)
+		// the interpreter and the compiled module), and another for the
+		// calls from now on (0: the whole; in the interpreter up to the
+		// compiled module's, Engine::BUDGET)
 		virtual int64_t budget() = 0;
 		virtual void set_call_budget(int64_t units) = 0;
 		// What the last call left of its budget; below 0 it ran past it
