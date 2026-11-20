@@ -2060,8 +2060,11 @@ struct Engine::Impl
 	// ~0 for the start function; the meter at the budget before.
 	ss_ interp_call(uint32_t f, const uint64_t *a, uint64_t *r)
 	{
-		*i_meter = e.call_budget > 0 && e.call_budget < INTERP_BUDGET ?
-				e.call_budget : INTERP_BUDGET;
+		// [KIT_INTERP_BUDGETS] A budget asked for may be over the
+		// interpreter's own, up to the compiled engine's (the same units):
+		// Kit's builds and body batches, whose cost is units, not time
+		*i_meter = e.call_budget > 0 ? std::min<int64_t>(e.call_budget, BUDGET) :
+				INTERP_BUDGET;
 		wasm_val_t args[MAX_PARAMS], res[1];
 		memset(args, 0, sizeof args);
 		memset(res, 0, sizeof res);
