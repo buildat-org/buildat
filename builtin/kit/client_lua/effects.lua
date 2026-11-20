@@ -340,9 +340,9 @@ function M.effect(x)
 	return made
 end
 
--- [RACER_FEEL] (3) kit.mark(x, y, z, yaw, size, color[, alpha]): a mark on the
--- ground from a client part (a tyre's): a flat quad at x, y + 0.02, z, turned
--- yaw degrees (from +z toward +x, as s.yaw), size {across, along} m (a number:
+-- [RACER_FEEL] (3) kit.mark{at = {x, y, z}, yaw, size, color, alpha}
+-- ([KIT_API_1]: a table, as kit.effect's): a mark on the ground from a client
+-- part (a tyre's): a flat quad at x, y + 0.02, z, turned yaw degrees (from +z toward +x, as s.yaw), size {across, along} m (a number:
 -- a square), color "#rrggbb", alpha 0...1 (0.6), unlit. Kept in a ring of
 -- MAX_MARKS in the scene, the oldest replaced; drawn as CHUNK marks a
 -- CustomGeometry, one that got marks rebuilt every MARK_EVERY s (a mark
@@ -389,8 +389,14 @@ local function mark_chunk(c)
 	end
 	cg:Commit()
 end
-function M.mark(x, y, z, yaw, size, color, alpha)
-	x, y, z = tonumber(x), tonumber(y), tonumber(z)
+function M.mark(t)
+	if type(t) ~= "table" then
+		error("mark: {at = {x, y, z}, yaw = degrees, size = {across, along}, " ..
+				"color = \"#rrggbb\", alpha = 0...1}", 2)
+	end
+	local at = type(t.at) == "table" and t.at or {}
+	local x, y, z = tonumber(at[1]), tonumber(at[2]), tonumber(at[3])
+	local yaw, size, color, alpha = t.yaw, t.size, t.color, t.alpha
 	if not O.scene or not x or not y or not z then
 		return
 	end

@@ -96,7 +96,7 @@ end
 return {
 	version = 1,
 	no_position = true,
-	players = true,
+	reads_players = true,
 	linked_in = true,
 	about = {
 		group = "Game",

@@ -17,7 +17,7 @@
 **                        player entity's own kit/inventory) or inv_self;
 **                        [KIT] stage 4d: player_id (the player entity),
 **                        names {by = name}, made {id...}, players (a type's
-**                        `players`), next_id and sizes {"prefab:<name>" |
+**                        `reads_players`), next_id and sizes {"prefab:<name>" |
 **                        "entity:<id>" = entities a copy makes};
 **                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
 **                        voxel_box) and voxels {names, ids} (reads_voxels:
@@ -41,7 +41,7 @@
 **                        [KIT_CARRY_ATTACH] attach = {player,
 **                        bone, x, y, z} | false (c:attach, c:detach);
 **                        the request's regions = {{id, team,
-**                        rules, o, n}...} (a type's `regions`: c:region_at)
+**                        rules, o, n}...} (a type's `reads_regions`: c:region_at)
 **                        (looking that way, level), sessions =
 **                        {{"start", {player id...} | null} | {"move",
 **                        player id, session} | {"end", session}...}
@@ -611,7 +611,7 @@ static const char PRELUDE[] =
 "	end\n"
 "	-- [KIT_CTF] its own entity moved (the world's position; fall: down\n"
 "	-- onto the first solid below, on_fall's), a player's speed, the\n"
-"	-- region deciding a cell (a type's `regions`: the smallest holding it)\n"
+"	-- region deciding a cell (a type's `reads_regions`: the smallest holding it)\n"
 "	function c:move(pos, opts)\n"
 "		if type(pos) ~= 'table' then error('move: a position, {x, y, z}', 2) end\n"
 "		if opts ~= nil and type(opts) ~= 'table' then error('move: options are {fall = true}', 2) end\n"
@@ -688,7 +688,7 @@ static const char PRELUDE[] =
 "	end\n"
 "	function c:detach() fx.attach = false end\n"
 "	function c:region_at(pos)\n"
-"		if not req.regions then error('region_at: its type reads no regions (regions = true)', 2) end\n"
+"		if not req.regions then error('region_at: its type reads no regions (reads_regions = true)', 2) end\n"
 "		if type(pos) ~= 'table' then error('region_at: a position, {x, y, z}', 2) end\n"
 "		local p = {}\n"
 "		for k = 1, 3 do local v = (tonumber(pos[k]) or 0) + 0.5 p[k] = v - v % 1 end\n"
@@ -735,7 +735,7 @@ static const char PRELUDE[] =
 "	-- [KIT_CTF] a health's death of its player (c.is_player): Kit's on_died\n"
 "	-- hooks, then kit/game_rules' respawn; every waiting player respawned;\n"
 "	-- a player hurt; a blast (api.h)\n"
-"	function c:died(by, kind) fx.died = {by == nil and NULL or tostring(by), kind == nil and NULL or tostring(kind)} end\n"
+"	function c:died(by, type) fx.died = {by == nil and NULL or tostring(by), type == nil and NULL or tostring(type)} end\n"
 "	function c:respawn_waiting() fx.respawn_waiting = true end\n"
 "	function c:hurt(player, amount)\n"
 "		local h = fx.hurt or {}\n"

@@ -302,9 +302,9 @@ end
 return {
 	version = 1,
 	usable = true,
-	players = true,
-	regions = true,
-	teams = true,
+	reads_players = true,
+	reads_regions = true,
+	reads_teams = true,
 	-- (a cloth off to its +x side, as on a pole: a kit/part placed under
 	-- it; own_look off and parts under it for another look)
 	look = {shape = "box", size = {0.7, 0.45, 0.06}, offset = {0.35, 0.65, 0},

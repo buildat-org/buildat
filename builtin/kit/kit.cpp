@@ -370,7 +370,7 @@ struct Type
 	// [KIT] stage 4d: each signal's value's type ("any" where the file
 	// gives none; "none": no value)
 	sm_<ss_, ss_> in_types, out_types;
-	// It reads every player entity (players = true); it is on each player
+	// It reads every player entity (reads_players = true); it is on each player
 	// entity, not placed (player = true)
 	bool players = false, player = false;
 	// [KIT_PARTICLES] The parameter saying which world event its on_event
@@ -382,9 +382,10 @@ struct Type
 	// on_tool, the wear)
 	bool placeable = false, health = false, equipment = false;
 	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
-	// state members and score); it reads every team (teams = true)
+	// state members and score); it reads every team (reads_teams = true)
 	bool team = false, teams = false;
-	// [KIT_CTF] It reads its scene's regions (regions = true: c:region_at)
+	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
+	// c:region_at)
 	bool regions = false;
 	// Its client part, <name>.client.lua beside it ("" none)
 	ss_ client;
@@ -2002,14 +2003,20 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		names("handlers", t.handlers);
-		t.players = t.decl.get("players").is_true();
+		// [KIT_API_1] (decision 5) players, teams and regions of before read
+		// as reads_*
+		auto reads = [&](const char *k){
+			return t.decl.get(ss_("reads_")+k).is_true() ||
+					t.decl.get(k).is_true();
+		};
+		t.players = reads("players");
 		t.player = t.decl.get("player").is_true();
 		t.placeable = t.decl.get("placeable").is_true();
 		t.health = t.decl.get("health").is_true();
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
-		t.teams = t.decl.get("teams").is_true();
-		t.regions = t.decl.get("regions").is_true();
+		t.teams = reads("teams");
+		t.regions = reads("regions");
 		t.events = jstr(t.decl, "events");
 		// Its client part, beside it
 		const ss_ client = local ? jstr(lt->second, "client") : pkg ?
@@ -17762,7 +17769,7 @@ struct Module: public interface::Module, public Interface
 
 	// The entities an instance reaches: its own, its links' ends, those its
 	// entity parameters name, the copies it made, the player who set the
-	// run off, every player for a type that reads them (`players`), and
+	// run off, every player for a type that reads them (`reads_players`), and
 	// [KIT_PANEL_PARENT] the panel it is in
 	std::set<uint64_t> reach(const Entity &e, size_t comp, const ss_ &by)
 	{
@@ -17828,7 +17835,7 @@ struct Module: public interface::Module, public Interface
 		return r;
 	}
 
-	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
+	// [KIT_MINIGAMES_FIX] The teams a `reads_teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
 	// any (a placed prefab's own)
 	// [KIT_CTF] A `map` scene of its own (kit/arena's): that scene's teams
@@ -21455,7 +21462,7 @@ struct Module: public interface::Module, public Interface
 	// times factor (0...10) from now on, on the server's steps and their
 	// client's prediction (controls_for sends the parameters), until the
 	// next call, their body's going (a leave, another session) or Stop. A
-	// player it reaches: the run's, or any for a type with `players`
+	// player it reaches: the run's, or any for a type with `reads_players`
 	void speed_fx(const Entity &e, size_t comp, const ss_ &by,
 			const json::Value &s)
 	{
@@ -33831,7 +33838,8 @@ struct Module: public interface::Module, public Interface
 				"linked_in = true: c.linked_in = {input = {id...}}, the entities "
 				"linking to it, which it reaches (c:send); inputs = {name = "
 				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
-				"outputs likewise; usable = true (players use it: on_use); look "
+				"outputs likewise; usable = true (players use it: on_use); "
+				"reads_players = true (c.players), reads_teams = true (c.teams); look "
 				"= {shape = \"box\"|\"sphere\", size = n or {x, y, z}, color = "
 				"\"#rrggbb\", solid = true, text = \"<shared state key>\"}; zone "
 				"= \"<a position param>\" (a box of cells from its place) or "
@@ -33912,7 +33920,7 @@ struct Module: public interface::Module, public Interface
 				"body (node at its feet, s its state; another's {pos, pose}; yaw "
 				"the own body's as drawn between its steps, degrees; scenery is "
 				"kit/parallax's, not a client part's; kit.shake(a), "
-				"kit.effect{at, ...} and kit.mark(x, y, z, yaw, size, color) "
+				"kit.effect{at, ...} and kit.mark{at, yaw, size, color} "
 				"from any of them: get_guide); with client left out, the type's "
 				"client part stays as it is; \"\" takes it away. A few lines "
 				"changed: edit_type.",
@@ -40110,7 +40118,7 @@ struct Module: public interface::Module, public Interface
 				"player's own client as their predicted body meets the zone "
 				"(the server's shapes), a round trip before the server's "
 				"on_enter: animate there (e:predict), decide on the server. "
-				"c.players (players = true) lists every "
+				"c.players (reads_players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to those not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
@@ -40137,7 +40145,7 @@ struct Module: public interface::Module, public Interface
 				"the same; keep a description fixed, vary at, dir and count; "
 				"64 bursts live and 240 a second from all parts, the rest "
 				"dropped: a stream is a small count every 0.1 s, ttl under 1 s); "
-				"kit.mark(x, y, z, yaw, size, color[, alpha]) a flat quad on the "
+				"kit.mark{at = {x, y, z}, yaw, size, color, alpha} a flat quad on the "
 				"ground (a tyre's mark: size {across, along} m, yaw as s.yaw, "
 				"0.02 m above y; the newest 1024 kept, shown within 0.1 s; ~60 "
 				"us each: one a wheel every metre or so, not every frame), "
@@ -45246,7 +45254,7 @@ struct Module: public interface::Module, public Interface
 
 	// A run's c:session_start(players), c:session_move(player, id),
 	// c:session_end(id): the players it reaches (in its zone, the run's,
-	// any for a type with `players`), the sessions it made; none from a
+	// any for a type with `reads_players`), the sessions it made; none from a
 	// session but its own end and moves back
 	void session_fx(const Entity &e, size_t comp, const Run &r,
 			const json::Value &ops)

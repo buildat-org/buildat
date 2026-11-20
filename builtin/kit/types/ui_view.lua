@@ -47,7 +47,7 @@ end
 return {
 	version = 1,
 	no_position = true,
-	players = true,
+	reads_players = true,
 	ui = {kind = "view", text = "param:title", anchor = "param:anchor",
 		x = "param:x", y = "param:y", width = "param:width",
 		height = "param:height", color = "param:color",

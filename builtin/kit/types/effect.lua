@@ -137,8 +137,8 @@ end
 
 return {
 	version = 2,
-	players = true,
-	teams = true,
+	reads_players = true,
+	reads_teams = true,
 	events = "trigger",
 	-- [KIT_SYMMETRY] axis and offset are the world's
 	space = {axis = "world", offset = "world"},

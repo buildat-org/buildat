@@ -45,8 +45,8 @@ cat > "$t/user/apps/workbench/check_types/probe.lua" <<'EOF'
 local function f(x) return tostring(math.floor(x * 100 + 0.5) / 100) end
 return {
 	version = 1,
-	players = true,
-	regions = true,
+	reads_players = true,
+	reads_regions = true,
 	params = {
 		marker_color = {type = "string", default = "#ff3030"},
 		marker_label = {type = "string", default = "Flag"},

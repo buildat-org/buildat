@@ -391,8 +391,40 @@ namespace interface
 // kit:app, AppCall, its native code's to do; 8 a run). A
 // component reaches its own entity and its links, the entities its entity
 // parameters name and the copies it made, and the player who set it off
-// (every player with `players = true`), the panel it is in (c.panel), the
+// (every player with `reads_players = true`), the panel it is in (c.panel), the
 // entities linking to it with `linked_in = true`, nothing else.
+//
+// [KIT_API_1] **Names** (kit_api1_review.md item 7). Kit's rules for its
+// own names:
+// - A bool parameter "active from the start" is `enabled`; no parameter
+//   is named `on`.
+// - Inputs: show/hide a UI's visibility (ui_*, pause_menu_action), on/off
+//   a switch whose state is drawn or sent on (lever, effect, voxel_replace,
+//   voxel_states), enable/disable a behaviour started or stopped (attack,
+//   flag, flee, follow, region, senses, spawn_rule, wander). Inputs are
+//   never renamed: a link names its target's input, and migrate sees
+//   parameters only.
+// - Distances: radius an area round the entity (explosive, spawn_rule,
+//   wander), range how far it notices or lets a player act (radar,
+//   senses, flag's *_range), distance one it keeps or places at
+//   (controls, flee, follow, placer), reach how far an attack or a hand
+//   reaches (attack, bot).
+// - Speeds: a movement's `speed` (walkers) and `top_speed` (vehicles,
+//   which accelerate towards it) are m/s; every other speed is relative to
+//   the body's own (c:speed's factor, propose_move's speed, kit/flag's and
+//   kit/flee's, kit/bot's speed in percent as its aim and reaction).
+// - Damage is `type` everywhere: c:hurt{type}, c:explode{type},
+//   c:died(by, type), on_died(c, player, by, type).
+// - A type field giving read access is reads_*: reads_players,
+//   reads_teams, reads_regions, reads_voxels (players, teams and regions
+//   = true of before are read as them).
+// - A label in a signal's type, "string:<label>", is free text the editor
+//   shows ("string:player", "string:team", ...); a link does not read it.
+// Renamed in 4z37j (each type's migrate takes a placed one forward):
+// kit/effect's `on` is `trigger` (v2), kit/symmetry's `on` `enabled` (v2),
+// kit/spawn_rule's `on` `on_voxels` (v2), kit/voxel_replace's and
+// kit/voxel_states' `start_on` `enabled` (v2); on_build's c.move is
+// c.move_lib; a client part's kit.mark takes a table.
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
 // no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
@@ -445,7 +477,7 @@ namespace interface
 //   default inventory provider) and kit/score -- not placed, not edited;
 //   their state is play state (the round's start resets it), kept in the
 //   runtime row (its "players": {name: {id, aside}}). A type with
-//   `players = true` reads every player: c.players = {{id, name, here,
+//   `reads_players = true` reads every player: c.players = {{id, name, here,
 //   state = {type = state}, scene}}: every scene's players, each with
 //   the scene they are in ([KIT_AGENT_FEEDBACK_1117] "" none); a
 //   scene's component keeps to its own by `not p.away` (below).
@@ -585,8 +617,8 @@ namespace interface
 //   shaken as kit/controls' shake input does (0...5, from this frame),
 //   kit.effect{at = {x, y, z}, ...} c:effect's particles (its particle
 //   fields, clamped alike; 64 live bursts and 240 a second from all parts,
-//   past it dropped; effects.lua), kit.mark(x, y, z, yaw, size, color[,
-//   alpha]) a flat ground mark (size {across, along}; a ring of 1024;
+//   past it dropped; effects.lua), kit.mark{at = {x, y, z}, yaw, size,
+//   color, alpha} a flat ground mark (size {across, along}; a ring of 1024;
 //   ~60 us a mark, the sandbox's Vector3s),
 //   kit.clear_marks()); (2) kit.shared, one plain table per client every
 //   client part of every entity shares (local, nothing sent; a part's
@@ -973,13 +1005,13 @@ namespace interface
 //                             a side at most (the World's whole height:
 //                             a map-wide region, a column to the bottom)
 // **Places, moves, speed and markers** ([KIT_CTF], any game's):
-//   c.players (a type's `players`): each also has pos {x, y, z} (placed
+//   c.players (a type's `reads_players`): each also has pos {x, y, z} (placed
 //   ones: the world's, their feet's cell's middle, as c.pos is for an
 //   entity), yaw (degrees, their view's last input) and alive (placed,
 //   not waiting to respawn, their health's hp above 0 where they have
 //   one); away true when they are in another scene than the entity (a
 //   placed one's; never on the root's), scene the one they are in.
-//   regions = true -- c:region_at({x, y, z}): the region deciding the
+//   reads_regions = true -- c:region_at({x, y, z}): the region deciding the
 //   cell the point is in (the smallest enabled one of its scene, as
 //   allows() picks), {id, team (the team it is under, 0 none), rules
 //   ({dig = "all"|"owners"|"others"|"none", ...}, its published state)},
@@ -1345,14 +1377,14 @@ namespace interface
 // start's alone. It writes 256 sections at most: a dig or place into one
 // more is refused (told), an entity's write dropped (logged). A component makes one
 // (c:session_start(players): players it reaches, in its zone or the
-// run's, any for a type with `players`; nil: those in its zone and the
+// run's, any for a type with `reads_players`; nil: those in its zone and the
 // run's), moves a player into one it made or back (c:session_move(player,
 // id), id 0 the default) and ends one it made (c:session_end(id));
 // on_session_start(c, id) and on_session_end(c, id) are its own.
 // [KIT_MAP_ROTATION] c:session_start(players, map, others): `map` the scene
 // its players go into (else the maker's `map` parameter), `others` scenes
 // whose entities run nothing in this session, less `map` and the maker's own
-// scene. c.scenes, for a `teams = true` type, the composition's scenes. In a
+// scene. c.scenes, for a `reads_teams = true` type, the composition's scenes. In a
 // session c.session is its id (0 in the default) and c:session_end() ends
 // it; none is made from inside one, MAX_SESSIONS (8) at most. Ending one
 // sends its players back to the default round at their scene's spawn.
@@ -1407,7 +1439,7 @@ namespace interface
 // its name, colour, spawn (its pad) and shared score ("add", "set";
 // "reached" at win_score). **The Team interface**: a type with `team =
 // true` is a team, its state `members` (its players' entity ids) and
-// `score`; a type with `teams = true` reads the teams in its scene (of
+// `score`; a type with `reads_teams = true` reads the teams in its scene (of
 // those, the ones under its own parent when there are any: a placed
 // prefab's own), c.teams = {{id, params, state}} by id, and reaches them
 // (c:send); a kit/arena runs a round only in the session it started (any
@@ -1422,7 +1454,7 @@ namespace interface
 // [KIT_CTF] kit/arena's `map` (a scene's name; "" none: the round in the
 // arena's own scene): the session's players go into that scene's copy
 // (its spawn, then their team's pad), its teams the round's (c.teams, a
-// `teams = true` type's with a `map`), and at the session's end back to
+// `reads_teams = true` type's with a `map`), and at the session's end back to
 // the arena's scene (its spawn). `time_up`: "draw" (the default) or
 // "most": the team with the most points wins at the timer's end; a tie
 // runs on as overtime (the status line says so) until the scores differ

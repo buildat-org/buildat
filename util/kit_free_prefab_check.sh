@@ -417,7 +417,7 @@ rotation()
 -- c:region_at for the check
 return {
 	version = 1,
-	regions = true,
+	reads_regions = true,
 	inputs = {region = "position"},
 	on_input = function(c, input, v)
 		local r = c:region_at(v)

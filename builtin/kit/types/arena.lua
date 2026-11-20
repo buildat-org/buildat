@@ -378,11 +378,11 @@ end
 return {
 	version = 3,
 	zone = "size",
-	teams = true,
+	reads_teams = true,
 	-- ([KIT_SCENE_PACKAGES] maps "*")
 	listed = true,
 	-- (every player read: the queue keeps those here)
-	players = true,
+	reads_players = true,
 	params = {
 		hud_style = {cat = "hud", type = "string", default = "shapes",
 			choices = {"shapes", "plain"}},

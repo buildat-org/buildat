@@ -116,7 +116,7 @@ return {
 	version = 1,
 	region = "size",
 	-- (set_owner's capture by team reads them)
-	teams = true,
+	reads_teams = true,
 	params = params,
 	state = {
 		enabled = {default = true, shared = true},

@@ -528,7 +528,7 @@ end
 
 return {
 	version = 1,
-	players = true,
+	reads_players = true,
 	linked_in = true,
 	-- (the grid's pole and the way it faces)
 	gizmo = {shape = "box", size = 0.3, color = "#f4d35e"},

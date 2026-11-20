@@ -92,7 +92,7 @@ return {
 				colors = {"#808080"}, speed_min = 1, ttl_min = 0.5, size_min = 0.2}
 		end
 		for i = 1, 1100 do
-			kit.mark(p.x + i * 0.01, p.y, p.z, i, {0.25, 0.5}, "#202020")
+			kit.mark{at = {p.x + i * 0.01, p.y, p.z}, yaw = i, size = {0.25, 0.5}, color = "#202020"}
 		end
 		e:log("tdzone effects asked")
 	end,

@@ -211,8 +211,8 @@ end
 local function mark(x0, z0, x1, z1, color)
 	local dx, dz = x1 - x0, z1 - z0
 	local x, z = (x0 + x1) / 2, (z0 + z1) / 2
-	kit.mark(x, FLOOR_Y, z, math.atan2(dx, dz) * 180 / math.pi,
-			{0.3, math.sqrt(dx * dx + dz * dz) + 0.1}, color, 0.55)
+	kit.mark{at = {x, FLOOR_Y, z}, yaw = math.atan2(dx, dz) * 180 / math.pi,
+			size = {0.3, math.sqrt(dx * dx + dz * dz) + 0.1}, color = color, alpha = 0.55}
 	said_once("mark", x, FLOOR_Y, z)
 end
 -- This client's camera shaken (0...5)

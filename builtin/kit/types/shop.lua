@@ -42,7 +42,7 @@ end
 return {
 	version = 1,
 	usable = true,
-	players = true,
+	reads_players = true,
 	params = {
 		prefab = {type = "prefab", default = "kit/airship_skiff"},
 		price = {type = "number", default = 20, min = 0, max = 100000},

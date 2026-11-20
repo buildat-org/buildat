@@ -32,7 +32,7 @@ end
 return {
 	version = 1,
 	no_position = true,
-	teams = true,
+	reads_teams = true,
 	ui = {kind = "input", text = "param:label", max_length = "param:max_length",
 		anchor = "param:anchor", x = "param:x", y = "param:y",
 		width = "param:width", height = "param:height", color = "param:color",

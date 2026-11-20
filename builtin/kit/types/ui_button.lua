@@ -45,7 +45,7 @@ return {
 	version = 2,
 	no_position = true,
 	-- (to "team" reads them)
-	teams = true,
+	reads_teams = true,
 	ui = {kind = "button", text = "param:label", action = "param:action",
 		anchor = "param:anchor", x = "param:x", y = "param:y",
 		width = "param:width", height = "param:height", color = "param:color",
