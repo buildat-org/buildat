@@ -6492,6 +6492,15 @@ function M.scenes_dialog()
 			drop("dialog")
 			M.add_scene_file("")
 		end):SetName("import scene")
+		-- [KIT_SCENE_DUPLICATE] the selected one copied beside it (the
+		-- server takes the builder to the copy)
+		if (E.state.project or "") ~= "" then
+			button(r, "Duplicate " .. cur, function()
+				drop("dialog")
+				log:info("kit editor: duplicate the scene " .. cur)
+				send({op = "duplicate_scene", name = cur})
+			end):SetName("duplicate scene")
+		end
 	end
 	if (E.state.project or "") ~= "" then
 		r = two and row(w) or r
