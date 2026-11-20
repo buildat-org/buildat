@@ -56,6 +56,10 @@
 	#include <fcntl.h>
 	#include <sys/stat.h>
 	#include <unistd.h>
+#else
+	// [WIN_KIT_BUILD] camera_say()'s write and camera_read()'s read (mingw's;
+	// there no camera_launcher is given, so they are never called)
+	#include <io.h>
 #endif
 #define MODULE "kit"
 
