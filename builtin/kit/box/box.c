@@ -55,8 +55,7 @@
 **                        {entities, voxels} (on_build's: a prefab's
 **                        members, [KIT_GENERATORS]; its request's
 **                        max_children and entities), generate = {{id,
-**                        params}...} (c:generate), respawn = true
-**                        (c:respawn()), [KIT_CTF] died = {by, type},
+**                        params}...} (c:generate), [KIT_CTF] died = {by, type},
 **                        respawn_waiting = true, hurt = {{player, amount,
 **                        fraction, type}...}, explode = {{x, y, z, radius,
 **                        power, kill, hurt, share, friendly_fire,
@@ -532,7 +531,6 @@ static const char PRELUDE[] =
 "	function c:count(item, ext) return inv.count(item, ext) end\n"
 "	function c:has(item, n, ext) return inv.count(item, ext) >= (tonumber(n) or 1) end\n"
 "	function c:add(item, n, ext) return inv.change('inventory_add', item, n, ext) end\n"
-"	c.give = c.add\n"
 "	function c:take(item, n, ext) return inv.change('inventory_take', item, n, ext) end\n"
 "	function c:list(ext) return inv.list(ext) end\n"
 "	-- [KIT_GUIDE_BOTS_2] by: as set off by that player or bot (\"player:<id>\", \"bot:<id>\")\n"
@@ -730,12 +728,10 @@ static const char PRELUDE[] =
 "	-- default the sessions it made, {[id] = {players, taken, clock}}\n"
 "	c.session_players = req.session_players or 0\n"
 "	c.sessions = req.sessions or {}\n"
-"	-- [KIT_TOOLS_1] whether it is on a player's entity; c:respawn() puts\n"
-"	-- that player at their spawn after the run (kit/health's death)\n"
+"	-- [KIT_TOOLS_1] whether it is on a player's entity\n"
 "	c.is_player = req.is_player or false\n"
 "	-- [KIT_PANEL_PARENT] the panel it is in (its parent, if a panel)\n"
 "	c.panel = req.panel\n"
-"	function c:respawn() fx.respawn = true end\n"
 "	-- [KIT_CTF] a health's death of its player (c.is_player): Kit's on_died\n"
 "	-- hooks, then kit/game_rules' respawn; every waiting player respawned;\n"
 "	-- a player hurt; a blast (api.h)\n"

@@ -17665,9 +17665,6 @@ struct Module: public interface::Module, public Interface
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
-		// [KIT_TOOLS_1] kit/health's c:respawn() on a player's entity
-		if(fx.get("respawn").is_true() && (e.kind == "player" || is_bot(e)))
-			respawn_player(e.id);
 		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
 		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
 		// running the targets' hooks now: what the caller's run() reads
@@ -29858,19 +29855,6 @@ struct Module: public interface::Module, public Interface
 			return amount;
 		}
 		return 0;
-	}
-
-	// A player's entity back at their spawn (kit/health's c:respawn()):
-	// their team's pad, else the last spawner of players in their scene,
-	// else the app's default
-	void respawn_player(uint64_t player)
-	{
-		const size_t peer = peer_of_player(player);
-		if(!peer && !is_bot_id(player))
-			return;
-		// [KIT_INVENTORY_PLAY] the inventory at a death, the kits at a spawn
-		player_died(player);
-		revive(player);
 	}
 
 	// ---- [KIT_CTF] Death and respawn, hurts and blasts

@@ -919,7 +919,7 @@ namespace interface
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).
 //
 // That player's inventory: c:count(item, ext) (how many), c:add(item, n,
-// ext) (c:give the same), c:take(item, n, ext) (all n or none: true if
+// ext), c:take(item, n, ext) (all n or none: true if
 // taken), c:list(ext) ({item = n}), c:has(item, n, ext) (count >= n); n is
 // 1 if left out, an item letters, digits and _, ext a free-form table the
 // provider may read (nil: {}). The provider is the player entity's own
@@ -1523,8 +1523,8 @@ namespace interface
 // = {amount, type, item, crit}, it returns the hit as it goes on (nil:
 // unchanged; amount 0: nothing) -- armour, shields, stage 9's effects.
 // It signals "damaged" (the amount) and "died"; a player dead respawns
-// (c:respawn(): their team's pad, else the last spawner of players in
-// their scene, else the app's spawn) at max. c.is_player: on a player's
+// (by kit/game_rules' respawn: their team's pad, else the last spawner of
+// players in their scene, else the app's spawn) at max. c.is_player: on a player's
 // entity. "kit:hit" <entity id> is a placed peer's melee hit with what
 // they hold: Running, out of the tools, a melee item of theirs, past its
 // cooldown (game time), the target with health in their scene within its
@@ -1630,8 +1630,7 @@ namespace interface
 // client too, and Kit's HUD says "Waiting to respawn". game_rules' respawn
 // changed to "at_once" respawns those waiting. A player moved to another
 // session (c:session_move, an arena's round and its end) waits no more in
-// the one they leave. c:respawn() (before
-// [KIT_CTF] kit/health's) still respawns a player at once.
+// the one they leave.
 // c:hurt(player, amount | {amount = n | fraction = f, type = name}):
 // a player of the round hurt (fraction: of their health's max) through
 // their modify_hit hooks and health as a hit of type `type` ("hurt" by
