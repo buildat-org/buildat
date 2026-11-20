@@ -136,17 +136,19 @@ function M.level_plane()
 end
 -- [KIT_CHASE_HEADING] A chase camera following the body's heading:
 -- kit/controls' chase_follow (its lag, seconds; 0: mouse look), out of a seat
--- (a seat's chase as before); heading: its body has one (s.yaw)
+-- (a seat's chase as before); heading: its body has one (s.yaw).
+-- [KIT_PARAM_AUDIT] first_person likewise: the eye turned with the body
 local function chase_follow(heading)
 	local lag = tonumber(params().chase_follow) or 0
-	if lag > 0 and camera_mode() == "chase" and not M.seated() and
+	local m = camera_mode()
+	if lag > 0 and (m == "chase" or m == "first_person") and not M.seated() and
 			(not heading or C.s and tonumber(C.s.yaw)) then
 		return lag
 	end
 	return nil
 end
 -- Whether the mouse or a drag turns the view (a top-down's, [KIT_PLANE] a
--- side camera's and a chase following the heading never turn)
+-- side camera's and a chase or first person following the heading never turn)
 function M.view_turns()
 	local m = camera_mode()
 	return m ~= "top_down" and m ~= "side" and not chase_follow(true)
@@ -618,6 +620,8 @@ local function log_body()
 	-- [KIT_SHIP_VIEW] A chase view's distance from what it looks at
 	if C.chase_dist then
 		log:info(string.format("kit: camera %.2f m behind", C.chase_dist))
+	end
+	if C.chase_dist or C.fp_follow then
 		-- ([KIT_CHASE_HEADING] its turn and the body's as drawn)
 		log:info(string.format("kit: chase yaw %.2f, the body's %s", C.chase_yaw or
 				C.yaw, C.draw_yaw and string.format("%.2f", C.draw_yaw) or "none"))
@@ -2517,6 +2521,26 @@ local function follow_point(key, par, dt, bu, bv, lu, lv, hw, hh)
 	return f
 end
 
+-- [KIT_CHASE_HEADING] Behind the way the body points as drawn (no 30 Hz
+-- steps), lag seconds behind it, at most half a turn a second: a spin
+-- does not whip the view round. The heading, not the way it goes: in
+-- reverse the view stays behind the nose. Another's body followed
+-- (a target, spectating, own false): the turn kept. The view's yaw (C.yaw:
+-- the input's and the body drawn) set and returned.
+-- simplified: that body's own heading if a spectator wants it
+local function follow_heading(dt, lag, own)
+	if own then
+		local want = C.draw_yaw or tonumber(C.s.yaw)
+		local was = C.chase_yaw or want
+		local d = ((want - was) % 360 + 540) % 360 - 180
+		local most = 180 * dt
+		C.chase_yaw = (was + math.max(-most, math.min(most,
+				d * (1 - math.exp(-dt / lag))))) % 360
+	end
+	C.yaw = C.chase_yaw or C.yaw
+	return C.yaw
+end
+
 local function place_camera(dt, at)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
@@ -2576,7 +2600,7 @@ local function place_camera(dt, at)
 		end
 	end
 	C.follow = at
-	C.chase_dist = nil
+	C.chase_dist, C.fp_follow = nil, nil
 	cam.orthographic = false
 	if sp then
 		if tp then
@@ -2681,23 +2705,7 @@ local function place_camera(dt, at)
 					1 - math.exp(-dt / 0.25))
 			yaw = C.chase_yaw
 		elseif lag then
-			-- [KIT_CHASE_HEADING] Behind the way the body points as drawn (no 30 Hz
-			-- steps), lag seconds behind it, at most half a turn a second: a spin
-			-- does not whip the view round. The heading, not the way it goes: in
-			-- reverse the view stays behind the nose. Another's body followed
-			-- (a target, spectating): the turn kept.
-			-- simplified: that body's own heading if a spectator wants it
-			if own then
-				local want = C.draw_yaw or tonumber(C.s.yaw)
-				local was = C.chase_yaw or want
-				local d = ((want - was) % 360 + 540) % 360 - 180
-				local most = 180 * dt
-				C.chase_yaw = (was + math.max(-most, math.min(most,
-						d * (1 - math.exp(-dt / lag))))) % 360
-			end
-			-- (the view's yaw for the rest: the input's and the body drawn)
-			C.yaw = C.chase_yaw or C.yaw
-			yaw = C.yaw
+			yaw = follow_heading(dt, lag, own)
 			pitch = tonumber(par.chase_pitch) or 15
 		end
 		rot = magic.Quaternion(pitch, yaw, roll)
@@ -2732,6 +2740,10 @@ local function place_camera(dt, at)
 		-- ([KIT_SPECTATE_CAMERA] a camera_target looked at, untilted)
 		if tp then
 			look_at(want_pos, tp)
+		elseif chase_follow(true) then
+			-- [KIT_PARAM_AUDIT] the eye turned as the chase is, looking level
+			follow_heading(dt, chase_follow(true), own)
+			C.pitch, C.fp_follow = 0, true
 		end
 		rot = magic.Quaternion(C.pitch, C.yaw, roll)
 		if C.tilt and not tp then

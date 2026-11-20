@@ -7,7 +7,8 @@
 -- (a movement's s.yaw, as drawn), following it with chase_follow seconds of
 -- lag at most half a turn a second, chase_pitch degrees down, the mouse not
 -- turning it; in a seat as with 0, a body with no heading (kit/walker)
--- turned by the mouse; top_down: from height above at a fixed angle and yaw, ortho a flat
+-- turned by the mouse; [KIT_PARAM_AUDIT] first_person with chase_follow
+-- above 0 likewise: the eye turned with the heading, level; top_down: from height above at a fixed angle and yaw, ortho a flat
 -- view; [KIT_TOP_DOWN] (6) following with dead_zone, look_ahead and
 -- look_velocity as side does, in the view's axes on the ground (across the
 -- screen and up it; the lead the way the body faces, s.yaw, else the way it
@@ -118,7 +119,8 @@ return {
 		angle = {cat = "look", type = "number", default = 60, min = 10,
 			max = 90},
 		-- ([KIT_CHASE_HEADING] chase: 0 mouse look; more: the body's heading
-		-- followed with that lag in seconds, looking chase_pitch degrees down)
+		-- followed with that lag in seconds, looking chase_pitch degrees down;
+		-- first_person: the heading followed so, looking level)
 		chase_follow = {cat = "look", type = "number", default = 0, min = 0,
 			max = 5},
 		chase_pitch = {cat = "look", type = "number", default = 15, min = -10,
