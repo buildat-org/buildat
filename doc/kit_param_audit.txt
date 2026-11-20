@@ -54,7 +54,8 @@ terrain flat -> noise          | hills under the room      | ground -6..1 with s
                                |                           | (or level) gives dry hills                 |
 noise -> flat (undo)           | the room as before        | the body stayed buried 4.5 m down (unbury  | FIXED
                                |                           | reached 2.7 m): unbury now lifts up to     |
-                               |                           | 64 m (319a477e1)                           |
+                               |                           | 64 m with the body's middle in known solid |
+                               |                           | (319a477e1, 19ced6368)                     |
 undo                           | exact                     | exact                                      | pass
 
 Arena (teams, rounds)

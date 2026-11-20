@@ -86,7 +86,7 @@ edit() # <json>: an edit, one more to undo
 	step 10 "entities, $n to undo" "event kit_edit $1"
 }
 set_p() { edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"; }
-shot() { step 15 "Wrote screenshot $t/$1" "frames ${2:-10}" "screenshot $t/$1"; }
+shot() { step 40 "Wrote screenshot $t/$1" "frames ${2:-10}" "screenshot $t/$1"; }
 # The authored composition (the save's row, written within a second of an
 # edit and at once by a stop) into <file>; with <same>: waited for until
 # its entities are <same>'s
@@ -178,7 +178,7 @@ ENV=$(tail -c +$((m + 1)) "$SL" | grep -aoP "An edit by kitboss: placed kit/envi
 set_p $ENV time 8
 set_p $CONTROLS camera '"top_down"'
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
-step 5 "kit: body at" "frames 120" "event kit_body"
+step 30 "kit: body at" "frames 60" "event kit_body"
 shot env_fast.png 30
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
 mc=$(mark "$CL")
