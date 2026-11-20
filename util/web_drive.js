@@ -64,6 +64,7 @@
 //   ["rdrag", x0, y0, x1, y1] the right button down at x0, y0, moved to x1, y1
 //                           over half a second, and up
 //   ["ldrag", x0, y0, x1, y1] the left button, the same (Chrome only)
+//   ["mdrag", x0, y0, x1, y1] the middle button, the same
 //   ["drag", type, label, x1, y1, "touch"]
 //                           the same from where the click by label would go
 //   ["at_log", regex, "tap"]  a tap where the last console line matching
@@ -322,14 +323,16 @@ async function firefox() {
 					duration: 50, x: Math.round(x0 + (x1 - x0) * i / 10),
 					y: Math.round(y0 + (y1 - y0) * i / 10)})),
 				{type: "pointerUp", button: 0}]}]}),
-		rdrag: (x0, y0, x1, y1) => c.send("input.performActions", {
+		rdrag: (...a) => ops.button_drag(2, ...a),
+		mdrag: (...a) => ops.button_drag(1, ...a),
+		button_drag: (button, x0, y0, x1, y1) => c.send("input.performActions", {
 				context: ctx, actions: [{type: "pointer", id: "m", actions: [
 				{type: "pointerMove", x: x0, y: y0},
-				{type: "pointerDown", button: 2},
+				{type: "pointerDown", button},
 				...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => ({type: "pointerMove",
 					duration: 50, x: Math.round(x0 + (x1 - x0) * i / 10),
 					y: Math.round(y0 + (y1 - y0) * i / 10)})),
-				{type: "pointerUp", button: 2}]}]}),
+				{type: "pointerUp", button}]}]}),
 		shot: async p => {
 			const r = await c.send("browsingContext.captureScreenshot", {context: ctx});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -582,6 +585,7 @@ async function chrome() {
 				touchPoints}),
 		rdrag: (...a) => ops.mouse_drag("right", 2, ...a),
 		ldrag: (...a) => ops.mouse_drag("left", 1, ...a),
+		mdrag: (...a) => ops.mouse_drag("middle", 4, ...a),
 		mouse_drag: async (button, buttons, x0, y0, x1, y1) => {
 			const mouse = (type, x, y) => c.send("Input.dispatchMouseEvent", {type,
 					x, y, button, buttons, clickCount: 1});

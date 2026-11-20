@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~25 s (2026-11-02)
+# cost: ~50 s (2026-11-20)
 # covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/workbench/**
 # [KIT_CAM_MIN_MOVE] The editor's 3D camera under the surface: a fresh
 # save on Workbench, a flat World, the camera put 3 cells under the
@@ -11,9 +11,15 @@
 #   - a middle drag of 200 pixels pans it at least as a point 6 away
 #     grabbed would; one up pans it along y, not z ([KIT_PAN_PLANE]: the
 #     world-axis plane nearest the view's, here XY).
+# [KIT_EDITOR_PAN_ZOOM] Then a game from the Brimstone Speedway template (a
+# plane game, the editor opening in 2D), its 3D view by F2: a middle drag of
+# 150 pixels pans the camera some 10 along the ground; five notches of the
+# wheel sent at once have all zoomed two frames after the last (0.7 a notch:
+# 30 or more toward the road 40 off), nothing after.
 # [KIT_WEB_WHEEL_TENTHS] With "web", in headless Chrome: one notch of the wheel,
 # 100 CSS pixels, which the web's SDL counts as 10, is one notch in the 2D plan
-# (span 50 to 40) and in the 3D view (1 to 2 cells along the look, not 10).
+# (span 50 to 40) and in the 3D view (1 to 3 cells along the look, not 10).
+# The Brimstone game's middle drag and a notch in ten events there, as above.
 # [KIT_WHEEL_TRACKPAD] Walking with the voxels tool, ten wheel events of 10 CSS
 # pixels, a trackpad's notch: one step of the voxel in hand.
 #   util/kit_cam_min_move_check.sh
@@ -74,15 +80,72 @@ J
 		fail "no plan spans or camera places ($c)"
 	awk -v a="$s0" -v b="$s1" 'BEGIN { exit !(a == 50 && b > 39.9 && b < 40.1) }' ||
 		fail "one notch in the plan: span $s0 -> $s1, not 50 -> 40"
-	# 0.8 ^ 1 of 10 ahead (nothing hit) or a cell's least; ten notches went 8.9 or 10
-	awk -v a="$z0" -v b="$z1" 'BEGIN { d = b - a; exit !(d >= 0.9 && d <= 2.1) }' ||
-		fail "one notch in 3D: z $z0 -> $z1, not 1 to 2 cells"
+	# ([KIT_EDITOR_PAN_ZOOM] 1 - 0.7 of 10 ahead, nothing hit) or a cell's
+	# least; ten notches went 9.7
+	awk -v a="$z0" -v b="$z1" 'BEGIN { d = b - a; exit !(d >= 0.9 && d <= 3.1) }' ||
+		fail "one notch in 3D: z $z0 -> $z1, not 1 to 3 cells"
 	# [KIT_WHEEL_TRACKPAD] Ten events of a tenth each, as a trackpad sends a
 	# notch: the voxel in hand steps once (it stepped at each)
 	hand=$(grep -ac "kit editor: in hand" "$c")
 	[ "$hand" = 2 ] ||
 		fail "a notch in ten small wheel events: $((hand - 1)) steps of the voxel in hand, not 1 ($c)"
-	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch; a notch in ten small events steps the voxel in hand once"
+	# [KIT_EDITOR_PAN_ZOOM] A game from the Brimstone Speedway template, its 3D
+	# view by F2: the middle drag pans; a notch in ten events sent at once has
+	# all zoomed two frames after the last, and nothing more after
+	b=$t/brim/out
+	mkdir -p "$b/user/shared"
+	(cd "$here/apps/workbench/templates/brimstone_speedway" &&
+		zip -qrX "$b/user/shared/game.zip" .) || fail "the template not zipped"
+	cat > "$t/brim.json" <<J
+[
+	["nav", "\${URL}"],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["click", "Button", "Don't add"], ["frames", 3],
+	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "kit editor: edit rights: yes", 10],
+	["waitlog_any", "kit editor: kit/controls' edit view 2d", 10],
+	["key", "F2"], ["waitlog", "kit editor: the view is 3D", 10], ["frames", 3],
+	["mouse", 500, 350], ["frames", 2],
+	["event", "kit_cam_where brim start"], ["frames", 3],
+	["mdrag", 500, 350, 650, 350], ["frames", 3],
+	["event", "kit_cam_where brim panned"], ["frames", 3],
+	$(for _ in $(seq 10); do printf '["wheel", 500, 350, -10], '; done)
+	["frames", 2], ["event", "kit_cam_where brim wheeled"], ["frames", 20],
+	["event", "kit_cam_where brim settled"], ["frames", 3]
+]
+J
+	BUILDAT_WORKBENCH_PROJECT=g BUILDAT_WORKBENCH_FROM="$b/user/shared/game.zip" \
+		WEB_DRIVE_VIEWPORT=1024x700@1 "$here/util/web_drive.sh" chrome workbench \
+		"$t/brim.json" "$b" > "$t/brim_drive.txt" 2>&1 ||
+		fail "the Brimstone web drive ($(tail -2 "$t/brim_drive.txt"), $b)"
+	c=$b/page.log
+	at() { grep -aoP "the 3D camera at \K\S+ \S+ \S+(?= \($1\))" "$c" | tail -1; }
+	read -r x0 y0 z0 <<<"$(at "brim start")"
+	read -r x1 y1 z1 <<<"$(at "brim panned")"
+	read -r x2 y2 z2 <<<"$(at "brim wheeled")"
+	read -r x3 y3 z3 <<<"$(at "brim settled")"
+	[ -n "${z0:-}" ] && [ -n "${z3:-}" ] || fail "no camera positions in the Brimstone game ($c)"
+	awk -v a="$x0" -v b="$x1" -v c="$y0" -v d="$y1" 'BEGIN { e = a - b
+		f = c - d; if (f < 0) f = -f; exit !(e >= 5 && f < 0.01) }' ||
+		fail "the middle drag in the Brimstone game: x $x0 -> $x1, y $y0 -> $y1, not 5 or more along -x at its height ($c)"
+	echo "ok: in the Brimstone game the middle drag panned the 3D camera x $x0 -> $x1"
+	# 0.3 of the 40 to the road, all of it two frames after the last event
+	awk -v ax="$x1" -v ay="$y1" -v az="$z1" -v bx="$x2" -v by="$y2" -v bz="$z2" \
+		-v cx="$x3" -v cy="$y3" -v cz="$z3" 'BEGIN {
+		d = sqrt((bx - ax) ^ 2 + (by - ay) ^ 2 + (bz - az) ^ 2)
+		e = sqrt((cx - bx) ^ 2 + (cy - by) ^ 2 + (cz - bz) ^ 2)
+		exit !(d >= 10 && d <= 14 && e < 0.01) }' ||
+		fail "a notch in ten wheel events in the Brimstone game: $x1,$y1,$z1 -> $x2,$y2,$z2 (two frames on) -> $x3,$y3,$z3 (20 on), not one notch at once ($c)"
+	echo "ok: a notch in ten events moved it $x1,$y1,$z1 -> $x2,$y2,$z2 at once, nothing after"
+	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch; a notch in ten small events steps the voxel in hand once; in a Brimstone game the middle drag pans and a notch in ten events zooms at once"
 	exit 0
 fi
 check_tmp kit_cam_min_move; t=$CHECK_TMP
@@ -245,5 +308,77 @@ awk -v a="$y3" -v b="$y4" -v c="$z3" -v d="$z4" 'BEGIN { e = a - b; if (e < 0) e
 	fail "the middle drag up looking along +z: y $y3 -> ${y4:-none}, z $z3 -> ${z4:-none}, not along y alone ($c)"
 echo "ok: the middle drag up panned it y $y3 -> $y4 (z $z4: the XY plane)"
 [ -s "$t/under.png" ] || fail "no screenshot ($t/under.png)"
-echo "PASS: the 3D camera under the ground: the wheel moves it a cell a notch at least, a middle drag pans it at least as if 6 away"
+# [KIT_EDITOR_PAN_ZOOM] A game from the Brimstone Speedway template (a plane
+# game: the editor opens in 2D), its 3D view by F2: the middle drag and a
+# burst of the wheel
+b=$t/brim
+mkdir -p "$b/user/shared"
+(cd "$here/apps/workbench/templates/brimstone_speedway" &&
+	zip -qrX "$b/user/shared/game.zip" .) || fail "the template not zipped"
+cat > "$t/brim.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+EOF
+joined >> "$t/brim.cmds"
+cat >> "$t/brim.cmds" <<EOF
+wait_log_any 10000 kit editor: kit/controls' edit view 2d
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+frames 3
+mouse_pos 500 350
+frames 2
+event kit_cam_where brim start
+mouse_down middle
+frames 2
+mouse_pos 575 350
+frames 2
+mouse_pos 650 350
+frames 2
+mouse_up middle
+frames 2
+event kit_cam_where brim panned
+$(for _ in 1 2 3 4 5; do echo "mouse_wheel 1"; done)
+frames 2
+event kit_cam_where brim wheeled
+frames 20
+event kit_cam_where brim settled
+screenshot $t/brim.png
+sync 5000
+quit
+EOF
+start_server "$t/srv_brim.log" "Listening at" 300 auto env BUILDAT_WORKBENCH_PROJECT=g \
+	BUILDAT_WORKBENCH_FROM="$b/user/shared/game.zip" \
+	bin/buildat_server -m ../apps/workbench -D "$b/user" -l 3 \
+	--sim-rate "$CHECK_RATE" || fail "the Brimstone server did not come up ($t/srv_brim.log)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$t/srv_brim.log" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv_brim.log" | head -1)
+[ -n "$code" ] || fail "no setup code ($t/srv_brim.log)"
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" client brim
+stop
+c=$t/brim.log
+read -r x0 y0 z0 <<<"$(at "brim start")"
+read -r x1 y1 z1 <<<"$(at "brim panned")"
+read -r x2 y2 z2 <<<"$(at "brim wheeled")"
+read -r x3 y3 z3 <<<"$(at "brim settled")"
+[ -n "${z0:-}" ] && [ -n "${z3:-}" ] || fail "no camera positions in the Brimstone game ($c)"
+# From F2's place (some 40 above the road, which is 40 off) 150 pixels pan it
+# some 10 along x, at its height ([KIT_PAN_PLANE]: looking down, XZ)
+awk -v a="$x0" -v b="$x1" -v c="$y0" -v d="$y1" 'BEGIN { e = a - b
+	f = c - d; if (f < 0) f = -f; exit !(e >= 5 && f < 0.01) }' ||
+	fail "the middle drag in the Brimstone game: x $x0 -> $x1, y $y0 -> $y1, not 5 or more along -x at its height ($c)"
+echo "ok: in the Brimstone game the middle drag panned the 3D camera x $x0 -> $x1"
+# Five notches in at once: 1 - 0.7^5 of the 40 to the road (0.8 a notch went
+# 27), the whole of it two frames after the last
+awk -v ax="$x1" -v ay="$y1" -v az="$z1" -v bx="$x2" -v by="$y2" -v bz="$z2" \
+	-v cx="$x3" -v cy="$y3" -v cz="$z3" 'BEGIN {
+	d = sqrt((bx - ax) ^ 2 + (by - ay) ^ 2 + (bz - az) ^ 2)
+	e = sqrt((cx - bx) ^ 2 + (cy - by) ^ 2 + (cz - bz) ^ 2)
+	exit !(d >= 30 && e < 0.01) }' ||
+	fail "five wheel notches in the Brimstone game: $x1,$y1,$z1 -> $x2,$y2,$z2 (two frames on) -> $x3,$y3,$z3 (20 on), not 30 or more at once ($c)"
+echo "ok: five notches moved it $x1,$y1,$z1 -> $x2,$y2,$z2 at once, nothing after"
+echo "PASS: the 3D camera under the ground: the wheel moves it a cell a notch at least, a middle drag pans it at least as if 6 away; in a Brimstone game the middle drag pans and a burst of the wheel zooms at once"
 # vim: set noet ts=4 sw=4:
