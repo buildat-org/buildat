@@ -34,7 +34,9 @@
 #      time; muted by its name and by "<id>:<name>" (the answer's muted);
 #   5. get_state's filters: scene, ids, type, state false (10); (4z37f)
 #      its generators: a kit/lights_out's, its run_generator with a size,
-#      the last run's counts, a run of no generator refused;
+#      the last run's counts, a run of no generator refused; (4z37p) a
+#      put generator's place and run_generator built across ticks, each
+#      answered as it ends, as one call's;
 #   6. get_goal_warnings' level lines: default names, a scene with no way
 #      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
 #      wholly in front of a side view's clip, placed and moved there: in the
@@ -309,6 +311,17 @@ HUB = '''return {
 }
 '''
 CL1 = 'return {on_add = function(e) e:log("hub client v1") end}\n'
+# [KIT_BUILD_SLICED] a generator whose build runs across ticks
+SLOWGEN = '''return {
+	version = 1,
+	params = {n = {type = "number", default = 3, min = 0, max = 10}},
+	on_build = function(c)
+		local x = 0
+		for i = 1, 2000000 do x = (x + i) % 7 end
+		for i = 1, c.params.n do c:child{type = "kit/sign", pos = {i, 0, x}} end
+	end,
+}
+'''
 # (play_input's repeats: an output every tick once it has "go")
 TICKER = '''return {
 	version = 1,
@@ -701,6 +714,22 @@ elif phase == "state":
     g = gen()
     assert g["children"] == 36 and g["last"]["children"] == 36 and g["last"]["kept"] == 25, g
     assert "not a generator" in refused("run_generator", {"id": MT})
+    call("undo")
+    call("undo")
+    # [KIT_BUILD_SLICED] (4z37p) a build across ticks: the answer as it
+    # ends, as one call's
+    call("put_type", {"name": "slowgen", "source": SLOWGEN})
+    t = call("place", {"type": "local/slowgen", "pos": [44, 1, 40]})
+    G = placed(t)
+    assert "built %d again: 3 children (0 kept, 3 new, 0 gone)" % G in t, t
+    t = call("run_generator", {"id": G, "params": {"n": 2}})
+    assert "ran %d's local/slowgen, n 2, built %d again: 2 children (2 kept, 0 new, 1 gone)" % (G, G) in t, t
+    g = [g for g in state().get("generators", []) if g["id"] == G][0]
+    assert g["children"] == 2 and "building" not in g, g
+    ended = re.findall(r"Entity %d's build ended: (\d+) slices" % G, open(out + "/srv.log", errors="replace").read())
+    assert len(ended) == 2 and min(map(int, ended)) >= 2, ended
+    print("  a build across ticks (%s slices): its agent answered as it ended" % ", ".join(ended))
+    call("undo")
     call("undo")
     call("undo")
 elif phase == "goals":

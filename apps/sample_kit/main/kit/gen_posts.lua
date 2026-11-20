@@ -4,7 +4,9 @@
 -- square, none within 3 m of another entity of the scene (c.entities);
 -- past the default cap of 63. In play `reseed` (not 0) builds it again
 -- live from that seed at the round's start (c:generate on itself). Its log
--- says whether c.move_lib (move.lua) is there.
+-- says whether c.move_lib (move.lua) is there. [KIT_BUILD_SLICED] `work`
+-- (not 0) draws that many numbers first (a build some ticks long), its log
+-- then the last post's place; `live_work` the live build's.
 return {
 	version = 1,
 	children = 200,
@@ -12,6 +14,8 @@ return {
 		count = {type = "number", default = 70, min = 0, max = 190},
 		seed = {type = "number", default = 1, min = 0, max = 1000000},
 		reseed = {type = "number", default = 0, min = 0, max = 1000000},
+		work = {type = "number", default = 0, min = 0, max = 20000000},
+		live_work = {type = "number", default = 0, min = 0, max = 20000000},
 		corners = {type = "points", level = true, values = {{name = "h", min = 0, max = 5,
 			default = 1}}, default = {{-8, -8, 1}, {8, -8, 1}, {0, 8, 2}}},
 	},
@@ -25,7 +29,10 @@ return {
 		for _, p in ipairs(c.params.corners) do
 			c:child{type = "kit/sign", name = "corner", pos = {p[1], p[3], p[2]}}
 		end
-		local made, clear = 0, 0
+		for _ = 1, c.params.work do
+			r()
+		end
+		local made, clear, last = 0, 0, ""
 		for _ = 1, c.params.count do
 			local x, z = r() * 20 - 10, r() * 20 - 10
 			local ok = true
@@ -38,17 +45,18 @@ return {
 			if ok then
 				c:child{type = "kit/sign", name = "post", pos = {x, 0, z}}
 				made = made + 1
+				last = string.format(", the last post at %.4f,%.4f", x, z)
 			else
 				clear = clear + 1
 			end
 		end
 		c:log(string.format("gen_posts: seed %d, %d posts, %d kept clear of %d entities%s",
 			c.params.seed, made, clear, #c.entities, type(c.move_lib) == "table" and c.move_lib.world and
-			", move.lua there" or ""))
+			", move.lua there" or "") .. (c.params.work ~= 0 and ", work " .. c.params.work .. last or ""))
 	end,
 	on_start = function(c)
 		if c.params.reseed ~= 0 then
-			c:generate(c.id, {seed = c.params.reseed})
+			c:generate(c.id, {seed = c.params.reseed, work = c.params.live_work})
 		end
 	end,
 }
