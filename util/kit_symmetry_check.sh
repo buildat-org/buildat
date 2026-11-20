@@ -52,12 +52,12 @@ sym() # <param> <value>
 }
 config() # <slices> <angle> <mode> <slice>
 {
-	sym on false
+	sym enabled false
 	sym slices "\"$1\""
 	sym angle "\"$2\""
 	sym mode "\"$3\""
 	sym slice "\"$4\""
-	sym on true
+	sym enabled true
 }
 {
 	cat <<'EOF'
@@ -85,11 +85,11 @@ EOF
 	edit '{"op": "link", "id": 6, "comp": 0, "output": "entered", "to": 8, "input": "open"}'
 	edit '{"op": "place", "type": "kit/sign", "pos": [3, 2, 2], "parent": 5}'
 	# halves straight mirrored +x (the defaults), one undo, on again
-	sym on true
+	sym enabled true
 	echo 'event kit_edit {"op": "undo"}'
 	n=$((n - 1))
 	printf 'wait_log 10000 entities, %d to undo\n' $n
-	sym on true
+	sym enabled true
 	edit '{"op": "move", "id": 5, "pos": [4, 1, 3]}'
 	config halves straight mirrored +z
 	edit '{"op": "move", "id": 5, "pos": [5, 1, 3]}'
@@ -98,7 +98,7 @@ EOF
 	config quadrants straight rotational +x+z
 	edit '{"op": "move", "id": 5, "pos": [2, 1, 6]}'
 	# quadrants at 45: x >= |z|, the teleporter and the part moved in first
-	sym on false
+	sym enabled false
 	edit '{"op": "move", "id": 7, "pos": [6, 1, 2]}'
 	edit '{"op": "move", "id": 5, "pos": [5, 1, 3]}'
 	config quadrants 45 mirrored +x
@@ -178,7 +178,7 @@ def image(M, cs):
 # Segments: from each "on" to the next (an edit's copies logged before it)
 edits = [i for i, l in enumerate(log) if "An edit by" in l or "An undo by" in l]
 marks = [max(j for j in edits if j < i) + 1 for i in edits
-		if "set 4's kit/symmetry on to true" in log[i]]
+		if "set 4's kit/symmetry enabled to true" in log[i]]
 assert len(marks) == 6, marks
 pat = re.compile(r"kit/symmetry 4: copy (\d+) of (\d+), slice (\d+): at ([-\d.]+),([-\d.]+),([-\d.]+) turned ([-\d.]+),([-\d.]+),([-\d.]+): (.*)$")
 for k, (name, maps) in enumerate(configs):

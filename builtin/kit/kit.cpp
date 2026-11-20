@@ -3348,7 +3348,7 @@ struct Module: public interface::Module, public Interface
 			if(it == m_entities.end() || it->first == 1)
 				return 0;
 			if(const Instance *in = symmetry_in(it->second))
-				return in->params.get("on").is_true() ? it->first : 0;
+				return in->params.get("enabled").is_true() ? it->first : 0;
 		}
 		return 0;
 	}
@@ -3540,7 +3540,7 @@ struct Module: public interface::Module, public Interface
 			const Entity &s = m_entities[sid];
 			symmetry::Config c;
 			ss_ why;
-			if(!symmetry_in(s)->params.get("on").is_true())
+			if(!symmetry_in(s)->params.get("enabled").is_true())
 				continue;
 			if(!sym_config(s, c, why)){
 				log_w(MODULE, "Entity %s's kit/symmetry copies nothing: %s",
@@ -3765,7 +3765,7 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < cs_.size(); k++)
 				if(full_type(jstr(cs_.at(k), "type")) == SYMMETRY_TYPE){
 					if(on)
-						*on = cs_.at(k).get("params").get("on").is_true();
+						*on = cs_.at(k).get("params").get("enabled").is_true();
 					return true;
 				}
 			return false;
@@ -3932,7 +3932,7 @@ struct Module: public interface::Module, public Interface
 						on = false;
 				} else {
 					n = m_entities[sid];
-					on = symmetry_in(n)->params.get("on").is_true();
+					on = symmetry_in(n)->params.get("enabled").is_true();
 				}
 				symmetry::Config cf;
 				cfgs[sid] = std::make_pair(on && sym_config(n, cf, w2), cf);
@@ -3980,7 +3980,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_entities){
 			const Instance *in = symmetry_in(p.second);
 			ss_ why;
-			if(in && in->params.get("on").is_true() && scene_of(p.second) == ref &&
+			if(in && in->params.get("enabled").is_true() && scene_of(p.second) == ref &&
 					sym_config(p.second, c, why))
 				return &p.second;
 		}
@@ -4238,7 +4238,7 @@ struct Module: public interface::Module, public Interface
 				continue;
 			json::Value o = json::object();
 			o.set("id", (int64_t)p.first);
-			const bool on = in->params.get("on").is_true();
+			const bool on = in->params.get("enabled").is_true();
 			o.set("on", on);
 			symmetry::Config c;
 			ss_ why;
@@ -5116,27 +5116,45 @@ struct Module: public interface::Module, public Interface
 	// prefab): its own; none, in a file of "kit" 1 or more 1 (Kit writes
 	// each one's since), in one from before the type's current (Kit left
 	// that out then); 0: the type's current, for entity_from_json()
+	// [KIT_API_1] (4z37j (3) B) Kit's types bumped since files had a "kit"
+	// level: the version a file from before left out (its writer did where
+	// it was the type's then); 0 for the rest (today's is that one)
+	// simplified: a bare type name read as Kit's
+	static int64_t legacy_version(ss_ type)
+	{
+		static const sm_<ss_, int64_t> V = {{"kit/effect", 1},
+				{"kit/symmetry", 1}, {"kit/spawn_rule", 1},
+				{"kit/voxel_replace", 1}, {"kit/voxel_states", 1}};
+		if(type.find('/') == ss_::npos)
+			type = "kit/"+type;
+		auto it = V.find(type);
+		return it == V.end() ? 0 : it->second;
+	}
 	static int64_t file_version(const json::Value &file, const json::Value &c)
 	{
 		const json::Value &v = c.get("version");
 		if(v.is_number())
 			return (int64_t)v.as_number();
-		return json::jint(file, "kit", 0) >= 1 ? 1 : 0;
+		return json::jint(file, "kit", 0) >= 1 ? 1 :
+				legacy_version(jstr(c, "type"));
 	}
 	// The file's entities with file_version()'s, each component's
 	static json::Value file_versions(const json::Value &file,
 			const json::Value &es)
 	{
-		if(json::jint(file, "kit", 0) < 1 || !es.is_array())
+		if(!es.is_array())
 			return es;
 		json::Value out = es.deepcopy();
 		for(unsigned i = 0; i < out.size(); i++){
 			if(!out.at(i).get("components").is_array())
 				continue;
 			json::Value &cs = out[i]["components"];
-			for(unsigned k = 0; k < cs.size(); k++)
-				if(cs.at(k).is_object() && cs.at(k).get("version").is_undefined())
-					cs[k].set("version", (int64_t)1);
+			for(unsigned k = 0; k < cs.size(); k++){
+				const int64_t v = cs.at(k).is_object() ?
+						file_version(file, cs.at(k)) : 0;
+				if(v && cs.at(k).get("version").is_undefined())
+					cs[k].set("version", v);
+			}
 		}
 		return out;
 	}
@@ -25946,7 +25964,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_SPAWN_RULE] For a type with `spawn_spots = true` (kit/spawn_rule):
 	// spots = {{x, y, z}...}, at most one a player of its scene (here, alive), a
 	// cell's middle on a solid voxel with two free over it, radius / 2 to
-	// radius from them across, 8 up to 16 down: the voxel one of `on` (names,
+	// radius from them across, 8 up to 16 down: the voxel one of `on_voxels` (names,
 	// "," or " " between; none: any), the sky light in the cell over it within
 	// light_min...light_max (the World's sky light off: 15), none of the kind
 	// (copies of its prefab; apart_any: any creature) within `apart` m, nor
@@ -25969,7 +25987,7 @@ struct Module: public interface::Module, public Interface
 		const bool any = p.get("apart_any").is_true();
 		std::set<ss_> on;
 		{
-			ss_ s = jstr(p, "on");
+			ss_ s = jstr(p, "on_voxels");
 			for(char &ch : s)
 				if(ch == ',')
 					ch = ' ';
@@ -42607,7 +42625,7 @@ struct Module: public interface::Module, public Interface
 		std::map<uint64_t, ss_> sym_was;
 		for(auto &e : m_entities)
 			if(const Instance *si = symmetry_in(e.second))
-				sym_was[e.first] = si->params.get("on").is_true() ?
+				sym_was[e.first] = si->params.get("enabled").is_true() ?
 						si->params.stringify() : "";
 		std::deque<Change> &u = m_undo[p.name];
 		commit(change, &u);
@@ -42615,7 +42633,7 @@ struct Module: public interface::Module, public Interface
 			const Instance *si = symmetry_in(e.second);
 			symmetry::Config cf;
 			ss_ cwhy;
-			if(!si || !si->params.get("on").is_true() || sym_was[e.first] ==
+			if(!si || !si->params.get("enabled").is_true() || sym_was[e.first] ==
 					si->params.stringify() || u.empty() ||
 					!sym_config(e.second, cf, cwhy))
 				continue;

@@ -406,29 +406,29 @@ EOF
 	set_ $id signal '"arm"'
 	set_ $id distance 1.5
 	# [KIT_PARTICLES] [KIT_FEEDBACK_EFFECTS] What the game shows of itself
-	effect '13, 1, 8' 'Blood' '' 'on="hit"' count=30 'color="#e00000"' \
+	effect '13, 1, 8' 'Blood' '' 'trigger="hit"' count=30 'color="#e00000"' \
 		along_hit=true spread=45 scale_by_damage=true speed_min=0.2 speed_max=3 \
 		ttl_min=1 ttl_max=1.2 size_min=0.05 size_max=0.09 land=true fade=0.2 \
 		flash_time=0.1 'flash_color="#ff2020"' arc_time=1.2
-	effect '14, 1, 8' 'Dig crumbs' '' 'on="dig"' 'shape="voxel"' count=14 \
+	effect '14, 1, 8' 'Dig crumbs' '' 'trigger="dig"' 'shape="voxel"' count=14 \
 		spread=70 'offset=[0, 0.4, 0]' speed_min=1 speed_max=3 ttl_min=0.5 \
 		ttl_max=0.9 size_min=0.08 size_max=0.14 land=true
-	effect '15, 1, 8' 'Place dust' '' 'on="place"' 'shape="round"' count=8 \
+	effect '15, 1, 8' 'Place dust' '' 'trigger="place"' 'shape="round"' count=8 \
 		'color="#b0a590"' gravity=0 'offset=[0, -0.4, 0]' speed_min=0.3 \
 		speed_max=0.8 ttl_min=0.4 ttl_max=0.6 size_min=0.2 size_max=0.3 grow=2
-	effect '16, 1, 8' 'Blast debris' '' 'on="blast"' 'shape="voxel"' count=60 \
+	effect '16, 1, 8' 'Blast debris' '' 'trigger="blast"' 'shape="voxel"' count=60 \
 		spread=80 speed_min=3 speed_max=8 ttl_min=0.9 ttl_max=1.3 size_min=0.1 \
 		size_max=0.2 land=true light_time=0.15 light_range=14 light_brightness=4
 	link $id fired $CONTROLS shake
-	effect '17, 1, 8' 'Blast smoke' '' 'on="blast"' 'shape="round"' count=30 \
+	effect '17, 1, 8' 'Blast smoke' '' 'trigger="blast"' 'shape="round"' count=30 \
 		'color="#605850"' 'color2="#303030"' gravity=-1 speed_min=0.5 speed_max=2 \
 		ttl_min=1 ttl_max=2 size_min=0.5 size_max=1 grow=1 fade=0.6 box=1.5
-	effect '18, 1, 8' 'Blast ring' '' 'on="blast"' 'shape="ring"' count=1 \
+	effect '18, 1, 8' 'Blast ring' '' 'trigger="blast"' 'shape="ring"' count=1 \
 		'color="#ffe0a0"' gravity=0 speed_min=0 speed_max=0 ttl_min=0.25 \
 		ttl_max=0.25 size_min=1 size_max=1 grow=24 fade=0.6
-	effect '19, 1, 8' 'Respawn sparkle' '' 'on="respawn"' count=20 \
+	effect '19, 1, 8' 'Respawn sparkle' '' 'trigger="respawn"' count=20 \
 		'color="#80e0ff"' gravity=-1 'offset=[0, 0.5, 0]' size_min=0.05 size_max=0.08
-	effect '20, 1, 8' 'Pickup sparkle' '' 'on="pickup"' count=14 \
+	effect '20, 1, 8' 'Pickup sparkle' '' 'trigger="pickup"' count=14 \
 		'color="#ffe060"' gravity=2 size_min=0.05 size_max=0.08
 	effect '21, 1, 8' 'Flag taken' '' 'where="value"' team_color=true count=24 \
 		'offset=[0, 1, 0]'

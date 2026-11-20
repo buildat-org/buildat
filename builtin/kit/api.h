@@ -689,8 +689,8 @@ namespace interface
 //   or at 45 degrees, mirrored or rotational; `slice` names the authored
 //   one (types/symmetry.lua lists the names). The World is finite, and
 //   square where a map turns x into z (a quarter turn, a diagonal's
-//   mirror); an edit turning it on otherwise is refused, why said. On,
-//   what is under it (its sources, each in the authored slice: one put
+//   mirror); an edit enabling it otherwise is refused, why said. With
+//   `enabled`, what is under it (its sources, each in the authored slice: one put
 //   outside is refused, and so is a kit/wave) has a copy in each other
 //   slice: an authored entity marked {"built": {"by": the kit/symmetry,
 //   "member": source * 8 + slice, "source", "slice"}}, under its source's
@@ -706,7 +706,7 @@ namespace interface
 //   its parameters (each one set its own, an override, kept as the source
 //   changes; prefab_reset gives it the source's again): a move, a rename,
 //   Add/Remove component, a child, a parent, a delete (but with the
-//   kit/symmetry), a link to or from it are refused. Off or deleted, its
+//   kit/symmetry), a link to or from it are refused. Disabled or deleted, its
 //   copies go. Entities outside it stay single. [KIT_AIRSHIPS_2] Hosting
 //   makes the copies a build has none of yet (a template's on kit/symmetry).
 //   A type's `space` = {<param> = <kind>} says what its parameters are
@@ -943,7 +943,7 @@ namespace interface
 //
 // [KIT_VOXEL_STATES] kit/voxel_replace and kit/voxel_states write a box
 // of voxels (their `size`, 16 a side at most), inputs on/off/toggle, the
-// shared state "on" (`start_on` at the start, which they write then),
+// shared state "on" (`enabled` at the start, which they write then),
 // the output "changed" (the new on). voxel_replace: on, every `find` cell
 // becomes `replace` (either may be air), the cells it changed kept (the
 // round's, not shared); off, of those only the ones still `replace` go
@@ -1654,7 +1654,7 @@ namespace interface
 // (16 nearest, from a 16 m bucket index; `sight = true`: also in_sight),
 // c:nearest(type | "player"). [KIT_SPAWN_RULE] A type's `spawn_spots = true`
 // reads, in on_timer, c.spots = {{x, y, z}...} (a spot by each player its
-// parameters allow: prefab, radius, on, light_min, light_max, apart,
+// parameters allow: prefab, radius, on_voxels, light_min, light_max, apart,
 // apart_any) and c.far = {id...} (its copies no player is within despawn
 // m of); kit.cpp's spawn_spots_lit, kit/spawn_rule. A creature whose section is not loaded
 // sleeps: no steps, no timers (they are pushed on by its sleep), and goes

@@ -23,7 +23,7 @@
 #      S writes A.
 #   3. On again, then End: both boxes are the start again (the game's
 #      changes put back; the dug pillar, a build, kept).
-#   4. R's start_on, then Run: R is on at the start, its stones glass.
+#   4. R's enabled, then Run: R is on at the start, its stones glass.
 # The probes' patterns are read from the save's authored row.
 # ([KIT_ROUND_START]) The first End is a fresh save's: sample_kit's floor
 # is merged after the round copied its section, and the merge is made
@@ -118,7 +118,7 @@ EOF
 	echo "frames 5"
 	pat 20 a; echo "wait_log 10000 kit editor: state: 21 entities, $((n + 1)) to undo"
 	pat 21 a; echo "wait_log 10000 kit editor: state: 21 entities, $((n + 2)) to undo"
-	ed '{"op": "set", "id": 17, "comp": 0, "param": "start_on", "value": true}'
+	ed '{"op": "set", "id": 17, "comp": 0, "param": "enabled", "value": true}'
 	echo "wait_log 10000 kit editor: state: 21 entities, $((n + 3)) to undo"
 	echo "click Button \"Run\""
 	echo "wait_log 10000 kit editor: the server is Running (by kitboss)"

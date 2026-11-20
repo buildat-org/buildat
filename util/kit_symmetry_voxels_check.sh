@@ -100,7 +100,7 @@ EOF
 	echo 'wait_log 30000 kit: World: generated again'
 	edit '{"op": "place", "type": "kit/symmetry", "pos": [5, 1, 7]}'
 	# 1. halves straight mirrored +x (the defaults)
-	sym on true
+	sym enabled true
 	cols "7 9" "-7 9"
 	cols "20 -13" "-20 -13"
 	cols "30 25" "-30 25"
@@ -123,11 +123,11 @@ EOF
 	cols "20 -13" "-20 -13"
 	play
 	# 2. quadrants straight rotational +x+z
-	sym on false
+	sym enabled false
 	sym slices '"quadrants"'
 	sym mode '"rotational"'
 	sym slice '"+x+z"'
-	sym on true
+	sym enabled true
 	edit '{"op": "set_voxel", "pos": [5, 12, 6], "voxel": "kit/stone:stair", "param": 0}'
 	info 5 12 6
 	info 6 12 -5

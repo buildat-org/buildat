@@ -12,7 +12,7 @@
 -- within 3 cells of the place (the place's column's ceiling: then it falls
 -- through). A light for light_time s, never with a shadow: light_color,
 -- light_range, light_brightness.
--- When: `on`. "signal": the inputs below. Kit's world events (each at its
+-- When: `trigger`. "signal": the inputs below. Kit's world events (each at its
 -- place, as api.h's on_event says): "dig", "place" (the voxel's material,
 -- for shape voxel), "hit" (at the target's body, a health's hit), "blast"
 -- (the blown voxels' commonest materials), "respawn", "pickup".
@@ -136,15 +136,15 @@ local function fire(c, value)
 end
 
 return {
-	version = 1,
+	version = 2,
 	players = true,
 	teams = true,
-	events = "on",
+	events = "trigger",
 	-- [KIT_SYMMETRY] axis and offset are the world's
 	space = {axis = "world", offset = "world"},
 	gizmo = {shape = "sphere", size = 0.15, color = "#ffa040"},
 	params = {
-		on = {type = "string", default = "signal", choices = {"signal", "dig",
+		trigger = {type = "string", default = "signal", choices = {"signal", "dig",
 			"place", "hit", "blast", "respawn", "pickup"}},
 		where = {type = "string", default = "self",
 			choices = {"self", "value", "who"}},
@@ -204,6 +204,13 @@ return {
 		},
 	},
 	inputs = {burst = "any", on = "any", off = "none", color = "string"},
+	-- [KIT_API_1] version 2: `trigger` was `on`
+	migrate = function(params, from)
+		if from < 2 then
+			params.trigger, params.on = params.on, nil
+		end
+		return params
+	end,
 	outputs = {fired = "position"},
 	on_input = function(c, input, value)
 		if input == "burst" then
