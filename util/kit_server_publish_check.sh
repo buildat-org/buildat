@@ -22,7 +22,8 @@
 #      its licence CC-BY-4.0: crags/loop 1.0.0 on the Aitta.
 #   4. MCP with kitboss's tokens: list_aitta lists it (its
 #      buildat_version), also with get_state's game as its filter;
-#      publish_scene the next (1.0.1, unasked); an
+#      publish_scene the next (1.0.1, unasked), [KIT_API_1] its answer
+#      warning of the experimental touch_axes (local/crag_bike's); an
 #      unlisted Aitta refused for both a publish and an install; a template's
 #      install refused to the Builder token, publish_log too; the Admin
 #      token's publish_log: kitbob's 1.0.0 and kitboss's 1.0.1; each release
@@ -170,7 +171,7 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
 [ -n "$code" ] || fail "no setup code ($SL)"
 url=http://localhost:$WP/api/v1/mcp
 cat > "$t/mcp.py" <<'PY'
-import io, json, sys, urllib.error, urllib.request, zipfile
+import io, json, re, sys, urllib.error, urllib.request, zipfile
 phase, url, tok, adm, aitta = sys.argv[1:6]
 args = sys.argv[6:]
 def post(token, msg):
@@ -244,6 +245,9 @@ elif phase == "pub":
     t = call("publish_scene", {"scene": "loop", "name": "loop", "license": "MIT",
         "aitta": aitta, "description": "The Loop again, by the agent"})
     assert t.startswith("Published crags/loop 1.0.1 as the server on " + aitta), t
+    # [KIT_API_1] (item 10) Crag Trial's bike's touch_axes, warned of
+    assert re.search(r"\. Uses experimental parts of Kit, which may change in any "
+        r"release: .*touch_axes \(types/crag_bike\.lua\)", t), t
     bad = "http://127.0.0.1:1"
     t = call("publish_scene", {"scene": "loop", "name": "loop", "license": "MIT", "aitta": bad}, error=True)
     assert "is not one the server publishes to" in t, t

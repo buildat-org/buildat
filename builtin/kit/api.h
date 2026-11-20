@@ -75,6 +75,44 @@ namespace interface
 // (radians; the box's own, the same on the server and every client), pi,
 // huge and random (one sequence in the box).
 //
+// [KIT_API_1] **What Kit API 1 promises** (kit_plan 4z37j). A game made
+// with Kit API 1 keeps loading and playing the same way in every later
+// Buildat. A builder can rely on: the game file's structure; each builtin
+// type's params, their defaults and meanings, inputs, outputs and state
+// keys (older values move forward through the type's migrations); the
+// server script interface this file documents (c: methods and fields, the
+// handlers, the type-table fields, signal value types); movement
+// declarations, a step's s, i and p, and the 10 official w methods
+// (client_lua/move.lua's head); the client parts' handlers, e, and the 15
+// names of their `kit` table (Client parts, below); and the jam1, blip1 and
+// weave1 formats. Within API 1 Kit only adds things; a renamed thing keeps
+// its old name as an alias until API 2. A Kit that meets a game made with a
+// newer one refuses it with a message saying which Buildat to use, and
+// never loads it half-way.
+// Outside the promise (any release may change them):
+// - what is marked experimental: generators (on_build, c:child, c:link,
+//   c:voxel_box, c.entities, c.move, c:generate, the "points" keys `values`
+//   and `level`), driving bots (c:drive, c.body, c.path, kit/path and
+//   kit/bot's drive, skill and ask; a kit/bot walking the goals is API
+//   1's), kit/parallax and a movement's touch_axes; a type of its own by
+//   `experimental = true`. Publishing a game that uses one warns and is not
+//   blocked (kit.cpp's experimental_names(), pub_experimental());
+// - kit.internal (the whole client module) and w's 18 internal methods;
+// - [KIT_API_1] (item 11) the texts of refusals, errors and log lines, the
+//   MCP tools' texts and get_guide's wording. A script must not branch on
+//   an error's text: a game that needs to tell failures apart gets a
+//   return value from Kit, not a stable message. The checks match these
+//   texts in the tree and change with them;
+// - network protocols (the packets: a client and its server update
+//   together, and nothing persisted is lost);
+// - per-run caps and rates: c:hurt 16 a run, c:explode 4, c:speed and
+//   c:body_var 64, c:set_voxels 4096, sessions 8, c:after 64, c:sound 8,
+//   a generator's 63 children, EXPLODE_RATE, EFFECT_RATE, client parts' 64
+//   bursts and 240 a second, the 0.1 s held period, box.c's STEP_CAP and
+//   string params' lengths. Kit aims to raise them, not lower them; a game
+//   must not rely on meeting one;
+// - the editor's and Workbench's UI.
+//
 // A type is named "<author>/<name>" ([KIT] stage 4b): everyone makes their
 // own door. Kit's own generic types are builtin/kit/types/<name>.lua,
 // author "kit", in every hosting app; the app's are <types_path>/<name>.lua
@@ -157,6 +195,15 @@ namespace interface
 //              title, author}...}: the scenes a kit/scene_info on them
 //              lists (title the scene's name where it gives none), by the
 //              scene's id (kit/ui_scene_list, kit/arena's maps "*")
+//   experimental = true      -- [KIT_API_1] (item 10) the type is outside
+//              Kit API 1 and may change in any release (kit/path,
+//              kit/parallax): get_guide's list says "(experimental)", and
+//              publishing a game that places one warns
+//   container = "<param>"    -- [KIT_API_1] (finding 16; kit/chest's) with
+//              usable = true: a use opens its slots on the player's
+//              inventory screen beside their own, as many as that number
+//              parameter says (1 to 54; 27 without it), its state `slots`
+//              as kit/inventory's
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
@@ -336,6 +383,20 @@ namespace interface
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
 //   on_timer(c, name, player), on_enter(c, by), on_leave(c, by),
 //   on_join(c, by),
+//   [KIT_API_1] (finding 16) on_give(c, by) (kit/starting_kit's: a starting
+//   kit for the player by, at a round's start, and where its `when`
+//   parameter is "spawn" at each respawn too; each instance in the
+//   player's scene or on the root, one under a kit/team its members' only;
+//   a `clear` parameter true empties the inventory first),
+//   on_inventory(c, player, when, kept, gone) (before a player's inventory
+//   changes, when "death", kit/game_rules' on_death, or "round_end"; kept
+//   the slots they will have, gone those dropped or lost; it returns kept,
+//   gone as it wants them, nil as they are; each instance in the player's
+//   scene, on the root or on their entity; simplified: box.c passes on a
+//   boolean return only, so what it returns is not taken yet: no type
+//   uses it),
+//   on_daytime(c, what) (an `environment = true` type's, kit/environment's:
+//   "dawn" as its clock passes 6:00, "dusk" at 18:00, while Running),
 //   on_params(c, changed) (a live edit changed its parameters: {name = the
 //   value before}), on_remove(c) (it is about to go: deleted while Running,
 //   removed by c:remove, or "Restart this" before its on_start)
@@ -577,10 +638,21 @@ namespace interface
 //   [KIT_CLIENT_REACT] (3) **What a client part reaches**: its handlers'
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
-//   client's log only); `local kit = require("buildat/module/kit")`, the
-//   client's Kit (module.lua's and controls.lua's heads list it: kit.pointed,
-//   kit.use, kit.body_state() this client's predicted body, kit.body_pos(),
-//   kit.seated()...; [RACER_FEEL] (2), (3) from a handler or a movement's
+//   client's log only); `local kit = require("buildat/module/kit")`,
+//   [KIT_API_1] these 15 names of the client's Kit and no others (another
+//   is nil; module.lua's, controls.lua's and input.lua's heads say more):
+//   kit.pointed(origin, dir, reach) and kit.use(id), kit.body_state() this
+//   client's predicted body, kit.body_pos(), kit.seated(), kit.ui_keys()
+//   (true while a UI page has the keys: play gets none),
+//   kit.press_action(name, down) (a game action, a type's `actions`,
+//   pressed or let go as by its key), kit.key_down(id) (a key action held),
+//   kit.key_name(id) (its key's name) and kit.key_text(s) (each "[id]" in s
+//   as this client's key, as signs show it), kit.shared, kit.shake,
+//   kit.effect, kit.mark and kit.clear_marks below. kit.internal is the
+//   whole client module, the editor's too: outside Kit API 1 (it may
+//   change in any release; the apps that host Kit use it, and publishing a
+//   game whose part does warns). [RACER_FEEL] (2), (3) from a handler or a
+//   movement's
 //   draw, this client's alone and at once: kit.shake(amount) the camera
 //   shaken as kit/controls' shake input does (0...5, from this frame),
 //   kit.effect{at = {x, y, z}, ...} c:effect's particles (its particle
@@ -588,7 +660,7 @@ namespace interface
 //   past it dropped; effects.lua), kit.mark(x, y, z, yaw, size, color[,
 //   alpha]) a flat ground mark (size {across, along}; a ring of 1024;
 //   ~60 us a mark, the sandbox's Vector3s),
-//   kit.clear_marks()); (2) kit.shared, one plain table per client every
+//   kit.clear_marks(); (2) kit.shared, one plain table per client every
 //   client part of every entity shares (local, nothing sent; a part's
 //   reload, a scene switch, Play and Stop keep it, the connection's end
 //   drops it; keys by convention the type's name; simplified: a part
@@ -629,7 +701,10 @@ namespace interface
 //   keep_own_body: the player's own body stays drawn for them out of play,
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
-//   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
+//   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
+//   c:child, c:link, c:voxel_box, c.entities, c.move, c:generate and the
+//   "points" keys `values` and `level` may change in any release; publishing
+//   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
 //   edit changes its parameters, into that edit (one undo puts the old
@@ -907,7 +982,8 @@ namespace interface
 //   (kit/polygon's params so named): a spike strip a bike's step crashes on
 //   itself, no zone and no round trip.
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
-//   ("param:<name>" as a look's; kit/parallax): the looks under the entity
+//   ("param:<name>" as a look's; kit/parallax; experimental, [KIT_API_1]:
+//   the field and the type may change in any release): the looks under the entity
 //   are drawn by each client offset by its camera's travel from the
 //   entity's place, 1 - follow of it along x and 1 - follow_y up
 //   ([KIT_TOP_DOWN] (5) along z with kit/controls' plane horizontal), with
@@ -1696,7 +1772,15 @@ namespace interface
 // anywhere in its scene; simplified: the pathfinder does not walk a deck);
 // c.seat is the seat held (0: none), c:drive{f, r, fire} its inputs there
 // (-1...1; fire: a holder's jump, a turret's trigger), c:leave_seat() back
-// where it stood; a teleport or a death takes it out. A turret held by a bot
+// where it stood; a teleport or a death takes it out. [KIT_BOT_DRIVE] A
+// driving bot (kit/bot's drive) also steers the players' movement with
+// c:drive; its runs have c.body {pos, vel, yaw, top} (its body as last
+// stepped, the world's; top its movement's speed) and c.path {points =
+// {{x, y, z}...}} (its kit/bot's `path`, else its scene's first kit/path,
+// in the world; nil: none). Experimental ([KIT_API_1]): c:drive, c.body,
+// c.path, kit/path and kit/bot's drive, skill and ask may change in any
+// release, and publishing a type that uses them warns; a kit/bot that
+// walks the goals is Kit API 1's. A turret held by a bot
 // fires its shots as the bot's. c.aim(speed, gravity, d, h, lo, hi): the
 // flattest elevation (radians) between lo and hi whose arc is h m over the
 // muzzle d m out (move.lua's M.aim, by M.arc, which a gunner's impact
