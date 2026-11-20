@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-19)
+# cost: ~2 min (2026-11-20)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/polygon_edit.lua apps/sample_kit/main/kit/gen_*.lua
 # [KIT_GENERATORS] (kit_plan 4q) Generators, in apps/sample_kit; kitboss
 # builds in Kit's editor, Ended:
@@ -12,7 +12,9 @@
 #      11 gone, 43 still under L. 18's lit set back to false.
 #   2. sample_kit/gen_many (70 children) refused at the cap;
 #      sample_kit/gen_runaway's build cut by the meter, refused; neither
-#      placed. A builder's builds are rate-limited: right after the
+#      left placed (the runaway's place made as its build went on across
+#      ticks, undone as it was refused). A builder's builds are
+#      rate-limited: right after the
 #      runaway's a build is refused ("built too often"), and runs again a
 #      few seconds later (the runaway's again, cut by the meter).
 #   3. A kit/spawner (68) copying L. Run: the board's middle lit as a
@@ -31,12 +33,16 @@
 #      by member, the rest gone), both signs kept; Run with seed 2 and
 #      count 40 (one edit); undone: the seed 1 posts back. A corner without
 #      its height
-#      and one out of its range refused. Its reseed 7: Play builds it again
-#      live (its on_start's c:generate): seed 7's posts in the round, the
-#      sign under it kept; Stop: the authored ones back (the save's).
-#   6. (4z37i) Generating...: not for those builds (short); in the wasm
-#      interpreter gen_runaway's (some 2 s, cut by its meter) shown,
-#      then hidden ($t/generating.png).
+#      and one out of its range refused. [KIT_BUILD_SLICED] (4z37p) Builds
+#      some ticks long (its work 800000): Run seed 3 replaced under way by
+#      Run seed 4 (one undo), their posts as Python draws them, each tick's
+#      gap at most the tick, a slice and some; undone. Seed 1 with reseed
+#      7: Play builds it again live (its on_start's c:generate), some ticks
+#      long: seed 7's posts in the round, the sign under it kept; Stop: the
+#      authored ones back (the save's).
+#   6. (4z37i) Generating...: in part 1 for the runaways; in the wasm
+#      interpreter gen_runaway's shown, then hidden as
+#      its place is undone, its build dropped ($t/generating.png).
 #
 #   util/kit_generators_check.sh
 set -u
@@ -89,27 +95,41 @@ refused() # <json> <reason>
 	printf 'event kit_edit %s\nwait_log 30000 kit editor: refused: %s\n' "$1" "$2"
 }
 size() { edit "{\"op\": \"set\", \"id\": 17, \"comp\": 0, \"param\": \"size\", \"value\": $1}" "$2"; }
-# gen_posts' posts from a seed (its Lehmer generator), clear of points: how many
-posts() # <seed> <count> [x,z (relative to G)...]
+# gen_posts' posts from a seed (its Lehmer generator, `work` numbers drawn
+# first), clear of points: how many (with "last": the last one's x,z too)
+posts() # <seed> <count> <work> [last] [x,z (relative to G)...]
 {
 	python3 -I - "$@" <<'PY'
 import sys
-seed, count = int(sys.argv[1]), int(sys.argv[2])
-avoid = [tuple(map(float, a.split(","))) for a in sys.argv[3:]]
-s = seed % 2147483646 + 1
+seed, count, work = map(int, sys.argv[1:4])
+last = sys.argv[4:5] == ["last"]
+avoid = [tuple(map(float, a.split(","))) for a in sys.argv[4 + last:]]
+M = 2147483647
+s = (seed % 2147483646 + 1) * pow(16807, work, M) % M
 def r():
     global s
-    s = s * 16807 % 2147483647
+    s = s * 16807 % M
     return (s - 1) / 2147483646
-n = 0
+n, at = 0, ""
 for _ in range(count):
     x, z = r() * 20 - 10, r() * 20 - 10
-    n += all((x - a) ** 2 + (z - b) ** 2 >= 9 for a, b in avoid)
-print(n)
+    if all((x - a) ** 2 + (z - b) ** 2 >= 9 for a, b in avoid):
+        n, at = n + 1, "%.4f,%.4f" % (x, z)
+print(n, at) if last else print(n)
 PY
 }
-P1=$(posts 1 70) P1C=$(posts 1 70 5,5) P2C=$(posts 2 40 5,5) P7C=$(posts 7 70 5,5)
+P1=$(posts 1 70 0) P1C=$(posts 1 70 0 5,5) P2C=$(posts 2 40 0 5,5)
 [ "$P1" = 70 ] && [ "$P1C" -lt 70 ] || fail "seed 1's posts: $P1, $P1C clear of the sign (pick another place)"
+# [KIT_BUILD_SLICED] builds some ticks long (W numbers drawn first): seed
+# 4's (one that replaced seed 3's under way), seed 1's (each some 0.6 of a
+# builder's allowance: the three in a row); the round's seed 7 with LW
+# (no allowance; past 0.3 s: Generating... says when it ends)
+W=800000 LW=8000000
+read P4W P4L <<< "$(posts 4 70 $W last 5,5)"
+read P1W P1L <<< "$(posts 1 70 $W last 5,5)"
+read P7W P7L <<< "$(posts 7 70 $LW last 5,5)"
+[ "$P4W" != "$P1C" ] && [ "$P1W" != "$P1C" ] && [ "$P1W" != "$P4W" ] ||
+	fail "seed 1's and 4's posts with work $W: $P1W, $P4W, $P1C without (pick another W)"
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -180,7 +200,12 @@ want "$s" "placed kit/lights_out 17 at [0,1,-3], built 17 again: 25 children (0 
 echo "ok: placed, it builds its board under it; a size change builds it again (kept, new, gone), a tile's override kept; an undo puts the old children back"
 want "$t/boss1.log" "kit editor: refused: place: entity 68's sample_kit/gen_many: on_build: sample_kit/gen_many:8: child: 63 a build at most" \
 	"kit editor: refused: place: entity 68's sample_kit/gen_runaway: on_build ran past its budget"
-grep -aq "placed sample_kit/gen_" "$s" && fail "a refused generator was placed ($s)"
+# ([KIT_BUILD_SLICED] the runaway's placed as its build goes on, undone as
+# it is refused)
+grep -a "placed sample_kit/gen_" "$s" | grep -vq "placed sample_kit/gen_runaway 68 at \[10,1,12\], 68's build under way$" &&
+	fail "a refused generator was placed ($s)"
+[ "$(grep -ac "build refused: entity 68's sample_kit/gen_runaway: on_build ran past its budget; its edit undone" "$s")" = 2 ] ||
+	fail "the runaway's place not undone as its build was refused, twice ($s)"
 grep -ao "build refused: \(entity 68's sample_kit/gen_runaway\|generators built too often: again in [1-9] s\)" "$s" |
 	sed 's/: again in .*//' | tr '\n' '|' |
 	grep -qx "build refused: entity 68's sample_kit/gen_runaway|build refused: generators built too often|build refused: entity 68's sample_kit/gen_runaway|" ||
@@ -263,10 +288,25 @@ EOF
 		"set: "
 	refused "{\"op\": \"set\", \"id\": $G, \"comp\": 0, \"param\": \"corners\", \"value\": [[0, 0, 1], [4, 0, 9], [0, 4, 1]]}" \
 		"set: "
-	edit "{\"op\": \"set\", \"id\": $G, \"comp\": 0, \"param\": \"reseed\", \"value\": 7}" $c
+	# [KIT_BUILD_SLICED] builds some ticks long: seed 3's replaced under
+	# way by seed 4's (the two edits one undo), undone; seed 1's with its
+	# reseed 7, the round's live build some ticks long too
+	# (one right after the other: the first under way still)
+	n=$((n + 1)) c=$((46 + 3 + P4W))
+	printf 'event kit_edit %s\nevent kit_edit %s\nwait_log 30000 kit editor: state: %d entities, %d to undo\n' \
+		"$gb, \"params\": {\"seed\": 3, \"work\": $W}}" \
+		"$gb, \"params\": {\"seed\": 4, \"work\": $W}}" $c $n
+	echo 'event kit_edit {"op": "undo"}'
+	n=$((n - 1)) c=$((46 + 3 + P1C))
+	printf 'wait_log 10000 kit editor: state: %d entities, %d to undo\n' $c $n
+	n=$((n + 1)) c=$((46 + 3 + P1W))
+	printf 'event kit_edit %s\nwait_log 30000 kit editor: state: %d entities, %d to undo\n' \
+		"$gb, \"params\": {\"seed\": 1, \"reseed\": 7, \"work\": $W, \"live_work\": $LW}}" $c $n
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
+wait_log 10000 kit: the stopped notice shown: Generating...
+wait_log 30000 kit: the stopped notice hidden
 sync 3000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
@@ -290,16 +330,37 @@ want "$s" "placed sample_kit/gen_posts $G at [-30,1,30], built $G again: $((3 + 
 echo "ok: a generator past 63 children; Run keeps it clear of a sign beside it, its own last posts replaced; Run with params, one undo"
 want "$t/boss2.log" "points [x, y, h] within 256 of its place" "(point 2's h: a number from 0 to 5)"
 echo "ok: a corner without its height, one out of its range, refused"
-want "$s" "sample_kit/gen_posts $G: gen_posts: seed 7, $P7C posts" \
-	"Entity $G generated $G live: $((3 + P7C)) children ($((3 + P1C)) gone)"
-check_save $G $((3 + P1C)) $H
-echo "ok: Play builds it again live from its reseed, Stop puts the authored ones back"
-# (4z37i) 6. Generating...: none for the builds above (each well under
-# 0.3 s); in the wasm interpreter gen_runaway's build runs some 2 s
-# before its meter cuts it: the notice shown, then hidden as it ends
-for l in "$t/boss1.log" "$t/boss2.log"; do
-	! grep -aq "stopped notice shown: Generating" "$l" || fail "Generating... for a short build ($l)"
-done
+want "$s" "Entity $G's build under way dropped" \
+	"ran $G's sample_kit/gen_posts, seed 4, work $W, $G's build under way" \
+	"sample_kit/gen_posts $G: gen_posts: seed 4, $P4W posts, $((70 - P4W)) kept clear of " \
+	"work $W, the last post at $P4L" \
+	"ran $G's sample_kit/gen_posts, seed 4, work $W, built $G again: $((3 + P4W)) children" \
+	"sample_kit/gen_posts $G: gen_posts: seed 1, $P1W posts" "work $W, the last post at $P1L" \
+	"ran $G's sample_kit/gen_posts, live_work $LW, reseed 7, seed 1, work $W, built $G again: $((3 + P1W)) children"
+grep -aq "gen_posts: seed 3," "$s" && fail "seed 3's build, replaced under way, ended ($s)"
+# (a tick's gap at most the tick, a slice and some)
+python3 -I - "$s" "$G" "$CHECK_RATE" <<'PY' || fail "a build's slices or the ticks' gap ($s)"
+import re, sys
+s, G, rate = open(sys.argv[1], errors="replace").read(), sys.argv[2], float(sys.argv[3])
+B = [tuple(map(float, m)) for m in re.findall(r"Entity %s's build ended: (\d+) slices, (\d+) ms, spent \d+ M units, "
+	r"slices ([0-9.]+) ms at most, the ticks' gap ([0-9.]+) ms at most" % G, s)]
+assert len(B) == 3, B
+for n, ms, sl, gap in B:
+	assert n >= 3 and sl < 60 and gap < 1000 / rate + 120, (n, ms, sl, gap)
+print("ok: builds some ticks long: %s (slices, ms, the longest slice, the ticks' worst gap)" % B)
+PY
+echo "ok: a build some ticks long lands as one call's would (the posts as Python draws them), an edit under way replaced by the next, one undo; no tick much past its slice"
+want "$s" "Entity $G generates $G live: its build under way" \
+	"sample_kit/gen_posts $G: gen_posts: seed 7, $P7W posts" "work $LW, the last post at $P7L" \
+	"Entity $G generated $G live: $((3 + P7W)) children ($((3 + P1W)) gone)"
+check_save $G $((3 + P1W)) $H
+echo "ok: Play builds it again live from its reseed (some ticks long), Stop puts the authored ones back"
+# (4z37i) 6. Generating...: in part 1 for the two runaways' builds only
+# (the others well under 0.3 s); in the wasm interpreter gen_runaway's
+# shown, then ([KIT_BUILD_SLICED]) its place undone under way: hidden
+# (the box in the interpreter as it compiles: another may be past 0.3 s)
+[ "$(grep -ac "stopped notice shown: Generating" "$t/boss1.log")" -ge 2 ] ||
+	fail "Generating... not for the two runaways' builds ($t/boss1.log)"
 cat > "$t/boss3.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 kit editor: edit rights: yes
@@ -310,7 +371,8 @@ wait_log 10000 kit: the stopped notice shown: Generating...
 EOF
 echo "screenshot $t/generating.png" >> "$t/boss3.cmds"
 cat >> "$t/boss3.cmds" <<'EOF'
-wait_log 30000 kit editor: refused: place:
+event kit_edit {"op": "undo"}
+wait_log 10000 kit: the stopped notice hidden
 frames 5
 quit
 EOF
@@ -321,6 +383,7 @@ grep -aq "The box is up (interpreter)" "$t/srv3.log" || fail "not the interprete
 [ -s "$t/generating.png" ] || fail "no $t/generating.png"
 grep -aE "I kit +: kit: the stopped notice" "$t/boss3.log" | tail -2 | sed 's/.*notice //' | tr '\n' '|' |
 	grep -qx "shown: Generating...|hidden|" || fail "Generating... not shown, then hidden ($t/boss3.log)"
-echo "ok: Generating... while a build runs past 0.3 s, gone as it ends ($t/generating.png); none for short ones"
-echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output; a generator past 63 children Run again (with params), clear of the scene's entities, its own output replaced, one undo; a points param's values checked; a round's live build from a seed undone at Stop; Generating... for a long build only"
+grep -aq "Entity [0-9]*'s build under way dropped" "$t/srv3.log" || fail "the undo did not drop the build under way ($t/srv3.log)"
+echo "ok: Generating... while a build runs past 0.3 s, gone as its edit is undone ($t/generating.png)"
+echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output; a generator past 63 children Run again (with params), clear of the scene's entities, its own output replaced, one undo; a points param's values checked; builds across ticks land as one call's, one replacing another under way; a round's live build from a seed undone at Stop; Generating... for a long build"
 # vim: set noet ts=4 sw=4:

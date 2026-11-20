@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-20)
-# covers: builtin/kit/kit.cpp src/wasm/engine.cpp apps/workbench/templates/brimstone_speedway/**
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c src/wasm/engine.cpp apps/workbench/templates/brimstone_speedway/**
 # [KIT_INTERP_BUDGETS] Kit's box in the wasm interpreter
 # (BUILDAT_CHECK_WASM_INTERPRETER=1: a cold cache while the box compiles,
 # a server with no compiler): Brimstone Speedway from its template on
 # Workbench, kitboss alone on a headless weston's Xwayland:
 #   1. the Bone Yard's corner 3 given 6 m of run-off (the template's
 #      corners but {60, -34, 10, 6, 0}): local/brim_yard's build runs and
-#      is kept (it ran past a build's budget there);
+#      is kept (it ran past a build's budget there); [KIT_BUILD_SLICED]
+#      across ticks (some 70 slices), no tick's gap much past a tick and a
+#      slice (one call's was some 1.5 s);
 #   2. the time trial: after GO kitboss drives up the first straight (the
 #      check's driver, util/kit_racer_drive.py): the car goes 20 m or more
 #      (its body steps ran past their budget there, and it never moved);
@@ -116,10 +118,20 @@ grep -aq "The box is up (interpreter)" "$SL" || fail "not the interpreter ($SL)"
 m=$(mark "$SL")
 step 60 "kit editor: (state: [0-9]+ entities, 1 to undo|refused)" \
 	"event kit_edit {\"op\": \"set\", \"id\": 1048, \"comp\": 0, \"param\": \"corners\", \"value\": $CORNERS}"
-seen=$(tail -c +$((m + 1)) "$SL" | grep -aE "Entity 1048's build refused|set 1048's local/brim_yard corners" | head -1)
+# ([KIT_BUILD_SLICED] across ticks: the edit made, its build lands later)
+await "$SL" "$m" 90 "Entity 1048's build refused: entity|set 1048's local/brim_yard corners.*built 1048 again"
+seen=$(tail -c +$((m + 1)) "$SL" | grep -aE "Entity 1048's build refused: entity|set 1048's local/brim_yard corners.*built 1048 again" | head -1)
 echo "$seen" | grep -q "set 1048's local/brim_yard corners.*built 1048 again" ||
 	fail "the Bone Yard's corners edit did not build: ${seen:-nothing logged} ($SL)"
-echo "ok: the Bone Yard's corner 3 run-off 6 built in the interpreter: $(echo "$seen" | grep -o "built 1048 again.*" | cut -c1-80) ($(tail -c +$((m + 1)) "$SL" | grep -aoP "A R call: \K[0-9]+ ms, ok, spent [0-9]+" | sort -t' ' -k5 -n | tail -1))"
+# (no tick much past its slice: the ticks' gap at most a tick, a slice and some)
+ended=$(tail -c +$((m + 1)) "$SL" | grep -aoP "Entity 1048's build ended: \K.*" | head -1)
+python3 -I - "$ended" <<'PY' || fail "the build's slices or the ticks' gap: ${ended:-none} ($SL)"
+import re, sys
+n, ms, sl, gap = map(float, re.match(r"(\d+) slices, (\d+) ms, spent \d+ M units, slices ([0-9.]+) ms at most, "
+	r"the ticks' gap ([0-9.]+) ms at most", sys.argv[1]).groups())
+assert n >= 3 and sl < 80 and gap < 250, (n, sl, gap)
+PY
+echo "ok: the Bone Yard's corner 3 run-off 6 built in the interpreter: $(echo "$seen" | grep -o "built 1048 again.*" | cut -c1-80) (across ticks: $ended)"
 # 2. The trial: the car drives
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: ui full screen [0-9]+ up"

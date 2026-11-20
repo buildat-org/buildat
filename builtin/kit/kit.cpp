@@ -87,12 +87,21 @@ static const int64_t TICK_SLICES = 4;
 // and their burst, and how often "held" comes
 static const size_t MAX_TYPE_ACTIONS = 8, MAX_ACTIONS = 16;
 static const double ACTION_RATE = 20, ACTION_BURST = 40;
-// A builder's generator builds: their allowance in calls' budgets (a
-// build costs what its run spent, BUILD_MIN at least), BUILD_RATE a second
-// coming back up to BUILD_BURST; an edit that would build with less is
-// refused. simplified: a refusal, not a build deferred; the allowance a
-// peer's, not a name's (a reconnect starts it full; a slow way round it)
+// A builder's generator builds: their allowance in a build's call budgets
+// (a build costs what its run spent, BUILD_MIN at least; [KIT_BUILD_SLICED]
+// owed BUILD_BURST at most), BUILD_RATE a second coming back up to
+// BUILD_BURST; an edit that would build with less is refused.
+// simplified: a refusal, not a build deferred; the allowance a peer's, not
+// a name's (a reconnect starts it full; a slow way round it)
 static const double BUILD_RATE = 0.2, BUILD_BURST = 1, BUILD_MIN = 0.05;
+// [KIT_INTERP_BUDGETS] In the interpreter a body's batch and a build get
+// these times the engine's budget (box_call())
+static const int64_t INTERP_STEP = 4, INTERP_BUILD = 16;
+// [KIT_BUILD_SLICED] (kit_plan 4z37p) A generator's build in slices of this
+// time each (the box's count hook yields it), a slice a tick, BUILD_CAP of
+// a build's call budgets at most in all
+static const int64_t BUILD_SLICE_MS = 10, BUILD_SLICE_MS_INTERP = 20;
+static const int64_t BUILD_CAP = 10;
 static const int64_t HELD_EVERY_US = 100000;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // [KIT_CUSTOM_TYPES] A project's own types (local/<name>): how many, each
@@ -742,6 +751,9 @@ struct Change
 	uint64_t kept_id = 0;
 	size_t kept_comp = 0;
 	json::Value kept_before;
+	// [KIT_BUILD_SLICED] which commit() made it (a sliced build's landing
+	// joins its edit's)
+	uint64_t serial = 0;
 };
 
 // [KIT] stage 4e: a scene's World (terrain.h; [KIT_SCENES] one a scene):
@@ -1579,6 +1591,11 @@ struct Module: public interface::Module, public Interface
 	ss_ m_bench_saved;
 	// [KIT_GENERATORS] a build's call under way (box_call(): its budget)
 	bool m_building = false;
+	// [KIT_BUILD_SLICED] a sliced build's units left of its BUILD_CAP (0:
+	// one call's), and the box's count (start_box(): a new box knows no
+	// build under way)
+	int64_t m_build_left = 0;
+	uint64_t m_box_n = 0;
 	// Those that did not load (logged once), and those loading now (a
 	// prefab naming itself is none)
 	std::set<ss_> m_bad_prefabs, m_prefab_loading;
@@ -1772,6 +1789,7 @@ struct Module: public interface::Module, public Interface
 			b.reset(m_server->create_wasm_box(MODULE, "box", why));
 		}
 		m_box = std::move(b);
+		m_box_n++;
 		if(!m_box)
 			return false;
 		// The types again: a new box knows none. One that fails here
@@ -1825,8 +1843,10 @@ struct Module: public interface::Module, public Interface
 	// inventory provider (the box's last mark "P")
 	bool box_call(const ss_ &request, ss_ &answer, ss_ &error,
 			bool *runaway = nullptr, int64_t *spent = nullptr,
-			bool *in_provider = nullptr)
+			bool *in_provider = nullptr, bool *pending = nullptr)
 	{
+		if(pending)
+			*pending = false;
 		if(runaway)
 			*runaway = false;
 		if(in_provider)
@@ -1860,14 +1880,14 @@ struct Module: public interface::Module, public Interface
 		// 3 s there (the Windows box's CPU slower). INTERP_BUILD 16 is that
 		// BUDGET in the interpreter's units: what builds compiled builds
 		// there too. The builder's allowance (build_tokens: a build's units
-		// over budget()) keeps such stalls as rare in time as compiled
-		// ones: after the Bone Yard's build, 45 s to the next. simplified: a
-		// build stalls the server for its whole run; built across ticks is
-		// the upgrade (kit_plan 4z37p)
-		static const int64_t INTERP_STEP = 4, INTERP_BUILD = 16;
+		// over budget()) kept such stalls as rare in time as compiled
+		// ones. [KIT_BUILD_SLICED] Builds run across ticks now (a slice a
+		// tick, BUILD_CAP of these budgets in all: m_build_left what is left
+		// of it, 0 for one call's), the allowance in this budget's units
 		const int64_t slice = request[0] == 'D' || request[0] == 'L' ?
 				m_box->budget() :
-				m_building ? m_box->budget() * (interp ? INTERP_BUILD : 1) :
+				m_building ? std::min(m_box->budget() * (interp ? INTERP_BUILD : 1),
+						m_build_left > 0 ? m_build_left : INT64_MAX) :
 				request[0] == 'S' ? m_box->budget() / 4 * (interp ? INTERP_STEP : 1) :
 				m_box->budget() / SLICE_DIV * (interp ? TICK_SLICES : 1);
 		m_box->set_call_budget(slice);
@@ -1918,6 +1938,12 @@ struct Module: public interface::Module, public Interface
 		// The marks of calls into the inventory provider, ahead of it
 		const size_t marks = out.find_first_not_of("Pp");
 		out = marks == ss_::npos ? ss_() : out.substr(marks);
+		// ([KIT_BUILD_SLICED] "Y": a build's slice, the build under way)
+		if(!out.empty() && out[0] == 'Y' && pending){
+			*pending = true;
+			answer.clear();
+			return true;
+		}
 		if(out.empty() || (out[0] != 'O' && out[0] != 'E')){
 			error = "no answer";
 			return false;
@@ -9256,13 +9282,14 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AGENTS] a tool's answer that would come past the network's
 		// ten seconds: said to be on its way
 		const int64_t now = interface::os::time_us();
-		sv_<size_t> late;
+		sv_<std::pair<size_t, ss_>> late;
 		for(auto &w : m_mcp_waits)
 			if(now - w.second.since > 8000000)
-				late.push_back(w.first);
-		for(size_t peer : late)
-			mcp_answer(peer, "Still going after 8 s: list_aitta, get_state or "
-					"publish_log says when it is done", false);
+				late.push_back(std::make_pair(w.first, w.second.late));
+		for(auto &l : late)
+			mcp_answer(l.first, !l.second.empty() ? l.second : "Still going "
+					"after 8 s: list_aitta, get_state or publish_log says when it "
+					"is done", false);
 	}
 
 	storage::Store* pub_store()
@@ -9944,9 +9971,11 @@ struct Module: public interface::Module, public Interface
 		size_t http = 0;
 		json::Value id;
 		int64_t since = 0;
+		ss_ late; // (said past 8 s; empty: a publish's)
 	};
 	std::map<size_t, McpWait> m_mcp_waits;
 	size_t m_mcp_defer = 0;
+	ss_ m_mcp_late;
 
 	void pub_wait(size_t peer)
 	{
@@ -18394,7 +18423,34 @@ struct Module: public interface::Module, public Interface
 		ss_ why;
 		const int64_t t0 = interface::os::time_us();
 		m_build_log = json::array();
-		const bool built = build_of(g, ci, pf, why);
+		// [KIT_BUILD_SLICED] across ticks: made as it ends (live_land())
+		int64_t spent = 0;
+		const int st = build_start(g, ci, pf, why, spent, true, "");
+		if(st == 0){
+			SlicedBuild &b = m_sliced.back();
+			b.maker = maker;
+			b.maker_comp = comp;
+			b.maker_by = by;
+			b.round = m_motion_base;
+			log_i(MODULE, "Entity %s generates %s live: its build under way",
+					cs(itos(maker)), cs(itos(id)));
+			return;
+		}
+		live_built(maker, comp, by, id, ci, st > 0, pf, why, t0);
+	}
+
+	// live_generate()'s build ended (built: pf, else why)
+	void live_built(uint64_t maker, size_t comp, const ss_ &by, uint64_t id,
+			size_t ci, bool built, json::Value &pf, const ss_ &why, int64_t t0)
+	{
+		auto refuse = [&](const ss_ &why){
+			log_w(MODULE, "Entity %s: generate %s refused: %s", cs(itos(maker)),
+					cs(itos(id)), cs(why));
+			add_log(maker, "generate "+itos(id)+" refused: "+why);
+		};
+		auto mi = m_entities.find(maker);
+		if(mi == m_entities.end() || comp >= mi->second.comps.size())
+			return;
 		GenRun &gr = m_gen_runs[id];
 		gr = GenRun();
 		gr.t = time(nullptr);
@@ -20715,8 +20771,8 @@ struct Module: public interface::Module, public Interface
 
 	// The composition's generators (an authored entity with an on_build
 	// type, not a copy's): {id, name, type, scene, children (built by it
-	// now), comp (its index), last: {time, by, ok, children, kept, gone, ms,
-	// why | log, live}}
+	// now), comp (its index), building (a build under way), last: {time,
+	// by, ok, children, kept, gone, ms, why | log, live}}
 	json::Value generators_json(const ss_ &only_scene = "*")
 	{
 		json::Value out = json::array();
@@ -20742,6 +20798,9 @@ struct Module: public interface::Module, public Interface
 				}
 			g.set("scene", sn);
 			g.set("children", (int64_t)kids[e.id]);
+			// [KIT_BUILD_SLICED] its build under way (its children the last's)
+			if(building(e.id))
+				g.set("building", true);
 			auto ri = m_gen_runs.find(e.id);
 			if(ri != m_gen_runs.end()){
 				const GenRun &r = ri->second;
@@ -20788,20 +20847,12 @@ struct Module: public interface::Module, public Interface
 		// Generating... while it lasts past 0.3 s (ui.lua)
 		ss_ gen_scene;
 		scene_of(e, &gen_scene);
-		auto generating = [&](bool on){
-			network::access(m_server, [&](network::Interface *inetwork){
-				for(auto &o : m_peers)
-					if(gen_scene.empty() || o.second.scene == gen_scene)
-						inetwork->send(o.first, "kit:generating",
-								on ? "{\"on\": true}" : "{\"on\": false}");
-			});
-		};
-		generating(true);
+		generating(gen_scene, true);
 		m_building = true;
 		const bool called = box_call(request_of(e, e.comps[comp], r), answer,
 				error, &runaway, &spent);
 		m_building = false;
-		generating(false);
+		generating(gen_scene, false);
 		if(spent_out)
 			*spent_out = spent;
 		auto it = m_entities.find(e.id);
@@ -20812,6 +20863,25 @@ struct Module: public interface::Module, public Interface
 			add_log(e.id, why);
 			return false;
 		}
+		return build_answer(e, comp, answer, pf, why);
+	}
+
+	// (4z37i) "kit:generating" {"on"} to those in a scene ("": every
+	// scene's, a generator on the root)
+	void generating(const ss_ &gen_scene, bool on)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &o : m_peers)
+				if(gen_scene.empty() || o.second.scene == gen_scene)
+					inetwork->send(o.first, "kit:generating",
+							on ? "{\"on\": true}" : "{\"on\": false}");
+		});
+	}
+
+	// on_build's answer as the build's children (build_of())
+	bool build_answer(const Entity &e, size_t comp, const ss_ &answer,
+			json::Value &pf, ss_ &why)
+	{
 		const json::Value fx = json::load_string(answer.c_str());
 		const json::Value &lines = fx.get("log");
 		for(unsigned i = 0; i < lines.size(); i++)
@@ -20931,6 +21001,407 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		return true;
+	}
+
+	// ---- [KIT_BUILD_SLICED] (kit_plan 4z37p) A generator's build across
+	// ticks: on_build in a coroutine of the box's ("B"), its count hook
+	// yielding it after BUILD_SLICE_MS. The first slice runs at once: a
+	// build that ends there is as it always was (the edit with it, or
+	// refused). One that does not goes on a slice a tick (builds_tick(), the
+	// builds under way in turn, one a tick), its children applied at once as
+	// it ends, never half of them:
+	// - an edit's: the edit is made at once, the generator's children as they
+	//   were ("Generating..." in its scene); as the build ends, the op
+	//   "build" again with its answer (m_landing), one undo with the edit
+	//   (sliced_steps()). Refused (on_build's error, BUILD_CAP), the edit is
+	//   undone if it is still its builder's last, and the builder told. An
+	//   edit building the same generator again drops the one under way, the
+	//   two edits one undo; an undo of the edit drops it;
+	// - a round's (c:generate): made as it ends, if the round is that one.
+	// Each builder's allowance charged a slice at a time.
+	// simplified: one build's slice a tick, whoever's; a round's live build
+	// lands that many ticks later
+	struct SlicedBuild
+	{
+		uint64_t n = 0, id = 0, session = 0, box = 0;
+		size_t comp = 0;
+		// its type and parameters as built, its request, its scene
+		ss_ key, request, scene, answer;
+		int64_t spent = 0, t0 = 0, slices = 0, tick = 0, gap = 0, worst = 0;
+		// An edit's: its builder, op, what it said, undo step (bound by
+		// commit()), the step of the build it replaced (joined), the ids
+		// before and after; mcp: its agent's answer waits for it
+		size_t peer = 0;
+		ss_ by, op, what;
+		bool bound = false, mcp = false;
+		uint64_t step = 0, joins = 0, next0 = 0, next1 = 0;
+		// A round's: its maker, the c:generate's, the round (its start)
+		bool live = false;
+		uint64_t maker = 0;
+		size_t maker_comp = 0;
+		ss_ maker_by;
+		int64_t round = 0;
+	};
+	std::deque<SlicedBuild> m_sliced;
+	uint64_t m_sliced_n = 0, m_change_serial = 0;
+	int64_t m_tick_n = 0, m_tick_at = 0;
+	// The edit under way (on_edit()): its peer (0: none; a build outside an
+	// edit is one call, as one with m_build_sync), op and next id before it
+	size_t m_edit_peer = 0;
+	ss_ m_edit_op;
+	uint64_t m_edit_next0 = 0;
+	int m_build_sync = 0;
+	const SlicedBuild *m_landing = nullptr;
+
+	ss_ build_key(const Entity &e, size_t comp)
+	{
+		return e.comps[comp].type+"\n"+e.comps[comp].params.stringify();
+	}
+	bool box_interp()
+	{
+		return m_box && m_box->engine_name().compare(0, 11, "interpreter") == 0;
+	}
+	// A build's call budget (the allowance's unit)
+	int64_t build_unit()
+	{
+		return m_box ? std::max<int64_t>(1, m_box->budget() *
+				(box_interp() ? INTERP_BUILD : 1)) : 1;
+	}
+	bool building(uint64_t id)
+	{
+		for(const SlicedBuild &b : m_sliced)
+			if(b.id == id)
+				return true;
+		return false;
+	}
+
+	// The box's coroutine of b gone
+	void build_drop_box(SlicedBuild &b)
+	{
+		if(m_box && b.box == m_box_n){
+			ss_ a, e;
+			box_call("X"+itos(b.n), a, e);
+		}
+		b.box = 0;
+	}
+	// b ended or dropped (not in m_sliced): Generating... off in its scene
+	// unless another there goes on
+	void build_off(const SlicedBuild &b)
+	{
+		for(const SlicedBuild &o : m_sliced)
+			if(o.session == b.session && o.scene == b.scene)
+				return;
+		if(b.session && !m_sessions.count(b.session))
+			return;
+		SessionScope sc(*this, b.session);
+		generating(b.scene, false);
+	}
+	// Those matching f dropped
+	void build_cancel(const std::function<bool(const SlicedBuild&)> &f)
+	{
+		for(auto it = m_sliced.begin(); it != m_sliced.end();){
+			if(!f(*it)){
+				++it;
+				continue;
+			}
+			SlicedBuild b = *it;
+			it = m_sliced.erase(it);
+			build_drop_box(b);
+			build_off(b);
+			log_i(MODULE, "Entity %s's build under way dropped", cs(itos(b.id)));
+			if(b.mcp)
+				mcp_answer(b.peer, b.what+"; "+itos(b.id)+"'s build under way "
+						"dropped: an edit after it built it again or undid it", false);
+		}
+	}
+
+	// One slice of b, in its session: 1 ended (b.answer), 0 under way, -1
+	// failed (why)
+	int build_slice(SlicedBuild &b, ss_ &why)
+	{
+		if(!m_box){
+			why = "on_build: no box";
+			return -1;
+		}
+		const int64_t cap = BUILD_CAP * build_unit();
+		ss_ req, ms = itos(box_interp() ? BUILD_SLICE_MS_INTERP :
+				BUILD_SLICE_MS);
+		if(b.box != m_box_n){
+			// (again from its start in a new box)
+			req = "B"+itos(b.n)+" "+ms;
+			req += '\0';
+			req += b.request;
+			b.box = m_box_n;
+		} else {
+			req = "Y"+itos(b.n)+" "+ms;
+		}
+		ss_ answer, error;
+		bool runaway = false, pending = false;
+		int64_t spent = 0;
+		const int64_t t0 = interface::os::time_us();
+		m_building = true;
+		m_build_left = std::max<int64_t>(1, cap - b.spent);
+		const bool called = box_call(req, answer, error, &runaway, &spent,
+				nullptr, &pending);
+		m_building = false;
+		m_build_left = 0;
+		b.worst = std::max(b.worst, interface::os::time_us() - t0);
+		b.spent += spent;
+		b.slices++;
+		b.tick = m_tick_n;
+		m_meter.spent += spent;
+		auto it = m_entities.find(b.id);
+		if(it != m_entities.end() && b.comp < it->second.comps.size())
+			it->second.comps[b.comp].spent += spent;
+		if(called && !pending){
+			b.answer = answer;
+			return 1;
+		}
+		if(called && b.spent < cap)
+			return 0;
+		why = runaway || called ? "on_build ran past its budget" :
+				"on_build: "+error;
+		build_drop_box(b);
+		add_log(b.id, why);
+		return -1;
+	}
+
+	// e's build started, its first slice run: 1 ended (pf), 0 under way
+	// (m_sliced's last), -1 refused (why); spent the slice's. One under way
+	// of the same generator dropped (by's own edit's: its step joined)
+	int build_start(const Entity &e, size_t comp, json::Value &pf, ss_ &why,
+			int64_t &spent, bool live, const ss_ &by)
+	{
+		uint64_t joins = 0;
+		for(const SlicedBuild &o : m_sliced)
+			if(o.id == e.id && o.live == live && o.bound && o.by == by)
+				joins = o.step;
+		build_cancel([&](const SlicedBuild &o){
+			return o.id == e.id && o.live == live;
+		});
+		SlicedBuild b;
+		b.n = ++m_sliced_n;
+		b.id = e.id;
+		b.comp = comp;
+		b.session = m_active;
+		b.key = build_key(e, comp);
+		b.live = live;
+		b.joins = joins;
+		b.t0 = interface::os::time_us();
+		Run r;
+		r.entity = e.id;
+		r.comp = comp;
+		r.handler = "on_build";
+		b.request = request_of(e, e.comps[comp], r).substr(1); // (its "R" off)
+		scene_of(e, &b.scene);
+		generating(b.scene, true);
+		const int st = build_slice(b, why);
+		spent = b.spent;
+		if(st == 0){
+			m_sliced.push_back(b);
+			return 0;
+		}
+		build_off(b);
+		if(st < 0)
+			return -1;
+		return build_answer(e, comp, b.answer, pf, why) ? 1 : -1;
+	}
+
+	// [KIT_BUILD_SLICED] The builds' slice this tick: one, the next in turn
+	// (none that ran since the last tick)
+	void builds_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		const int64_t gap = m_tick_at ? now - m_tick_at : 0;
+		m_tick_at = now;
+		// (the gaps while it runs on: not the edit's before its first tick)
+		for(SlicedBuild &b : m_sliced)
+			if(b.slices >= 2)
+				b.gap = std::max(b.gap, gap);
+		const bool ran = !m_sliced.empty() && m_sliced.front().tick == m_tick_n;
+		m_tick_n++;
+		if(m_sliced.empty() || ran || !m_box)
+			return;
+		SlicedBuild b = m_sliced.front();
+		m_sliced.pop_front();
+		if(b.session && !m_sessions.count(b.session)){
+			build_drop_box(b);
+			return;
+		}
+		SessionScope sc(*this, b.session);
+		ss_ why;
+		const int64_t was = b.spent;
+		const int st = build_slice(b, why);
+		auto pi = m_peers.find(b.peer);
+		if(!b.live && pi != m_peers.end())
+			pi->second.build_tokens = std::max(-BUILD_BURST,
+					pi->second.build_tokens - (double)(b.spent - was) / build_unit());
+		if(st == 0){
+			m_sliced.push_back(b);
+			return;
+		}
+		build_off(b);
+		build_land(b, st > 0, why);
+	}
+
+	// b ended (ok: b.answer), in its session
+	void build_land(SlicedBuild &b, bool ok, ss_ why)
+	{
+		const int64_t us = interface::os::time_us() - b.t0;
+		log_i(MODULE, "Entity %s's build %s: %lld slices, %lld ms, spent %lld M "
+				"units, slices %.1f ms at most, the ticks' gap %.1f ms at most",
+				cs(itos(b.id)), ok ? "ended" : "refused", (long long)b.slices,
+				(long long)(us / 1000), (long long)(b.spent / 1000000),
+				b.worst / 1e3, b.gap / 1e3);
+		if(b.live)
+			return live_land(b, ok, why);
+		auto ei = m_entities.find(b.id);
+		auto pi = m_peers.find(b.peer);
+		const ss_ type = ei != m_entities.end() && b.comp <
+				ei->second.comps.size() ? ei->second.comps[b.comp].type : "";
+		if(!ok){
+			why = "entity "+itos(b.id)+"'s "+type+": "+why;
+			GenRun &gr = m_gen_runs[b.id];
+			gr = GenRun();
+			gr.t = time(nullptr);
+			gr.by = b.by;
+			gr.us = us;
+			gr.why = why;
+			bool undone = false;
+			if(pi != m_peers.end()){
+				undone = build_undo(b);
+				const ss_ text = (b.op.empty() ? ss_("build") : b.op)+": "+why+
+						(undone ? ss_() : ss_(" (the edit stays: more came after it)"));
+				if(b.mcp)
+					mcp_answer(b.peer, "Refused: "+text, true);
+				else
+					network::access(m_server, [&](network::Interface *inetwork){
+						inetwork->send(b.peer, "kit:edit_refused", text);
+					});
+			}
+			log_i(MODULE, "Entity %s's build refused: %s%s", cs(itos(b.id)),
+					cs(why), undone ? "; its edit undone" : "");
+			return;
+		}
+		ss_ dropped;
+		if(ei == m_entities.end() || type.empty() ||
+				build_key(ei->second, b.comp) != b.key)
+			dropped = "the generator changed";
+		else if(pi == m_peers.end() || session_of_peer(b.peer) != b.session)
+			dropped = "its builder left";
+		if(!dropped.empty()){
+			log_i(MODULE, "Entity %s's build dropped: %s", cs(itos(b.id)),
+					cs(dropped));
+			add_log(b.id, "its build dropped: "+dropped);
+			if(b.mcp)
+				mcp_answer(b.peer, b.what+"; "+itos(b.id)+"'s build dropped: "+
+						dropped, false);
+			return;
+		}
+		// The op "build" again, its answer this one's: one undo with the edit
+		json::Value j = json::object();
+		j.set("op", "build");
+		j.set("id", (int64_t)b.id);
+		j.set("comp", (int64_t)b.comp);
+		m_landing = &b;
+		bool made;
+		if(b.mcp){
+			// (its agent's answer the edit's as one call's would have been)
+			ss_ refused, warnings;
+			m_edit_what.clear();
+			made = agent_edit(b.peer, j, refused, warnings);
+			mcp_answer(b.peer, made ? m_edit_what+warnings : "Refused: "+refused+
+					warnings, !made);
+		} else {
+			on_edit(network::Packet(b.peer, "kit:edit", j.stringify()));
+			made = !m_edit_what.empty();
+		}
+		m_landing = nullptr;
+		// Its children refused (their checks): as one call's, the edit undone
+		if(!made && build_undo(b))
+			log_i(MODULE, "Entity %s's build refused as it ended; its edit undone",
+					cs(itos(b.id)));
+	}
+
+	// b's edit undone, if it is still its builder's last undo
+	bool build_undo(const SlicedBuild &b)
+	{
+		auto pi = m_peers.find(b.peer);
+		if(pi == m_peers.end() || !b.bound)
+			return false;
+		Peer &p = pi->second;
+		std::deque<Change> &u = m_undo[p.name];
+		if(u.empty() || u.back().serial != b.step)
+			return false;
+		const Change c = u.back();
+		u.pop_back();
+		WorldScope ws(m_w, world_named(p.scene));
+		if(c.stroke == -3)
+			undo_terrain(c, p);
+		commit(c.before, nullptr);
+		if(m_next_id == b.next1)
+			m_next_id = b.next0;
+		world_check(p.name);
+		return true;
+	}
+
+	// A round's build ended: made, if the round is still the one it began in
+	void live_land(SlicedBuild &b, bool ok, const ss_ &why)
+	{
+		auto gi = m_entities.find(b.id);
+		if(!m_session.running || m_motion_base != b.round ||
+				gi == m_entities.end() || b.comp >= gi->second.comps.size() ||
+				gi->second.comps[b.comp].type != b.key.substr(0, b.key.find('\n'))){
+			log_i(MODULE, "Entity %s's live build of %s dropped: its round or "
+					"the generator changed", cs(itos(b.maker)), cs(itos(b.id)));
+			return;
+		}
+		json::Value pf;
+		ss_ w = why;
+		const bool built = ok && build_answer(gi->second, b.comp, b.answer, pf, w);
+		live_built(b.maker, b.maker_comp, b.maker_by, b.id, b.comp, built, pf, w,
+				b.t0);
+	}
+
+	// commit()'s undo step u.back(): a landing's joined with its edit's, a
+	// build this edit started bound to it (one it replaced: joined with its)
+	void sliced_steps(std::deque<Change> &u)
+	{
+		if(!m_edit_peer || u.empty())
+			return;
+		auto join = [&](uint64_t step){
+			if(!step || u.size() < 2 || u[u.size() - 2].serial != step)
+				return;
+			const Change nc = u.back();
+			u.pop_back();
+			Change &was = u.back();
+			// (an entity in both: the older's row, from before both)
+			std::set<uint64_t> had;
+			for(const auto &r : was.before)
+				had.insert(r.first);
+			for(const auto &r : nc.before)
+				if(!had.count(r.first))
+					was.before.push_back(r);
+			was.cells.insert(nc.cells.begin(), nc.cells.end());
+			was.samples.insert(nc.samples.begin(), nc.samples.end());
+			was.decor.insert(was.decor.end(), nc.decor.begin(), nc.decor.end());
+			if(nc.stroke == -3){
+				was.stroke = -3;
+				if(!was.scene)
+					was.scene = nc.scene;
+			}
+		};
+		if(m_landing && m_landing->bound)
+			join(m_landing->step);
+		for(SlicedBuild &b : m_sliced){
+			if(b.live || b.bound || b.peer != m_edit_peer)
+				continue;
+			join(b.joins);
+			b.step = u.back().serial;
+			b.bound = true;
+			b.next0 = m_edit_next0;
+			b.next1 = m_next_id;
+		}
 	}
 
 	// The generator g (its row after the edit, n) built again into the
@@ -21293,12 +21764,16 @@ struct Module: public interface::Module, public Interface
 			const Entity &n = gi.first;
 			const size_t ci = gi.second;
 			json::Value pf;
+			// [KIT_BUILD_SLICED] a sliced build's end: its answer (charged as
+			// it ran)
+			const SlicedBuild *land = m_landing && m_landing->id == n.id &&
+					m_landing->comp == ci ? m_landing : nullptr;
 			// The builder's allowance, charged what the build spent
 			const int64_t t_us = interface::os::time_us();
 			p.build_tokens = std::min(BUILD_BURST, p.build_tokens +
 					(t_us - p.build_at) * 1e-6 * BUILD_RATE);
 			p.build_at = t_us;
-			if(p.build_tokens < BUILD_MIN){
+			if(!land && p.build_tokens < BUILD_MIN){
 				why = "generators built too often: again in "+itos((int64_t)
 						std::ceil((BUILD_MIN - p.build_tokens) / BUILD_RATE))+" s";
 				log_i(MODULE, "Entity %s's build refused: %s", cs(itos(n.id)),
@@ -21307,15 +21782,38 @@ struct Module: public interface::Module, public Interface
 			}
 			int64_t spent = 0;
 			m_build_log = json::array();
-			const bool built = build_of(n, ci, pf, why, &spent);
-			p.build_tokens -= std::max(BUILD_MIN, m_box ? (double)spent /
-					std::max<int64_t>(1, m_box->budget()) : BUILD_MIN);
+			int st = 1;
+			bool built;
+			if(land){
+				built = build_answer(n, ci, land->answer, pf, why);
+				// (said as the edit's own, as one call's would have been)
+				what = land->what;
+			} else if(m_edit_peer && !m_build_sync){
+				st = build_start(n, ci, pf, why, spent, false, p.name);
+				built = st > 0;
+			} else {
+				built = build_of(n, ci, pf, why, &spent);
+			}
+			if(!land)
+				p.build_tokens = std::max(-BUILD_BURST, p.build_tokens -
+						std::max(BUILD_MIN, (double)spent / build_unit()));
+			if(st == 0){
+				// Under way: the edit made without its children's change
+				SlicedBuild &b = m_sliced.back();
+				b.peer = m_edit_peer;
+				b.by = p.name;
+				b.op = m_edit_op;
+				b.what = what;
+				what += ", "+itos(n.id)+"'s build under way";
+				log_i(MODULE, "Entity %s's build under way", cs(itos(n.id)));
+				continue;
+			}
 			// [KIT_GENERATORS] (4z37f) its last run
 			GenRun &gr = m_gen_runs[n.id];
 			gr = GenRun();
 			gr.t = time(nullptr);
 			gr.by = p.name;
-			gr.us = interface::os::time_us() - t_us;
+			gr.us = interface::os::time_us() - (land ? land->t0 : t_us);
 			gr.log = m_build_log;
 			if(!built){
 				why = "entity "+itos(n.id)+"'s "+n.comps[ci].type+": "+why;
@@ -23800,6 +24298,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!m_drop_scenes.empty())
 			drop_scenes();
+		builds_tick(); // [KIT_BUILD_SLICED]
 		meter_tick(tick_us);
 	}
 
@@ -34788,6 +35287,7 @@ struct Module: public interface::Module, public Interface
 				return error(200, id, -32602, "arguments: an object");
 			bool failed = !calls_ok;
 			m_mcp_defer = 0;
+			m_mcp_late.clear();
 			const ss_ text = failed ? "Over "+itos(AGENT_CALLS)+" calls a "
 					"minute: wait" : agent_tool(at, *t, args, failed);
 			// [KIT_SERVER_PUBLISH] its answer from a thread (mcp_answer())
@@ -34796,6 +35296,7 @@ struct Module: public interface::Module, public Interface
 				w.http = r.peer;
 				w.id = id;
 				w.since = interface::os::time_us();
+				w.late = m_mcp_late;
 				m_mcp_defer = 0;
 				return;
 			}
@@ -35132,8 +35633,13 @@ struct Module: public interface::Module, public Interface
 					face == "bottom" ? " on its "+face : ss_())+warnings;
 		}
 		// [KIT_AGENT_NEXT_2]
-		if(op == "batch" || op == "scatter")
-			return agent_batch(op == "scatter", p, peer, a, failed);
+		if(op == "batch" || op == "scatter"){
+			// ([KIT_BUILD_SLICED] its builds one call each: one answer)
+			m_build_sync++;
+			const ss_ r = agent_batch(op == "scatter", p, peer, a, failed);
+			m_build_sync--;
+			return r;
+		}
 		if(op == "show")
 			return agent_show(p, peer, a, failed);
 		if(op == "sound")
@@ -35160,6 +35666,16 @@ struct Module: public interface::Module, public Interface
 			failed = true;
 			return "Refused: "+refused+warnings;
 		}
+		// [KIT_BUILD_SLICED] a build it started under way: the answer as it
+		// ends (build_land()), the edit's as one call's
+		for(SlicedBuild &b : m_sliced)
+			if(!b.live && b.peer == peer && b.bound && !b.mcp && !m_build_sync){
+				b.mcp = true;
+				m_mcp_defer = peer;
+				m_mcp_late = "Still going after 8 s: "+itos(b.id)+"'s build under "
+						"way; get_state's generators say when it ends (building, "
+						"last)";
+			}
 		return (!m_edit_what.empty() ? m_edit_what : m_session.running != ran ?
 				ss_(m_session.running ? "Running" : "Ended: the world at its "
 				"start") : op == "scene" ? "In the scene "+p.scene :
@@ -42583,7 +43099,15 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(packet.sender);
 		const ss_ who = pi == m_peers.end() ? ss_() : pi->second.name;
 		m_edit_what.clear();
+		// [KIT_BUILD_SLICED] its builds across ticks; those it started and
+		// did not make (refused after them) dropped
+		const size_t was_peer = m_edit_peer;
+		m_edit_peer = packet.sender;
 		on_edit_u(packet);
+		build_cancel([&](const SlicedBuild &b){
+			return !b.live && !b.bound && b.peer == packet.sender;
+		});
+		m_edit_peer = was_peer;
 		if(!m_edit_what.empty() && !who.empty())
 			history(who, m_edit_what);
 	}
@@ -42599,6 +43123,7 @@ struct Module: public interface::Module, public Interface
 				MAX_COMMENTS_PACKET) || jstr(j, "op") == "set")))
 			j = json::null();
 		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
+		m_edit_op = op;
 		auto refuse = [&](const ss_ &why){
 			log_i(MODULE, "An edit (%s) by peer %zu refused: %s",
 					op.empty() ? "?" : cs(op), peer, cs(why));
@@ -42947,6 +43472,10 @@ struct Module: public interface::Module, public Interface
 			// [KIT_PREFAB_VOXELS] a prefab's place: its voxels too
 			if(c.stroke == -3)
 				undo_terrain(c, p);
+			// [KIT_BUILD_SLICED] its build under way dropped
+			build_cancel([&](const SlicedBuild &b){
+				return b.bound && b.step == c.serial;
+			});
 			commit(c.before, nullptr);
 			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
 					"to undo)", cs(p.name), c.before.size(), u.size());
@@ -42958,6 +43487,7 @@ struct Module: public interface::Module, public Interface
 		m_paste = VoxelPaste();
 		m_bench_saved.clear();
 		const uint64_t next0 = m_next_id;
+		m_edit_next0 = next0;
 		if(!build_change(op, j, p, change, what, why) ||
 				!rebuilds(change, p, what, why) || !sym_check(change, why)){
 			m_paste.set = false;
@@ -44470,7 +45000,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AIRSHIPS_2] the regions' voxels, in the same undo
 		regions_sync(undo ? &back : nullptr, "");
 		if(undo){
+			back.serial = ++m_change_serial;
 			undo->push_back(back);
+			sliced_steps(*undo); // [KIT_BUILD_SLICED]
 			while(undo->size() > UNDO_MAX)
 				undo->pop_front();
 		}
@@ -45948,7 +46480,10 @@ struct Module: public interface::Module, public Interface
 				// A prefab with no place too: the box's frame is the root's
 				if(change[0].second.get("pos").is_undefined())
 					change[0].second.set("pos", pos);
+				// ([KIT_BUILD_SLICED] its builds one call each: no undo)
+				m_build_sync++;
 				ok = rebuilds(change, t, what, why);
+				m_build_sync--;
 			}
 			if(ok)
 				commit(change, nullptr);
@@ -46006,7 +46541,11 @@ struct Module: public interface::Module, public Interface
 		ss_ what, why;
 		m_follow = name;
 		m_follow_source = 0;
-		if(!rebuilds(change, p, what, why)){
+		// ([KIT_BUILD_SLICED] its builds one call each: no undo)
+		m_build_sync++;
+		const bool ok = rebuilds(change, p, what, why);
+		m_build_sync--;
+		if(!ok){
 			m_follow.clear();
 			log_w(MODULE, "The copies of %s do not follow: %s", cs(name), cs(why));
 			return;

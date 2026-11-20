@@ -69,6 +69,17 @@
 **   "L<source>"          [KIT] stage 4h: the movement library
 **                        (client_lua/move.lua), before the types
 **   "N<number>"          math.random's seed (the host's clock)
+**   "B<n> <ms>\0<lua literal>"  [KIT_BUILD_SLICED] an "R" request's run
+**                        (on_build's) as build n, in a coroutine of its
+**                        own: run until it ends ("O", its answer) or has
+**                        run <ms> ms ("Y", nothing: a count hook yielded
+**                        it); "Y<n> <ms>" runs it on, "X<n>" drops it.
+**                        Between them other requests run as ever: a
+**                        build keeps nothing of the box's but its own
+**                        Lua. simplified: its type's file's upvalues are
+**                        the type's, a handler between two slices sees
+**                        and may change them (a per-call copy if one
+**                        ever relies on them)
 **   "S<lua literal>"     a body's steps: {type, params, state, inputs, dt,
 **                        sub, world (move.lua's snapshot)}; answers the
 **                        state after them ([KIT_PLANE] stage 4: s.events
@@ -83,7 +94,9 @@
 ** not to be trusted, and the host starts a new box.
 ** simplified: one protected level. A pcall inside Lua could not catch (its
 ** C frames are gone with the trap), so components get no pcall, xpcall or
-** coroutines; a loadstring's syntax error ends the whole call. */
+** coroutines; a loadstring's syntax error ends the whole call. A build's
+** coroutine is the runtime's own (a trap in it unwinds the main state, the
+** coroutine dead). */
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -97,6 +110,7 @@
 
 static lua_State *L;
 static int g_pending; /* a Lua error's status, thrown and not recovered */
+static lua_State *g_thrower; /* the thread it was thrown in */
 static struct {
 	ptrdiff_t top, ci, errfunc;
 	unsigned short nCcalls;
@@ -126,8 +140,8 @@ int box_stack_low(void)
 
 void box_throw(struct lua_State *l, int status)
 {
-	(void)l;
 	g_pending = status;
+	g_thrower = l;
 	__builtin_trap();
 }
 
@@ -256,6 +270,29 @@ static int l_cap(lua_State *l)
 		lua_sethook(l, cap_hook, LUA_MASKCOUNT, STEP_CAP);
 	else
 		lua_sethook(l, NULL, 0, 0);
+	return 0;
+}
+
+/* [KIT_BUILD_SLICED] A build's coroutine yields from its count hook once
+** its slice's time is up: looked at every SLICE_COUNT instructions, and
+** not inside a C function's call back into Lua or a metamethod (Lua 5.1
+** cannot yield there: the next look). The hook is the coroutine's own; a
+** body's step cap (the main state's) is another */
+#define SLICE_COUNT 1000
+static unsigned g_slice_end; /* buildat_time_ms() it yields at */
+static void slice_hook(lua_State *l, lua_Debug *ar)
+{
+	(void)ar;
+	if(l->nCcalls <= l->baseCcalls &&
+			(int)(buildat_time_ms() - g_slice_end) >= 0)
+		lua_yield(l, 0);
+}
+static int l_slice(lua_State *l)
+{
+	lua_State *co = lua_tothread(l, 1);
+	luaL_argcheck(l, co != NULL, 1, "a coroutine");
+	g_slice_end = buildat_time_ms() + (unsigned)luaL_checkint(l, 2);
+	lua_sethook(co, slice_hook, LUA_MASKCOUNT, SLICE_COUNT);
 	return 0;
 }
 
@@ -894,9 +931,37 @@ static const char PRELUDE[] =
 "	move.steps(def, s, req.inputs or {}, req.dt or 1/60, req.sub or 1, w, req.params or {}, box_cap)\n"
 "	return json(s)\n"
 "end\n"
+"-- [KIT_BUILD_SLICED] Builds across calls, by the host's number: a slice\n"
+"-- of one, its answer and whether it is still under way\n"
+"local builds, co_create, co_resume, co_status = {}, coroutine.create, coroutine.resume, coroutine.status\n"
+"local slice = box_slice\n"
+"local function build_slice(n, ms)\n"
+"	local co = builds[n]\n"
+"	if not co then error('no build ' .. tostring(n), 0) end\n"
+"	slice(co, tonumber(ms))\n"
+"	local ok, r = co_resume(co)\n"
+"	if ok and co_status(co) ~= 'dead' then return '', true end\n"
+"	builds[n] = nil\n"
+"	if not ok then error(r, 0) end\n"
+"	return r\n"
+"end\n"
 "function box_request(s)\n"
 "	local op = s:sub(1, 1)\n"
-"	if op == 'L' then\n"
+"	if op == 'B' then\n"
+"		local n, ms, z = s:match('^B(%d+) (%d+)%z()')\n"
+"		if not n then error('a build with no number', 0) end\n"
+"		local f = assert(loadstring(s:sub(z), '=request'))\n"
+"		setfenv(f, {})\n"
+"		local req = f()\n"
+"		builds[n] = co_create(function() return run(req) end)\n"
+"		return build_slice(n, ms)\n"
+"	elseif op == 'Y' then\n"
+"		local n, ms = s:match('^Y(%d+) (%d+)$')\n"
+"		return build_slice(n, ms)\n"
+"	elseif op == 'X' then\n"
+"		builds[s:sub(2)] = nil\n"
+"		return 'true'\n"
+"	elseif op == 'L' then\n"
 "		local f = assert(loadstring(s:sub(2), '=move'))\n"
 "		setfenv(f, {math = math_lib, ipairs = ipairs, pairs = pairs, type = type,\n"
 "			tostring = tostring, tonumber = tonumber, setmetatable = setmetatable})\n"
@@ -958,8 +1023,9 @@ static int f_request(lua_State *l)
 	const size_t n = *(const size_t*)lua_touserdata(l, 2);
 	lua_getglobal(l, "box_request");
 	lua_pushlstring(l, in, n);
-	lua_call(l, 1, 1);
-	return 1;
+	/* its answer, and [KIT_BUILD_SLICED] whether a build is under way */
+	lua_call(l, 1, 2);
+	return 2;
 }
 
 static int f_open(lua_State *l)
@@ -978,6 +1044,8 @@ static int f_open(lua_State *l)
 	lua_setglobal(l, "box_seed");
 	lua_pushcfunction(l, l_cap);
 	lua_setglobal(l, "box_cap");
+	lua_pushcfunction(l, l_slice);
+	lua_setglobal(l, "box_slice");
 	lua_newtable(l);
 	luaL_register(l, NULL, MATH);
 	lua_setglobal(l, "box_math");
@@ -996,6 +1064,7 @@ static void enter(void)
 	g_entry.nCcalls = L->nCcalls;
 	g_entry.allowhook = L->allowhook;
 	g_pending = 0;
+	g_thrower = NULL;
 }
 
 __attribute__((noinline)) static int call_inner(void)
@@ -1032,14 +1101,14 @@ __attribute__((noinline)) static int call_inner(void)
 	g_entry.top = savestack(L, L->top - 3);
 	/* simplified: the input buffer leaks when the call traps (its pointer
 	** was in the lost frame); a request is small */
-	const int status = lua_pcall(L, 2, 1, 0);
+	const int status = lua_pcall(L, 2, 2, 0);
 	free(in);
 	size_t rn = 0;
-	const char *r = lua_tolstring(L, -1, &rn);
+	const char *r = lua_tolstring(L, status != 0 ? -1 : -2, &rn);
 	if(status != 0 || !r)
 		out('E', r ? r : "?", r ? rn : 1);
 	else
-		out('O', r, rn);
+		out(lua_toboolean(L, -1) ? 'Y' : 'O', r, rn);
 	lua_settop(L, 0);
 	return status != 0;
 }
@@ -1051,10 +1120,20 @@ __attribute__((noinline)) static int recover_inner(void)
 	if(!L || !g_pending)
 		return 0;
 	const int status = g_pending;
+	lua_State *from = g_thrower;
 	g_pending = 0;
+	g_thrower = NULL;
 	L->errorJmp = NULL;
 	StkId oldtop = restorestack(L, g_entry.top);
 	luaF_close(L, oldtop);
+	/* [KIT_BUILD_SLICED] thrown in a build's coroutine: its message here,
+	** the coroutine dead (never resumed: "cannot resume dead") */
+	if(from && from != L){
+		setobj2s(L, oldtop, from->top - 1);
+		L->top = oldtop + 1;
+		from->status = (lu_byte)status;
+		lua_sethook(from, NULL, 0, 0);
+	}
 	luaD_seterrorobj(L, status, oldtop);
 	L->nCcalls = g_entry.nCcalls;
 	L->ci = restoreci(L, g_entry.ci);
