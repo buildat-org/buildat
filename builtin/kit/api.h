@@ -1557,8 +1557,9 @@ namespace interface
 // (its spawn, then their team's pad), its teams the round's (c.teams, a
 // `reads_teams = true` type's with a `map`), and at the session's end back to
 // the arena's scene (its spawn). `time_up`: "draw" (the default) or
-// "most": the team with the most points wins at the timer's end; a tie
-// runs on as overtime (the status line says so) until the scores differ
+// "most": the team with the most points wins at the timer's end
+// ([KIT_API_1] with no teams the player with the most kit/score points,
+// the result's scores theirs); a tie runs on as overtime (the status line says so) until the scores differ
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.

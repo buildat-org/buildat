@@ -36,7 +36,8 @@
 -- own): the session's players go into its copy, its teams the round's,
 -- and back to the arena's scene at the end. `time_up`: "draw" (the
 -- default) or "most" (the team with the most points wins; a tie is
--- overtime, shown, until the scores differ). Its UI is drawn in its own
+-- overtime, shown, until the scores differ; [KIT_API_1] with no teams the
+-- player with the most kit/score points). Its UI is drawn in its own
 -- scene: output `status`, the round's line as it changes (the time left
 -- or "Overtime", the scores, the result), is for a text in the map
 -- [KIT_ARENA_SCORE_TO_WIN] `score_to_win` (0: none): a team with that
@@ -312,6 +313,21 @@ local function teams_of(c)
 	return out
 end
 
+-- [KIT_API_1] (decision 7) Who a round's points are counted for: its
+-- teams, else (none) its players by their kit/score
+local function sides(c)
+	local teams = teams_of(c)
+	if #teams > 0 then
+		return teams
+	end
+	local out = {}
+	for _, p in ipairs(c.players or {}) do
+		local s = p.state["kit/score"]
+		out[#out + 1] = {name = p.name, score = tonumber(s and s.score) or 0}
+	end
+	return out
+end
+
 local function scores(teams)
 	local t = {}
 	for i, x in ipairs(teams) do
@@ -353,7 +369,7 @@ local function finish(c, winner, cause, stopped)
 		return
 	end
 	c:after(-1, "tick")
-	local teams = teams_of(c)
+	local teams = sides(c)
 	c.state.result = winner and (winner .. " wins!") or
 			(stopped and "Stopped" or "Draw")
 	c.state.ended = ended_by(c, cause)
@@ -725,7 +741,7 @@ return {
 				end
 				if c.state.left <= 0 and c.params.time_up == "most" then
 					local best, tie
-					for _, t in ipairs(teams_of(c)) do
+					for _, t in ipairs(sides(c)) do
 						if not best or t.score > best.score then
 							best, tie = t, false
 						elseif t.score == best.score then
@@ -738,7 +754,7 @@ return {
 						return finish(c, best.name, "time up, the most points")
 					elseif best and not c.state.overtime then
 						c.state.overtime = true
-						c:log("time up, tied:", scores(teams_of(c)),
+						c:log("time up, tied:", scores(sides(c)),
 								"-- overtime")
 					end
 				end
