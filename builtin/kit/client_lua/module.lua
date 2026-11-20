@@ -186,7 +186,7 @@ end
 --   [KIT_CLIENT_REACT] require("buildat/module/kit") is [KIT_API_1] the
 --   table at this file's end: kit.shared, kit.pointed, kit.use,
 --   kit.body_state(), kit.body_pos(), kit.seated(), [RACER_FEEL] (2), (3)
---   kit.shake(a) (controls.lua's head), kit.effect{...}, kit.mark(...),
+--   kit.shake(a) (controls.lua's head), kit.effect{...}, kit.mark{...},
 --   kit.clear_marks() (effects.lua), kit.ui_keys() (ui.lua),
 --   kit.press_action, kit.key_down, kit.key_name, kit.key_text (input.lua),
 --   also from a movement's draw; kit.internal (this module) is outside Kit

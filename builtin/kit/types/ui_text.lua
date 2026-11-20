@@ -39,7 +39,7 @@ return {
 	version = 2,
 	no_position = true,
 	-- (to "team" reads them)
-	teams = true,
+	reads_teams = true,
 	ui = {kind = "text", text = "param:text", anchor = "param:anchor",
 		x = "param:x", y = "param:y", width = "param:width",
 		height = "param:height", size = "param:size", color = "param:color",

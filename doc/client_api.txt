@@ -1491,6 +1491,9 @@ checks songs and measures them). No samples, no files. The format's
 reference is Kit's get_guide topic "music" (builtin/kit/kit.cpp's
 agent_music()); jam1 is frozen: a song sounds the same in every later
 jam, natively and on the web (util/jam_check.sh holds the hashes).
+A song's optional first line `jam 1` names its format (a song without it is
+jam1); a higher number is refused: "line 1: this song is jam 2, made with a
+newer Buildat; this one reads jam 1".
 An app requires buildat/extension/jam; buildat.jam (buildat.jam.song) is
 its native half under it, not for an app's own use.
 jam.song(text [, tempo]) -> song, or nil and "line N: why"

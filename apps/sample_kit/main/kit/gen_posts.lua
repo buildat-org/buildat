@@ -4,7 +4,7 @@
 -- square, none within 3 m of another entity of the scene (c.entities);
 -- past the default cap of 63. In play `reseed` (not 0) builds it again
 -- live from that seed at the round's start (c:generate on itself). Its log
--- says whether c.move (move.lua) is there.
+-- says whether c.move_lib (move.lua) is there.
 return {
 	version = 1,
 	children = 200,
@@ -43,7 +43,7 @@ return {
 			end
 		end
 		c:log(string.format("gen_posts: seed %d, %d posts, %d kept clear of %d entities%s",
-			c.params.seed, made, clear, #c.entities, type(c.move) == "table" and c.move.world and
+			c.params.seed, made, clear, #c.entities, type(c.move_lib) == "table" and c.move_lib.world and
 			", move.lua there" or ""))
 	end,
 	on_start = function(c)

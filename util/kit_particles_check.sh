@@ -162,31 +162,31 @@ EOF
 	place kit/controls '0, 1, 0'; CONTROLS=$id
 	set_ 'shake_amount=2' 'shake_near=2' 'shake_far=20'
 	place kit/effect '5, 1, 5'
-	set_ 'on="hit"' 'count=24' 'color="#d00000"' 'along_hit=true' 'spread=45' \
+	set_ 'trigger="hit"' 'count=24' 'color="#d00000"' 'along_hit=true' 'spread=45' \
 		'scale_by_damage=true' 'speed_min=0.5' 'speed_max=3' 'gravity=9' \
 		'ttl_min=1' 'ttl_max=1.2' 'size_min=0.08' 'size_max=0.12' 'land=true' \
 		'flash_time=0.15' 'flash_color="#ff2020"' 'arc_time=1.5'
 	place kit/effect '5, 1, 6'
-	set_ 'on="dig"' 'shape="voxel"' 'count=16' 'speed_min=1' 'speed_max=3' \
+	set_ 'trigger="dig"' 'shape="voxel"' 'count=16' 'speed_min=1' 'speed_max=3' \
 		'ttl_min=0.5' 'ttl_max=1' 'size_min=0.1' 'size_max=0.16' 'land=true' \
 		'spread=70' 'offset=[0, 0.4, 0]'
 	place kit/effect '5, 1, 7'
-	set_ 'on="place"' 'shape="round"' 'count=8' 'color="#a09080"' 'gravity=0' \
+	set_ 'trigger="place"' 'shape="round"' 'count=8' 'color="#a09080"' 'gravity=0' \
 		'speed_min=0.3' 'speed_max=0.8' 'ttl_min=0.4' 'ttl_max=0.6' 'grow=2' \
 		'size_min=0.2' 'size_max=0.3'
 	place kit/effect '5, 1, 8'; DEBRIS=$id
-	set_ 'on="blast"' 'shape="voxel"' 'count=40' 'speed_min=3' 'speed_max=7' \
+	set_ 'trigger="blast"' 'shape="voxel"' 'count=40' 'speed_min=3' 'speed_max=7' \
 		'ttl_min=0.8' 'ttl_max=1.2' 'size_min=0.1' 'size_max=0.2' 'axis=[0, 1, 0]' \
 		'spread=80' 'light_time=0.15' 'light_range=14' 'light_brightness=4'
 	edit "{\"op\": \"link\", \"id\": $DEBRIS, \"comp\": 0, \"output\": \"fired\", \"to\": $CONTROLS, \"input\": \"shake\"}"
 	place kit/effect '5, 1, 9'
-	set_ 'on="blast"' 'shape="ring"' 'count=1' 'color="#ffe0a0"' 'speed_min=0' \
+	set_ 'trigger="blast"' 'shape="ring"' 'count=1' 'color="#ffe0a0"' 'speed_min=0' \
 		'speed_max=0' 'gravity=0' 'ttl_min=0.25' 'ttl_max=0.25' 'size_min=1' \
 		'size_max=1' 'grow=24' 'fade=0.6'
 	place kit/effect '5, 1, 10'
-	set_ 'on="respawn"' 'count=20' 'color="#80e0ff"' 'gravity=-1' 'offset=[0, 0.5, 0]'
+	set_ 'trigger="respawn"' 'count=20' 'color="#80e0ff"' 'gravity=-1' 'offset=[0, 0.5, 0]'
 	place kit/effect '5, 1, 11'
-	set_ 'on="pickup"' 'count=14' 'color="#ffe060"' 'gravity=2'
+	set_ 'trigger="pickup"' 'count=14' 'color="#ffe060"' 'gravity=2'
 	place kit/effect '1.5, 1, 0'; FOUNTAIN=$id
 	set_ 'count=60' 'color="#ffd070"' 'color2="#ffffff"' 'spread=25' \
 		'speed_min=2.5' 'speed_max=4.2' 'gravity=9' 'ttl_min=0.7' 'ttl_max=0.9'

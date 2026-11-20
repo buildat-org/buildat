@@ -5,7 +5,7 @@
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/api.h
 # [KIT_AGENT_FEEDBACK_1117] (4), (6): a type's Lua reading its players and
 # its per-player state. On Workbench, kitboss (the admin, on a headless
-# weston's Xwayland of the check's own) places a probe (players = true, a
+# weston's Xwayland of the check's own) places a probe (reads_players = true, a
 # per_player state `own`) in the scene "world"; Running, each tick it
 # counts one up in own for each player and logs c.players (name, p.scene,
 # p.away), own's entries by pairs(c.state.own) and the state's keys by
@@ -29,7 +29,7 @@ mkdir -p "$BUILDAT_WORKBENCH_TYPES"
 cat > "$BUILDAT_WORKBENCH_TYPES/probe.lua" <<'LUA'
 return {
 	version = 1,
-	players = true,
+	reads_players = true,
 	state = {own = {default = {}, per_player = true}, ticks = {default = 0}},
 	on_start = function(c)
 		c:after(0.2, "tick")

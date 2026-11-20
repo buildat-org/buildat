@@ -30,7 +30,7 @@ end
 
 return {
 	version = 2,
-	players = true,
+	reads_players = true,
 	hud = "text",
 	no_position = true,
 	params = {title = {cat = "hud", type = "string", default = "Score"}},

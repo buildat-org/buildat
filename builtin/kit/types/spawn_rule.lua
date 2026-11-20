@@ -2,7 +2,7 @@
 -- players, not at a place, for a world they walk away in (an infinite
 -- terrain). Every `every` seconds while enabled, each player of its scene
 -- may get one copy within `radius` m (from half of it out) where the
--- rule allows: on one of the voxels `on` (names, "kit/grass, kit/dirt";
+-- rule allows: on one of the voxels `on_voxels` (names, "kit/grass, kit/dirt";
 -- empty: any solid), the sky light over it within light_min...light_max
 -- (0 dark caves, 15 open sky; the World's sky light off reads 15), none
 -- of its kind (copies of the prefab, its own or another's; apart_any:
@@ -45,7 +45,7 @@ local function tick(c)
 end
 
 return {
-	version = 1,
+	version = 2,
 	no_position = true,
 	spawn_spots = true,
 	params = {
@@ -54,7 +54,7 @@ return {
 		every = {type = "number", default = 10, min = 1, max = 3600},
 		max = {type = "number", default = 4, min = 1, max = 100},
 		radius = {type = "number", default = 24, min = 4, max = 64},
-		on = {type = "string", default = ""},
+		on_voxels = {type = "string", default = ""},
 		light_min = {type = "number", default = 0, min = 0, max = 15},
 		light_max = {type = "number", default = 15, min = 0, max = 15},
 		apart = {type = "number", default = 12, min = 0, max = 128},
@@ -62,6 +62,13 @@ return {
 		despawn = {type = "number", default = 64, min = 0, max = 512},
 	},
 	state = {on = {default = true, param = "enabled"}},
+	-- [KIT_API_1] version 2: `on_voxels` was `on`
+	migrate = function(params, from)
+		if from < 2 then
+			params.on_voxels, params.on = params.on, nil
+		end
+		return params
+	end,
 	about = {
 		group = "Creatures",
 		what = "Makes copies of a prefab around the players, where its rules allow.",

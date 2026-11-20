@@ -161,6 +161,25 @@ print(string.format("ok: run wide at %.1f m/s, 2 s on the throttle: %.1f on grav
 -- road (the run-off's gravel allowed under skill 50), and the higher its
 -- skill the faster.
 local bot = load_env("builtin/kit/types/bot.lua", env())
+-- (follow is a local of bot.lua's: found among on_timer's upvalues, theirs)
+local function upvalue(f, name, depth)
+	for i = 1, 255 do
+		local n, v = debug.getupvalue(f, i)
+		if not n then
+			return
+		end
+		if n == name then
+			return v
+		end
+		if type(v) == "function" and depth > 0 then
+			local r = upvalue(v, name, depth - 1)
+			if r then
+				return r
+			end
+		end
+	end
+end
+bot.follow = assert(upvalue(bot.on_timer, "follow", 3), "bot.lua's follow not found")
 local yard = load_env("apps/workbench/templates/brimstone_speedway/types/brim_yard.lua", env())
 local poly_t = load_env("builtin/kit/types/polygon.lua", env())
 local kids = {}

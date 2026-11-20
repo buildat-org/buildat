@@ -3,7 +3,7 @@
 -- `replace` and remembers those cells; "off" turns back to `find` exactly
 -- those that still hold `replace` (a cell that was `replace` before On
 -- stays, one dug in between stays dug). Either may be air. Its writes are
--- game changes: End puts the start back. On at the start with start_on.
+-- game changes: End puts the start back. On at the start if `enabled`.
 -- Unseen in play; the editor draws its box
 
 -- A box index (from 1, x fastest, then z, then y) as its cell
@@ -52,14 +52,14 @@ local function set(c, on, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	voxel_box = "size",
 	reads_voxels = true,
 	params = {
 		size = {type = "position", default = {3, 3, 3}},
 		find = {type = "voxel", default = "kit/stone"},
 		replace = {type = "voxel", default = "air"},
-		start_on = {type = "bool", default = false},
+		enabled = {type = "bool", default = false},
 	},
 	state = {
 		on = {default = false, shared = true},
@@ -81,8 +81,15 @@ return {
 	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},
+	-- [KIT_API_1] version 2: `enabled` was `start_on`
+	migrate = function(params, from)
+		if from < 2 then
+			params.enabled, params.start_on = params.start_on, nil
+		end
+		return params
+	end,
 	on_start = function(c)
-		if c.params.start_on then
+		if c.params.enabled then
 			set(c, true, "its start")
 		end
 	end,

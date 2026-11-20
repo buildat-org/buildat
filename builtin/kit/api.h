@@ -91,7 +91,7 @@ namespace interface
 // never loads it half-way.
 // Outside the promise (any release may change them):
 // - what is marked experimental: generators (on_build, c:child, c:link,
-//   c:voxel_box, c.entities, c.move, c:generate, the "points" keys `values`
+//   c:voxel_box, c.entities, c.move_lib, c:generate, the "points" keys `values`
 //   and `level`), driving bots (c:drive, c.body, c.path, kit/path and
 //   kit/bot's drive, skill and ask; a kit/bot walking the goals is API
 //   1's), kit/parallax and a movement's touch_axes; a type of its own by
@@ -187,7 +187,8 @@ namespace interface
 //              Restart and a server restart keep it; it is in the runtime
 //              row, never the start's (Save as start leaves it out); a
 //              builder's op clear_kept puts its default back (best times,
-//              keyed by c:name(by), a high score)
+//              keyed by c:name(by), a high score); in a game session the
+//              session's own (Sessions)
 //   linked_in = true         -- [CRAG_BEST_RESET] c.linked_in = {input =
 //              {id...}}: the entities with a link to it, by its input,
 //              which it reaches (c:send to each: crag_run's gems)
@@ -452,8 +453,59 @@ namespace interface
 // kit:app, AppCall, its native code's to do; 8 a run). A
 // component reaches its own entity and its links, the entities its entity
 // parameters name and the copies it made, and the player who set it off
-// (every player with `players = true`), the panel it is in (c.panel), the
+// (every player with `reads_players = true`), the panel it is in (c.panel), the
 // entities linking to it with `linked_in = true`, nothing else.
+//
+// [KIT_API_1] **Names** (kit_api1_review.md items 5 and 7). A type's table
+// holds the fields above and its handlers alone: put_type (and the
+// editor's type put) refuses another field ("x: not a type field Kit
+// knows"), a function under a name that is no handler (a helper goes in a
+// local), and a parameter or state key starting kit_; a save's or a
+// package's type with one still loads, each warned of in the log. The
+// prefix kit_ is Kit's: every name Kit adds after API 1 on e (client
+// parts), s and i (movements' steps), w, an inventory call's ext and the
+// parameters it injects (use, own_look) starts kit_, so a game's own
+// names, which never do, never meet a later Kit's. Kit's rules for its
+// own names:
+// - A bool parameter "active from the start" is `enabled`; no parameter
+//   is named `on`.
+// - Inputs: show/hide a UI's visibility (ui_*, pause_menu_action), on/off
+//   a switch whose state is drawn or sent on (lever, effect, voxel_replace,
+//   voxel_states), enable/disable a behaviour started or stopped (attack,
+//   flag, flee, follow, region, senses, spawn_rule, wander). Inputs are
+//   never renamed: a link names its target's input, and migrate sees
+//   parameters only.
+// - Distances: radius an area round the entity (explosive, spawn_rule,
+//   wander), range how far it notices or lets a player act (radar,
+//   senses, flag's *_range), distance one it keeps or places at
+//   (controls, flee, follow, placer), reach how far an attack or a hand
+//   reaches (attack, bot).
+// - Speeds: a movement's `speed` (walkers) and `top_speed` (vehicles,
+//   which accelerate towards it) are m/s; every other speed is relative to
+//   the body's own (c:speed's factor, propose_move's speed, kit/flag's and
+//   kit/flee's, kit/bot's speed in percent as its aim and reaction).
+// - Damage is `type` everywhere: c:hurt{type}, c:explode{type},
+//   c:died(by, type), on_died(c, player, by, type).
+// - A type field giving read access is reads_*: reads_players,
+//   reads_teams, reads_regions, reads_voxels (players, teams and regions
+//   = true of before are read as them, warned of; put_type refuses them).
+// - A label in a signal's type, "string:<label>", is free text the editor
+//   shows ("string:player", "string:team", ...); a link does not read it.
+// Renamed in 4z37j (each type's migrate takes a placed one forward):
+// kit/effect's `on` is `trigger` (v2), kit/symmetry's `on` `enabled` (v2),
+// kit/spawn_rule's `on` `on_voxels` (v2), kit/voxel_replace's and
+// kit/voxel_states' `start_on` `enabled` (v2); on_build's c.move is
+// c.move_lib; a client part's kit.mark takes a table.
+// Reserved for a later Kit (not there yet; a game uses none of them for
+// its own): an inventory call's ext.player (that player's inventory;
+// refused now, "ext.player is reserved"); kit/goal's pick = "nearest_type"
+// with the parameter pick_type (a type name), when_state (a key of the
+// bot's own entity state: the goal counts while it is true, "!key" while
+// false) and kind = "dig" (the cells of its size box); c:voxel_at(x, y, z)
+// (a voxel's name or nil, world cells of the entity's scene) and
+// c:set_voxels_at({{x, y, z, name}...}) (4096 a run, game changes as
+// c:set_voxels'), both for a type with world_voxels = true; a client
+// part's kit.report(value) and the server handler on_report(c, by, value).
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
 // no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
@@ -506,7 +558,7 @@ namespace interface
 //   default inventory provider) and kit/score -- not placed, not edited;
 //   their state is play state (the round's start resets it), kept in the
 //   runtime row (its "players": {name: {id, aside}}). A type with
-//   `players = true` reads every player: c.players = {{id, name, here,
+//   `reads_players = true` reads every player: c.players = {{id, name, here,
 //   state = {type = state}, scene}}: every scene's players, each with
 //   the scene they are in ([KIT_AGENT_FEEDBACK_1117] "" none); a
 //   scene's component keeps to its own by `not p.away` (below).
@@ -657,8 +709,8 @@ namespace interface
 //   shaken as kit/controls' shake input does (0...5, from this frame),
 //   kit.effect{at = {x, y, z}, ...} c:effect's particles (its particle
 //   fields, clamped alike; 64 live bursts and 240 a second from all parts,
-//   past it dropped; effects.lua), kit.mark(x, y, z, yaw, size, color[,
-//   alpha]) a flat ground mark (size {across, along}; a ring of 1024;
+//   past it dropped; effects.lua), kit.mark{at = {x, y, z}, yaw, size,
+//   color, alpha} a flat ground mark (size {across, along}; a ring of 1024;
 //   ~60 us a mark, the sandbox's Vector3s),
 //   kit.clear_marks(); (2) kit.shared, one plain table per client every
 //   client part of every entity shares (local, nothing sent; a part's
@@ -702,7 +754,7 @@ namespace interface
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
 //   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
-//   c:child, c:link, c:voxel_box, c.entities, c.move, c:generate and the
+//   c:child, c:link, c:voxel_box, c.entities, c.move_lib, c:generate and the
 //   "points" keys `values` and `level` may change in any release; publishing
 //   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
@@ -737,7 +789,8 @@ namespace interface
 //   c.entities: the generator's scene's other entities, its own children
 //   left out, {id, name, types = {type...}, pos = {x, y, z} (the world's;
 //   none without a place), yaw}: to avoid or decorate hand-placed ones;
-//   c.move: move.lua's library, to check what it builds. An error() refuses
+//   c.move_lib: move.lua's library (the clients' kit.move_lib; not
+//   c:move), to check what it builds. An error() refuses
 //   the run (the edit with it), its text the reason. Run again on demand:
 //   the edit op {"op": "build", "id", "comp", "params"} (the editor's Run,
 //   MCP run_generator): params set first, then built whether they changed
@@ -763,8 +816,8 @@ namespace interface
 //   or at 45 degrees, mirrored or rotational; `slice` names the authored
 //   one (types/symmetry.lua lists the names). The World is finite, and
 //   square where a map turns x into z (a quarter turn, a diagonal's
-//   mirror); an edit turning it on otherwise is refused, why said. On,
-//   what is under it (its sources, each in the authored slice: one put
+//   mirror); an edit enabling it otherwise is refused, why said. With
+//   `enabled`, what is under it (its sources, each in the authored slice: one put
 //   outside is refused, and so is a kit/wave) has a copy in each other
 //   slice: an authored entity marked {"built": {"by": the kit/symmetry,
 //   "member": source * 8 + slice, "source", "slice"}}, under its source's
@@ -780,7 +833,7 @@ namespace interface
 //   its parameters (each one set its own, an override, kept as the source
 //   changes; prefab_reset gives it the source's again): a move, a rename,
 //   Add/Remove component, a child, a parent, a delete (but with the
-//   kit/symmetry), a link to or from it are refused. Off or deleted, its
+//   kit/symmetry), a link to or from it are refused. Disabled or deleted, its
 //   copies go. Entities outside it stay single. [KIT_AIRSHIPS_2] Hosting
 //   makes the copies a build has none of yet (a template's on kit/symmetry).
 //   A type's `space` = {<param> = <kind>} says what its parameters are
@@ -995,10 +1048,11 @@ namespace interface
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).
 //
 // That player's inventory: c:count(item, ext) (how many), c:add(item, n,
-// ext) (c:give the same), c:take(item, n, ext) (all n or none: true if
+// ext), c:take(item, n, ext) (all n or none: true if
 // taken), c:list(ext) ({item = n}), c:has(item, n, ext) (count >= n); n is
 // 1 if left out, an item letters, digits and _, ext a free-form table the
-// provider may read (nil: {}). The provider is the player entity's own
+// provider may read (nil: {}; [KIT_API_1] its player and kit_ keys Kit's,
+// refused: "ext.player is reserved"). The provider is the player entity's own
 // kit/inventory ([KIT] stage 4d; Kit's counts before); one component may
 // replace it for every player: a type with
 //   inventory = true, inventory_count(c, player, item, ext),
@@ -1018,7 +1072,7 @@ namespace interface
 //
 // [KIT_VOXEL_STATES] kit/voxel_replace and kit/voxel_states write a box
 // of voxels (their `size`, 16 a side at most), inputs on/off/toggle, the
-// shared state "on" (`start_on` at the start, which they write then),
+// shared state "on" (`enabled` at the start, which they write then),
 // the output "changed" (the new on). voxel_replace: on, every `find` cell
 // becomes `replace` (either may be air), the cells it changed kept (the
 // round's, not shared); off, of those only the ones still `replace` go
@@ -1048,13 +1102,13 @@ namespace interface
 //                             a side at most (the World's whole height:
 //                             a map-wide region, a column to the bottom)
 // **Places, moves, speed and markers** ([KIT_CTF], any game's):
-//   c.players (a type's `players`): each also has pos {x, y, z} (placed
+//   c.players (a type's `reads_players`): each also has pos {x, y, z} (placed
 //   ones: the world's, their feet's cell's middle, as c.pos is for an
 //   entity), yaw (degrees, their view's last input) and alive (placed,
 //   not waiting to respawn, their health's hp above 0 where they have
 //   one); away true when they are in another scene than the entity (a
 //   placed one's; never on the root's), scene the one they are in.
-//   regions = true -- c:region_at({x, y, z}): the region deciding the
+//   reads_regions = true -- c:region_at({x, y, z}): the region deciding the
 //   cell the point is in (the smallest enabled one of its scene, as
 //   allows() picks), {id, team (the team it is under, 0 none), rules
 //   ({dig = "all"|"owners"|"others"|"none", ...}, its published state)},
@@ -1420,14 +1474,14 @@ namespace interface
 // start's alone. It writes 256 sections at most: a dig or place into one
 // more is refused (told), an entity's write dropped (logged). A component makes one
 // (c:session_start(players): players it reaches, in its zone or the
-// run's, any for a type with `players`; nil: those in its zone and the
+// run's, any for a type with `reads_players`; nil: those in its zone and the
 // run's), moves a player into one it made or back (c:session_move(player,
 // id), id 0 the default) and ends one it made (c:session_end(id));
 // on_session_start(c, id) and on_session_end(c, id) are its own.
 // [KIT_MAP_ROTATION] c:session_start(players, map, others): `map` the scene
 // its players go into (else the maker's `map` parameter), `others` scenes
 // whose entities run nothing in this session, less `map` and the maker's own
-// scene. c.scenes, for a `teams = true` type, the composition's scenes. In a
+// scene. c.scenes, for a `reads_teams = true` type, the composition's scenes. In a
 // session c.session is its id (0 in the default) and c:session_end() ends
 // it; none is made from inside one, MAX_SESSIONS (8) at most. Ending one
 // sends its players back to the default round at their scene's spawn.
@@ -1447,6 +1501,10 @@ namespace interface
 // "written" and "shared": the default's loaded sections it holds no copy
 // of). Sessions are not saved: a
 // restart drops them and their scenes (the row "sessions").
+// [KIT_API_1] (decision 6) Kept state (kept = true) in a session belongs to
+// that session: it starts at its default there and is gone at the
+// session's end, the default's untouched; what a session leaves behind
+// goes out through c:session_end(id, result).
 // [KIT_PREFAB_BENCH] {"op": "prefab_bench", "prefab": name} takes a builder
 // to a prefab's temporary scene: a draft (kind "bench"; "kit:edit_state"'s
 // session adds prefab, root, box, ready) of an empty World with nothing from
@@ -1482,7 +1540,7 @@ namespace interface
 // its name, colour, spawn (its pad) and shared score ("add", "set";
 // "reached" at win_score). **The Team interface**: a type with `team =
 // true` is a team, its state `members` (its players' entity ids) and
-// `score`; a type with `teams = true` reads the teams in its scene (of
+// `score`; a type with `reads_teams = true` reads the teams in its scene (of
 // those, the ones under its own parent when there are any: a placed
 // prefab's own), c.teams = {{id, params, state}} by id, and reaches them
 // (c:send); a kit/arena runs a round only in the session it started (any
@@ -1497,10 +1555,11 @@ namespace interface
 // [KIT_CTF] kit/arena's `map` (a scene's name; "" none: the round in the
 // arena's own scene): the session's players go into that scene's copy
 // (its spawn, then their team's pad), its teams the round's (c.teams, a
-// `teams = true` type's with a `map`), and at the session's end back to
+// `reads_teams = true` type's with a `map`), and at the session's end back to
 // the arena's scene (its spawn). `time_up`: "draw" (the default) or
-// "most": the team with the most points wins at the timer's end; a tie
-// runs on as overtime (the status line says so) until the scores differ
+// "most": the team with the most points wins at the timer's end
+// ([KIT_API_1] with no teams the player with the most kit/score points,
+// the result's scores theirs); a tie runs on as overtime (the status line says so) until the scores differ
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.
@@ -1599,8 +1658,8 @@ namespace interface
 // = {amount, type, item, crit}, it returns the hit as it goes on (nil:
 // unchanged; amount 0: nothing) -- armour, shields, stage 9's effects.
 // It signals "damaged" (the amount) and "died"; a player dead respawns
-// (c:respawn(): their team's pad, else the last spawner of players in
-// their scene, else the app's spawn) at max. c.is_player: on a player's
+// (by kit/game_rules' respawn: their team's pad, else the last spawner of
+// players in their scene, else the app's spawn) at max. c.is_player: on a player's
 // entity. "kit:hit" <entity id> is a placed peer's melee hit with what
 // they hold: Running, out of the tools, a melee item of theirs, past its
 // cooldown (game time), the target with health in their scene within its
@@ -1706,8 +1765,7 @@ namespace interface
 // client too, and Kit's HUD says "Waiting to respawn". game_rules' respawn
 // changed to "at_once" respawns those waiting. A player moved to another
 // session (c:session_move, an arena's round and its end) waits no more in
-// the one they leave. c:respawn() (before
-// [KIT_CTF] kit/health's) still respawns a player at once.
+// the one they leave.
 // c:hurt(player, amount | {amount = n | fraction = f, type = name}):
 // a player of the round hurt (fraction: of their health's max) through
 // their modify_hit hooks and health as a hit of type `type` ("hurt" by
@@ -1730,7 +1788,7 @@ namespace interface
 // (16 nearest, from a 16 m bucket index; `sight = true`: also in_sight),
 // c:nearest(type | "player"). [KIT_SPAWN_RULE] A type's `spawn_spots = true`
 // reads, in on_timer, c.spots = {{x, y, z}...} (a spot by each player its
-// parameters allow: prefab, radius, on, light_min, light_max, apart,
+// parameters allow: prefab, radius, on_voxels, light_min, light_max, apart,
 // apart_any) and c.far = {id...} (its copies no player is within despawn
 // m of); kit.cpp's spawn_spots_lit, kit/spawn_rule. A creature whose section is not loaded
 // sleeps: no steps, no timers (they are pushed on by its sleep), and goes

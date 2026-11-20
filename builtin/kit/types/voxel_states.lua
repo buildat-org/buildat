@@ -4,7 +4,7 @@
 -- Show and Fill buttons edit). "on" and "off" write that state's pattern
 -- into the box, the cells that differ; an empty state writes nothing.
 -- Its writes are game changes: End puts the start back. The round starts
--- in its start state (start_on: B), that pattern written. Unseen in play;
+-- in its start state (`enabled`: B), that pattern written. Unseen in play;
 -- the editor draws its box
 
 -- A pattern ("<sx> <sy> <sz>;<names>;<runs>", builtin/kit/api.h) as its
@@ -72,12 +72,12 @@ local function set(c, on, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	voxel_box = "size",
 	reads_voxels = true,
 	params = {
 		size = {type = "position", default = {3, 3, 3}},
-		start_on = {type = "bool", default = false},
+		enabled = {type = "bool", default = false},
 		a = {type = "voxels", default = ""},
 		b = {type = "voxels", default = ""},
 	},
@@ -97,8 +97,15 @@ return {
 	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},
+	-- [KIT_API_1] version 2: `enabled` was `start_on`
+	migrate = function(params, from)
+		if from < 2 then
+			params.enabled, params.start_on = params.start_on, nil
+		end
+		return params
+	end,
 	on_start = function(c)
-		c.state.on = c.params.start_on
+		c.state.on = c.params.enabled
 		write(c, c.state.on, "its start")
 	end,
 	on_input = function(c, input, value, by)

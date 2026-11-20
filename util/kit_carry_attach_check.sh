@@ -35,7 +35,7 @@ cat > "$BUILDAT_WORKBENCH_TYPES/carry.lua" <<'EOF'
 local function f(x) return tostring(math.floor(x * 100 + 0.5) / 100) end
 return {
 	version = 1,
-	players = true,
+	reads_players = true,
 	look = {shape = "box", size = {0.3, 0.3, 0.3}, color = "#ffd020"},
 	inputs = {grab = "any", drop = "any", where = "any"},
 	on_input = function(c, input, v, by)

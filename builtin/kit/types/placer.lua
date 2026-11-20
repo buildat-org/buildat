@@ -9,7 +9,7 @@
 
 return {
 	version = 1,
-	players = true,
+	reads_players = true,
 	no_position = true,
 	params = {
 		item = {type = "string", default = "", choices_from = "items"},

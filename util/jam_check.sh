@@ -3,7 +3,9 @@
 # cost: ~3 min (2026-11-19)
 # covers: src/impl/jam.cpp src/interface/jam.h src/lua_bindings/jam.cpp extensions/jam/** apps/jam_check/** apps/workbench/templates/brimstone_speedway/composition.json util/jam_capture.js
 # [MUSIC_SYNTH]: apps/jam_check natively and in the web client (Chrome,
-# skipped without web/ or Chrome): parse errors by line, jam1's hashes
+# skipped without web/ or Chrome): parse errors by line ([KIT_API_1] a
+# "jam 2" line and a "jam 1" not first among them; a "jam 1" first line
+# the song's samples unchanged), jam1's hashes
 # (the first 10 s of jam.songs, one in a mood) the same as committed and on
 # both, the render's cost, a mood landing on a bar, the stream going on
 # through a 1 s main-thread stall natively, stop; on the web (both
@@ -49,6 +51,7 @@ judge() # <log> <where>
 	local l=$1 w=$2
 	lines "$l" | grep -q "FAILED" && fail "$w: $(lines "$l" | grep FAILED | head -1)"
 	grep -aq "jam check: errors ok" "$l" || fail "$w: the errors"
+	grep -aq "jam check: jam 1 header ok" "$l" || fail "$w: the jam 1 line"
 	for h in $HASHES; do
 		grep -aq "jam check: hash ${h%%:*} ${h#*:}," "$l" ||
 			fail "$w: hash ${h%%:*} is not ${h#*:} ($(lines "$l" | grep "hash ${h%%:*} "))"

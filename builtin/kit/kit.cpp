@@ -370,7 +370,7 @@ struct Type
 	// [KIT] stage 4d: each signal's value's type ("any" where the file
 	// gives none; "none": no value)
 	sm_<ss_, ss_> in_types, out_types;
-	// It reads every player entity (players = true); it is on each player
+	// It reads every player entity (reads_players = true); it is on each player
 	// entity, not placed (player = true)
 	bool players = false, player = false;
 	// [KIT_PARTICLES] The parameter saying which world event its on_event
@@ -382,9 +382,10 @@ struct Type
 	// on_tool, the wear)
 	bool placeable = false, health = false, equipment = false;
 	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
-	// state members and score); it reads every team (teams = true)
+	// state members and score); it reads every team (reads_teams = true)
 	bool team = false, teams = false;
-	// [KIT_CTF] It reads its scene's regions (regions = true: c:region_at)
+	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
+	// c:region_at)
 	bool regions = false;
 	// Its client part, <name>.client.lua beside it ("" none)
 	ss_ client;
@@ -1947,7 +1948,74 @@ struct Module: public interface::Module, public Interface
 		return full_type("kit/"+type);
 	}
 
-	bool load_type(const ss_ &name, ss_ &why)
+	// [KIT_API_1] (decision 4) The names a type table may hold: Kit's
+	// (api.h's "Types"), a helper goes in a local. kit_plan 4z37j (3) C's
+	// experimental too
+	static const std::set<ss_> &type_fields()
+	{
+		static const std::set<ss_> F = {"about", "actions", "between_plays",
+				"bot", "builds", "children", "component", "container", "controls",
+				"creature", "environment", "equipment", "events", "experimental",
+				"gizmo", "grants", "health", "hud", "inputs", "inventory",
+				"linked_in", "listed", "look", "marker", "movement", "nearby",
+				"no_position", "outputs", "owns_voxel", "parallax", "params",
+				"placeable", "player", "reads_players", "reads_regions",
+				"reads_teams", "reads_voxels", "region", "right_use", "root",
+				"seat", "senses", "sight", "space", "spawn", "spawn_spots",
+				"state", "takes_text", "team", "ui", "usable", "use_range",
+				"use_when", "version", "volume", "voxel_box", "world",
+				"world_region", "zone"};
+		return F;
+	}
+	// ... and the functions: its handlers
+	static const std::set<ss_> &handler_names()
+	{
+		static const std::set<ss_> H = {"allow", "inventory_add",
+				"inventory_count", "inventory_list", "inventory_take", "migrate",
+				"modify_hit", "on_action", "on_blast", "on_build", "on_daytime",
+				"on_died", "on_enter", "on_event", "on_fall", "on_give", "on_hit",
+				"on_input", "on_inventory", "on_item", "on_join", "on_leave",
+				"on_params", "on_reload", "on_remove", "on_session_end",
+				"on_session_start", "on_start", "on_timer", "on_tool", "on_ui",
+				"on_use", "on_voxel", "plan", "step"};
+		return H;
+	}
+	// Why its table is not one Kit knows, each ("": it is): a field or a
+	// function not Kit's, a field of before (read as its new name: renamed,
+	// {old, new}), a parameter or state key in Kit's kit_ prefix
+	static sv_<ss_> type_table_faults(const json::Value &decl,
+			const std::set<ss_> &handlers)
+	{
+		sv_<ss_> out;
+		for(json::Iterator it(decl); it; ++it){
+			const ss_ &k = it.key();
+			// (handlers and the signals' *_types and *_labels: Kit's own,
+			// signal_names()')
+			if(k == "handlers" || type_fields().count(k) || k == "inputs_types" ||
+					k == "outputs_types" || k == "inputs_labels" ||
+					k == "outputs_labels")
+				continue;
+			if(k == "players" || k == "teams" || k == "regions")
+				out.push_back(k+" = true is reads_"+k+" = true now");
+			else
+				out.push_back(k.substr(0, 64)+": not a type field Kit knows (a "
+						"helper goes in a local)");
+		}
+		for(const ss_ &h : handlers)
+			if(!handler_names().count(h))
+				out.push_back(h.substr(0, 64)+": a function, and no handler Kit "
+						"knows (a helper goes in a local)");
+		for(const char *k : {"params", "state"})
+			for(json::Iterator it(decl.get(k)); it; ++it)
+				if(it.key().compare(0, 4, "kit_") == 0)
+					out.push_back(ss_(k)+" "+it.key().substr(0, 64)+": names "
+							"starting kit_ are Kit's");
+		return out;
+	}
+
+	// strict: put by a builder (put_type, the editor), where
+	// type_table_faults() refuse it; a load only warns of them
+	bool load_type(const ss_ &name, ss_ &why, bool strict = false)
 	{
 		if(m_types.count(name))
 			return true;
@@ -2002,14 +2070,31 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		names("handlers", t.handlers);
-		t.players = t.decl.get("players").is_true();
+		// [KIT_API_1] (decision 4) its table's names Kit's
+		{
+			const sv_<ss_> faults = type_table_faults(t.decl, t.handlers);
+			if(strict && !faults.empty()){
+				why = name+": "+faults[0]+(faults.size() > 1 ? " (and "+
+						itos(faults.size() - 1)+" more)" : ss_());
+				return false;
+			}
+			for(const ss_ &f : faults)
+				log_w(MODULE, "Component type %s: %s", cs(name), cs(f));
+		}
+		// [KIT_API_1] (decision 5) players, teams and regions of before read
+		// as reads_*
+		auto reads = [&](const char *k){
+			return t.decl.get(ss_("reads_")+k).is_true() ||
+					t.decl.get(k).is_true();
+		};
+		t.players = reads("players");
 		t.player = t.decl.get("player").is_true();
 		t.placeable = t.decl.get("placeable").is_true();
 		t.health = t.decl.get("health").is_true();
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
-		t.teams = t.decl.get("teams").is_true();
-		t.regions = t.decl.get("regions").is_true();
+		t.teams = reads("teams");
+		t.regions = reads("regions");
 		t.events = jstr(t.decl, "events");
 		// Its client part, beside it
 		const ss_ client = local ? jstr(lt->second, "client") : pkg ?
@@ -3348,7 +3433,7 @@ struct Module: public interface::Module, public Interface
 			if(it == m_entities.end() || it->first == 1)
 				return 0;
 			if(const Instance *in = symmetry_in(it->second))
-				return in->params.get("on").is_true() ? it->first : 0;
+				return in->params.get("enabled").is_true() ? it->first : 0;
 		}
 		return 0;
 	}
@@ -3540,7 +3625,7 @@ struct Module: public interface::Module, public Interface
 			const Entity &s = m_entities[sid];
 			symmetry::Config c;
 			ss_ why;
-			if(!symmetry_in(s)->params.get("on").is_true())
+			if(!symmetry_in(s)->params.get("enabled").is_true())
 				continue;
 			if(!sym_config(s, c, why)){
 				log_w(MODULE, "Entity %s's kit/symmetry copies nothing: %s",
@@ -3765,7 +3850,7 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < cs_.size(); k++)
 				if(full_type(jstr(cs_.at(k), "type")) == SYMMETRY_TYPE){
 					if(on)
-						*on = cs_.at(k).get("params").get("on").is_true();
+						*on = cs_.at(k).get("params").get("enabled").is_true();
 					return true;
 				}
 			return false;
@@ -3932,7 +4017,7 @@ struct Module: public interface::Module, public Interface
 						on = false;
 				} else {
 					n = m_entities[sid];
-					on = symmetry_in(n)->params.get("on").is_true();
+					on = symmetry_in(n)->params.get("enabled").is_true();
 				}
 				symmetry::Config cf;
 				cfgs[sid] = std::make_pair(on && sym_config(n, cf, w2), cf);
@@ -3980,7 +4065,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_entities){
 			const Instance *in = symmetry_in(p.second);
 			ss_ why;
-			if(in && in->params.get("on").is_true() && scene_of(p.second) == ref &&
+			if(in && in->params.get("enabled").is_true() && scene_of(p.second) == ref &&
 					sym_config(p.second, c, why))
 				return &p.second;
 		}
@@ -4238,7 +4323,7 @@ struct Module: public interface::Module, public Interface
 				continue;
 			json::Value o = json::object();
 			o.set("id", (int64_t)p.first);
-			const bool on = in->params.get("on").is_true();
+			const bool on = in->params.get("enabled").is_true();
 			o.set("on", on);
 			symmetry::Config c;
 			ss_ why;
@@ -5116,27 +5201,45 @@ struct Module: public interface::Module, public Interface
 	// prefab): its own; none, in a file of "kit" 1 or more 1 (Kit writes
 	// each one's since), in one from before the type's current (Kit left
 	// that out then); 0: the type's current, for entity_from_json()
+	// [KIT_API_1] (4z37j (3) B) Kit's types bumped since files had a "kit"
+	// level: the version a file from before left out (its writer did where
+	// it was the type's then); 0 for the rest (today's is that one)
+	// simplified: a bare type name read as Kit's
+	static int64_t legacy_version(ss_ type)
+	{
+		static const sm_<ss_, int64_t> V = {{"kit/effect", 1},
+				{"kit/symmetry", 1}, {"kit/spawn_rule", 1},
+				{"kit/voxel_replace", 1}, {"kit/voxel_states", 1}};
+		if(type.find('/') == ss_::npos)
+			type = "kit/"+type;
+		auto it = V.find(type);
+		return it == V.end() ? 0 : it->second;
+	}
 	static int64_t file_version(const json::Value &file, const json::Value &c)
 	{
 		const json::Value &v = c.get("version");
 		if(v.is_number())
 			return (int64_t)v.as_number();
-		return json::jint(file, "kit", 0) >= 1 ? 1 : 0;
+		return json::jint(file, "kit", 0) >= 1 ? 1 :
+				legacy_version(jstr(c, "type"));
 	}
 	// The file's entities with file_version()'s, each component's
 	static json::Value file_versions(const json::Value &file,
 			const json::Value &es)
 	{
-		if(json::jint(file, "kit", 0) < 1 || !es.is_array())
+		if(!es.is_array())
 			return es;
 		json::Value out = es.deepcopy();
 		for(unsigned i = 0; i < out.size(); i++){
 			if(!out.at(i).get("components").is_array())
 				continue;
 			json::Value &cs = out[i]["components"];
-			for(unsigned k = 0; k < cs.size(); k++)
-				if(cs.at(k).is_object() && cs.at(k).get("version").is_undefined())
-					cs[k].set("version", (int64_t)1);
+			for(unsigned k = 0; k < cs.size(); k++){
+				const int64_t v = cs.at(k).is_object() ?
+						file_version(file, cs.at(k)) : 0;
+				if(v && cs.at(k).get("version").is_undefined())
+					cs[k].set("version", v);
+			}
 		}
 		return out;
 	}
@@ -6455,7 +6558,8 @@ struct Module: public interface::Module, public Interface
 	// Installed at once, Running or not; refused, the version before
 	// stays (its error in the Log of each entity it is on). what: the
 	// edit's text
-	ss_ install_local(const ss_ &name, const json::Value &row, ss_ &what)
+	ss_ install_local(const ss_ &name, const json::Value &row, ss_ &what,
+			bool strict = false)
 	{
 		auto old = m_local_types.find(name);
 		const json::Value was = old == m_local_types.end() ? json::Value() :
@@ -6479,7 +6583,7 @@ struct Module: public interface::Module, public Interface
 				m_local_types[name] = row;
 			else
 				m_local_types.erase(name);
-			if(row.is_object() && (!load_type(name, why) ||
+			if(row.is_object() && (!load_type(name, why, strict) ||
 					(is_movement(name) && !steps_tried(name, why)))){
 				m_types.erase(name);
 				m_sources.erase(name);
@@ -6695,7 +6799,7 @@ struct Module: public interface::Module, public Interface
 			row.set("by", p.name);
 		}
 		const json::Value before = had ? m_local_types[name] : json::Value();
-		why = install_local(name, row, what);
+		why = install_local(name, row, what, !del);
 		// (a plain type loads in a few ms; a loop to the budget's end
 		// takes about 100, the box's restart after it as much again)
 		const int64_t took = interface::os::time_us() - now;
@@ -9510,7 +9614,7 @@ struct Module: public interface::Module, public Interface
 		static const char *const N[] = {
 			// generators
 			"on_build", "c:child", "c:link", "c:voxel_box", "c.entities",
-			"c:generate",
+			"c.move_lib", "c:generate",
 			// driving bots
 			"c:drive", "c.body", "c.path",
 			// a movement's touch bar
@@ -17790,9 +17894,6 @@ struct Module: public interface::Module, public Interface
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
-		// [KIT_TOOLS_1] kit/health's c:respawn() on a player's entity
-		if(fx.get("respawn").is_true() && (e.kind == "player" || is_bot(e)))
-			respawn_player(e.id);
 		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
 		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
 		// running the targets' hooks now: what the caller's run() reads
@@ -17872,7 +17973,7 @@ struct Module: public interface::Module, public Interface
 
 	// The entities an instance reaches: its own, its links' ends, those its
 	// entity parameters name, the copies it made, the player who set the
-	// run off, every player for a type that reads them (`players`), and
+	// run off, every player for a type that reads them (`reads_players`), and
 	// [KIT_PANEL_PARENT] the panel it is in
 	std::set<uint64_t> reach(const Entity &e, size_t comp, const ss_ &by)
 	{
@@ -17938,7 +18039,7 @@ struct Module: public interface::Module, public Interface
 		return r;
 	}
 
-	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
+	// [KIT_MINIGAMES_FIX] The teams a `reads_teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
 	// any (a placed prefab's own)
 	// [KIT_CTF] A `map` scene of its own (kit/arena's): that scene's teams
@@ -21565,7 +21666,7 @@ struct Module: public interface::Module, public Interface
 	// times factor (0...10) from now on, on the server's steps and their
 	// client's prediction (controls_for sends the parameters), until the
 	// next call, their body's going (a leave, another session) or Stop. A
-	// player it reaches: the run's, or any for a type with `players`
+	// player it reaches: the run's, or any for a type with `reads_players`
 	void speed_fx(const Entity &e, size_t comp, const ss_ &by,
 			const json::Value &s)
 	{
@@ -26074,7 +26175,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_SPAWN_RULE] For a type with `spawn_spots = true` (kit/spawn_rule):
 	// spots = {{x, y, z}...}, at most one a player of its scene (here, alive), a
 	// cell's middle on a solid voxel with two free over it, radius / 2 to
-	// radius from them across, 8 up to 16 down: the voxel one of `on` (names,
+	// radius from them across, 8 up to 16 down: the voxel one of `on_voxels` (names,
 	// "," or " " between; none: any), the sky light in the cell over it within
 	// light_min...light_max (the World's sky light off: 15), none of the kind
 	// (copies of its prefab; apart_any: any creature) within `apart` m, nor
@@ -26097,7 +26198,7 @@ struct Module: public interface::Module, public Interface
 		const bool any = p.get("apart_any").is_true();
 		std::set<ss_> on;
 		{
-			ss_ s = jstr(p, "on");
+			ss_ s = jstr(p, "on_voxels");
 			for(char &ch : s)
 				if(ch == ',')
 					ch = ' ';
@@ -29983,19 +30084,6 @@ struct Module: public interface::Module, public Interface
 			return amount;
 		}
 		return 0;
-	}
-
-	// A player's entity back at their spawn (kit/health's c:respawn()):
-	// their team's pad, else the last spawner of players in their scene,
-	// else the app's default
-	void respawn_player(uint64_t player)
-	{
-		const size_t peer = peer_of_player(player);
-		if(!peer && !is_bot_id(player))
-			return;
-		// [KIT_INVENTORY_PLAY] the inventory at a death, the kits at a spawn
-		player_died(player);
-		revive(player);
 	}
 
 	// ---- [KIT_CTF] Death and respawn, hurts and blasts
@@ -33955,7 +34043,10 @@ struct Module: public interface::Module, public Interface
 				"linked_in = true: c.linked_in = {input = {id...}}, the entities "
 				"linking to it, which it reaches (c:send); inputs = {name = "
 				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
-				"outputs likewise; usable = true (players use it: on_use); look "
+				"outputs likewise; usable = true (players use it: on_use); "
+				"reads_players = true (c.players), reads_teams = true (c.teams); "
+				"no other field or function (a helper goes in a local), no kit_ "
+				"param or state name (Kit's); look "
 				"= {shape = \"box\"|\"sphere\", size = n or {x, y, z}, color = "
 				"\"#rrggbb\", solid = true, text = \"<shared state key>\"}; zone "
 				"= \"<a position param>\" (a box of cells from its place) or "
@@ -34040,7 +34131,7 @@ struct Module: public interface::Module, public Interface
 				"body (node at its feet, s its state; another's {pos, pose}; yaw "
 				"the own body's as drawn between its steps, degrees; scenery is "
 				"kit/parallax's, not a client part's; kit.shake(a), "
-				"kit.effect{at, ...} and kit.mark(x, y, z, yaw, size, color) "
+				"kit.effect{at, ...} and kit.mark{at, yaw, size, color} "
 				"from any of them: get_guide); with client left out, the type's "
 				"client part stays as it is; \"\" takes it away. A few lines "
 				"changed: edit_type.",
@@ -39836,6 +39927,8 @@ struct Module: public interface::Module, public Interface
 			"of its range, is an error with its line number. # at a line's start or after a space "
 			"starts a comment (C#3 is a note). Order: settings, instruments, "
 			"tracks, then patterns, sections, play, loop, moods.\n"
+			"  jam 1              # optional, the first line: the format's "
+			"version (none: 1; a higher one is refused, a newer Buildat's)\n"
 			"  title Scrap Heat\n"
 			"  tempo 150          # beats a minute (20..400)\n"
 			"  steps 16           # steps a bar\n"
@@ -40126,7 +40219,8 @@ struct Module: public interface::Module, public Interface
 			"players (kit/controls' movement): its events are its outputs, "
 			"its client part's draw(s, node, yaw) draws them (the Crag Trial "
 			"template's local/crag_bike). State with kept = true (best "
-			"times) outlives Stop and restarts; clear_kept clears it.\n"
+			"times) outlives Stop and restarts (a game session's its own); "
+			"clear_kept clears it.\n"
 			"- Work in small steps and read back: get_state (or list_types), "
 			"then place, set_param, link, start, try_input, get_events, "
 			"get_log, stop, fix, again. An edit's arguments are 4 KB at "
@@ -40168,6 +40262,14 @@ struct Module: public interface::Module, public Interface
 				"error's text), network protocols, per-run caps and rates (c:hurt "
 				"16 a run, c:after 64, set_voxels 4096...: never rely on meeting "
 				"one), and the editor's UI.\n"
+				// [KIT_API_1] (decision 5) api.h's "Names"
+				"- Names: a type table holds Kit's fields and handlers alone (a "
+				"helper goes in a local); names starting kit_ are Kit's. Kit's "
+				"own: a bool on from the start is enabled; inputs show/hide (UI), "
+				"on/off (a switch), enable/disable (a behaviour); radius an "
+				"area, range noticing, distance kept, reach an attack's; speed "
+				"and top_speed m/s, other speeds relative; damage is type; read "
+				"access is reads_*.\n"
 				"- Scenes in a tree: a scene may sit under another "
 				"(new_scene's parent, set_parent with a scene's id; get_state's "
 				"scenes_under), a group (a hub or a menu, a real scene with its "
@@ -40190,7 +40292,7 @@ struct Module: public interface::Module, public Interface
 				"c:link(child, output, to, input) (to: a child's number, 0 the "
 				"generator, {id = n} an entity of the scene's), c:voxel_box{...}; "
 				"c.entities, the scene's other entities ({id, name, types, pos, "
-				"yaw}), to avoid or decorate; c.move, move.lua's library; its "
+				"yaw}), to avoid or decorate; c.move_lib, move.lua's library; its "
 				"type's children = n caps them (63 by default, 1023 at most); an error() "
 				"refuses the run, its text the reason. get_state's generators "
 				"lists them and their last run (children, kept, gone, its c:log "
@@ -40266,7 +40368,7 @@ struct Module: public interface::Module, public Interface
 				"player's own client as their predicted body meets the zone "
 				"(the server's shapes), a round trip before the server's "
 				"on_enter: animate there (e:predict), decide on the server. "
-				"c.players (players = true) lists every "
+				"c.players (reads_players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to those not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
@@ -40298,7 +40400,7 @@ struct Module: public interface::Module, public Interface
 				"the same; keep a description fixed, vary at, dir and count; "
 				"64 bursts live and 240 a second from all parts, the rest "
 				"dropped: a stream is a small count every 0.1 s, ttl under 1 s); "
-				"kit.mark(x, y, z, yaw, size, color[, alpha]) a flat quad on the "
+				"kit.mark{at = {x, y, z}, yaw, size, color, alpha} a flat quad on the "
 				"ground (a tyre's mark: size {across, along} m, yaw as s.yaw, "
 				"0.02 m above y; the newest 1024 kept, shown within 0.1 s; ~60 "
 				"us each: one a wheel every metre or so, not every frame), "
@@ -41611,7 +41713,7 @@ struct Module: public interface::Module, public Interface
 			symmetry::Config cf;
 			ss_ why;
 			if(!symmetry_in(pe.second) || !symmetry_in(pe.second)->params.get(
-					"on").is_true() || !sym_config(pe.second, cf, why))
+					"enabled").is_true() || !sym_config(pe.second, cf, why))
 				continue;
 			const SymCounts n = sym_copy(scene_of(pe.second), cf, false, nullptr, by);
 			const ss_ ents = sym_parity_entities(pe.second, cf);
@@ -42789,7 +42891,7 @@ struct Module: public interface::Module, public Interface
 		std::map<uint64_t, ss_> sym_was;
 		for(auto &e : m_entities)
 			if(const Instance *si = symmetry_in(e.second))
-				sym_was[e.first] = si->params.get("on").is_true() ?
+				sym_was[e.first] = si->params.get("enabled").is_true() ?
 						si->params.stringify() : "";
 		std::deque<Change> &u = m_undo[p.name];
 		commit(change, &u);
@@ -42797,7 +42899,7 @@ struct Module: public interface::Module, public Interface
 			const Instance *si = symmetry_in(e.second);
 			symmetry::Config cf;
 			ss_ cwhy;
-			if(!si || !si->params.get("on").is_true() || sym_was[e.first] ==
+			if(!si || !si->params.get("enabled").is_true() || sym_was[e.first] ==
 					si->params.stringify() || u.empty() ||
 					!sym_config(e.second, cf, cwhy))
 				continue;
@@ -45410,7 +45512,7 @@ struct Module: public interface::Module, public Interface
 
 	// A run's c:session_start(players), c:session_move(player, id),
 	// c:session_end(id): the players it reaches (in its zone, the run's,
-	// any for a type with `players`), the sessions it made; none from a
+	// any for a type with `reads_players`), the sessions it made; none from a
 	// session but its own end and moves back
 	void session_fx(const Entity &e, size_t comp, const Run &r,
 			const json::Value &ops)

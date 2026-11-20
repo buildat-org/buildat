@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-20)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c src/interface/aitta.h util/kit_api1_alpha47.json
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c src/interface/aitta.h util/kit_api1_alpha47.json builtin/kit/types/effect.lua builtin/kit/types/symmetry.lua builtin/kit/types/spawn_rule.lua builtin/kit/types/voxel_replace.lua builtin/kit/types/voxel_states.lua
 # [KIT_API_1] Kit's formats and levels, on Workbench's server alone (no
 # client): save rows written by the check, the server started on them, the
 # rows it saves read back.
@@ -20,6 +20,13 @@
 #      is its type's current one, not migrated (x 300 stays).
 #   4. A save of Crag Trial written by 0.8.0-alpha.47 (util/kit_api1_alpha47
 #      .json) is hosted and written back with "kit" 1, each entity kept.
+#   5. 4z37j (3) B's renames: kit/effect's, kit/symmetry's and
+#      kit/spawn_rule's `on`, kit/voxel_replace's and kit/voxel_states'
+#      `start_on` at version 1 in "kit" 1, and unversioned from before, are
+#      written back at version 2 under the new names. A check type with
+#      players = true and a field Kit does not know loads, both warned of,
+#      and reads the players; its c:add with ext.player and c:list with
+#      ext.kit_x are refused.
 #   util/kit_api1_formats_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -53,6 +60,23 @@ return {
 			c:hurt("player:60", 3)
 		else
 			c:hurt(nil, 3)
+		end
+	end,
+}
+EOF
+# (5) a table of before: players = true and a field Kit does not know
+cat > "$BUILDAT_WORKBENCH_TYPES/reader.lua" <<'EOF'
+return {
+	version = 1,
+	players = true,
+	plyers = true,
+	look = {shape = "box", size = {0.3, 0.3, 0.3}, color = "#2020a0"},
+	on_timer = function(c, name)
+		if name == "a" then
+			c:log("reader players " .. type(c.players))
+			c:add("stone", 1, {player = 1})
+		else
+			c:list({kit_x = 1})
 		end
 	end,
 }
@@ -187,6 +211,63 @@ assert c["version"] == 2 and c["params"]["x"] == 300, c
 [ $? = 0 ] || fail "a composition from before: its unversioned ui_text migrated ($t/srv5.log)"
 echo "ok: from before, an unversioned component is its type's current"
 
+# 5. 4z37j's renames, from "kit" 1 at version 1 and from before unversioned
+RENAMED='[
+	{"id": 3, "parent": 2, "name": "effect", "components": [
+		{"type": "kit/effect", VER "params": {"on": "hit"}}]},
+	{"id": 4, "parent": 1, "name": "symmetry", "components": [
+		{"type": "kit/symmetry", VER "params": {"on": True}}]},
+	{"id": 5, "parent": 2, "name": "spawn_rule", "components": [
+		{"type": "kit/spawn_rule", VER "params": {"on": "stone", "enabled": False}}]},
+	{"id": 6, "parent": 2, "name": "voxel_replace", "components": [
+		{"type": "kit/voxel_replace", VER "params": {"start_on": True}}]},
+	{"id": 7, "parent": 2, "name": "voxel_states", "components": [
+		{"type": "kit/voxel_states", VER "params": {"start_on": True}}]}]'
+V1='"version": 1,'
+CHECK_RENAMED='
+c = {x["id"]: x["components"][0] for x in get("authored")["entities"] if x["id"] in range(3, 8)}
+want = {3: ("trigger", "hit"), 4: ("enabled", True), 5: ("on_voxels", "stone"),
+	6: ("enabled", True), 7: ("enabled", True)}
+for i, (k, v) in want.items():
+	p = c[i]["params"]
+	assert c[i]["version"] == 2 and p.get(k) == v, (WHAT, c[i])
+	assert "on" not in p and "start_on" not in p and not c[i].get("old_params"), (WHAT, c[i])
+assert c[5]["params"]["enabled"] is False, c[5]
+'
+rows world "$SET"'
+put("authored", {"kit": 1, "api": 1, "next_id": 9, "entities": [
+	{"id": 2, "parent": 1, "name": "world", "kind": "scene"},
+	{"id": 8, "parent": 2, "name": "reader", "pos": [0, 1, 0],
+		"components": [{"type": "workbench/reader", "version": 1}]}] + '"${RENAMED//VER/$V1}"'})
+put("session", {"by": "", "restore": [], "round": [], "running": True})
+put("runtime", {"8": [{"type": "workbench/reader", "state": {}, "timers": [
+		{"name": "a", "player": "", "s": 0.2, "by": ""},
+		{"name": "b", "player": "", "s": 0.4, "by": ""}]}],
+	"made": [], "removed": [], "players": {}, "next_id": 61})
+db.commit()
+' || fail "the rows"
+server 7 world "ext.kit_x is reserved"
+grep -aq "Hosted: " "$t/srv7.log" || fail "not hosted ($t/srv7.log)"
+for w in "Component type workbench/reader: players = true is reads_players = true now" \
+		"Component type workbench/reader: plyers: not a type field Kit knows" \
+		"reader players table" "ext.player is reserved" "ext.kit_x is reserved"; do
+	grep -aqF "$w" "$t/srv7.log" || fail "no \"$w\" ($t/srv7.log)"
+done
+rows world "$SET""WHAT = 'kit 1'$CHECK_RENAMED" ||
+	fail "kit 1's renamed params ($t/srv7.log)"
+echo "ok: kit 1: effect's on, symmetry's on, spawn_rule's on, voxel_replace's and voxel_states' start_on migrated to v2's names; a type of players = true and an unknown field loads warned of, reads players; ext.player and ext.kit_ refused"
+rows world "$SET"'
+put("authored", {"next_id": 8, "entities": [
+	{"id": 2, "parent": 1, "name": "world", "kind": "scene"}] + '"${RENAMED//VER/}"'})
+put("session", {"by": "", "restore": [], "round": [], "running": False})
+put("runtime", {"made": [], "removed": [], "players": {}, "next_id": 61})
+db.commit()
+' || fail "the rows"
+server 8 world
+rows world "$SET""WHAT = 'from before'$CHECK_RENAMED" ||
+	fail "the renamed params from before ($t/srv8.log)"
+echo "ok: from before: the five renamed params, unversioned, migrated"
+
 # 4. alpha.47's Crag Trial save
 mkdir -p "$(dirname "$(db crag)")"
 python3 - "$here/util/kit_api1_alpha47.json" "$(db crag)" <<'PY' || fail "the fixture"
@@ -220,4 +301,4 @@ for i in o:
 print("ok: alpha.47's Crag Trial save hosted, its %d entities as they were%s" %
 	(len(n), ", written back with \"kit\" 1" if "kit" in now else ""))
 PY
-echo "PASS: Kit's formats and levels: a type bumped after the export migrates (old_params kept), a newer \"kit\" and a newer component version refused with the newer-Buildat message, unknown keys and an unread made entity written back, c:hurt(\"player:<id>\"); a composition from before and alpha.47's save load"
+echo "PASS: Kit's formats and levels: a type bumped after the export migrates (old_params kept), a newer \"kit\" and a newer component version refused with the newer-Buildat message, unknown keys and an unread made entity written back, c:hurt(\"player:<id>\"); a composition from before and alpha.47's save load; the 4z37j renames migrate, a type table of before loads warned of"

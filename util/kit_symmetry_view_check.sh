@@ -57,7 +57,7 @@ sym() # <param> <value>
 	sym slices '"quadrants"'
 	sym mode '"rotational"'
 	sym slice '"+x+z"'
-	sym on true
+	sym enabled true
 	edit '{"op": "set", "id": 9, "comp": 0, "param": "text", "value": "A copy of its own"}'
 	cat <<EOF
 event kit_plan 0 0 80 4

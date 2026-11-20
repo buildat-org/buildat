@@ -17,7 +17,7 @@
 **                        player entity's own kit/inventory) or inv_self;
 **                        [KIT] stage 4d: player_id (the player entity),
 **                        names {by = name}, made {id...}, players (a type's
-**                        `players`), next_id and sizes {"prefab:<name>" |
+**                        `reads_players`), next_id and sizes {"prefab:<name>" |
 **                        "entity:<id>" = entities a copy makes};
 **                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
 **                        voxel_box) and voxels {names, ids} (reads_voxels:
@@ -41,7 +41,7 @@
 **                        [KIT_CARRY_ATTACH] attach = {player,
 **                        bone, x, y, z} | false (c:attach, c:detach);
 **                        the request's regions = {{id, team,
-**                        rules, o, n}...} (a type's `regions`: c:region_at)
+**                        rules, o, n}...} (a type's `reads_regions`: c:region_at)
 **                        (looking that way, level), sessions =
 **                        {{"start", {player id...} | null} | {"move",
 **                        player id, session} | {"end", session}...}
@@ -55,8 +55,7 @@
 **                        {entities, voxels} (on_build's: a prefab's
 **                        members, [KIT_GENERATORS]; its request's
 **                        max_children and entities), generate = {{id,
-**                        params}...} (c:generate), respawn = true
-**                        (c:respawn()), [KIT_CTF] died = {by, type},
+**                        params}...} (c:generate), [KIT_CTF] died = {by, type},
 **                        respawn_waiting = true, hurt = {{player, amount,
 **                        fraction, type}...}, explode = {{x, y, z, radius,
 **                        power, kill, hurt, share, friendly_fire,
@@ -429,6 +428,17 @@ static const char PRELUDE[] =
 "		mark('p')\n"
 "		return r\n"
 "	end\n"
+"	-- [KIT_API_1] ext's player and kit_ keys are Kit's (a later Kit's\n"
+"	-- ext.player: that player's inventory)\n"
+"	local function ext_ok(ext, level)\n"
+"		if ext == nil then return {} end\n"
+"		if type(ext) ~= 'table' then error('ext is a table', level) end\n"
+"		for k in pairs(ext) do\n"
+"			if k == 'player' or type(k) == 'string' and k:sub(1, 4) == 'kit_' then\n"
+"				error('ext.' .. k .. ' is reserved (Kit\\'s)', level) end\n"
+"		end\n"
+"		return ext\n"
+"	end\n"
 "	local function args(item, n, ext)\n"
 "		-- [KIT_TOOLS_1] or an item type's <author>/<name>\n"
 "		if type(item) ~= 'string' or #item > 129 or not (item:match('^[%w_]+$') and #item <= 64 or\n"
@@ -436,8 +446,7 @@ static const char PRELUDE[] =
 "			error('an item is letters, digits and _, or an item type\\'s <author>/<name>', 4) end\n"
 "		if type(n) ~= 'number' or n < 1 or n > MAX_ITEMS or n % 1 ~= 0 then\n"
 "			error('a count is a whole number from 1', 4) end\n"
-"		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 4) end\n"
-"		return ext or {}\n"
+"		return ext_ok(ext, 5)\n"
 "	end\n"
 "	local inv = {}\n"
 "	function inv.count(item, ext)\n"
@@ -452,9 +461,9 @@ static const char PRELUDE[] =
 "		return call(h, player, item, n or 1, ext) == true\n"
 "	end\n"
 "	function inv.list(ext)\n"
-"		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 3) end\n"
+"		ext = ext_ok(ext, 4)\n"
 "		if not player then return {} end\n"
-"		local l = call('inventory_list', player, ext or {})\n"
+"		local l = call('inventory_list', player, ext)\n"
 "		return type(l) == 'table' and copy(l) or {}\n"
 "	end\n"
 "	function inv.finish()\n"
@@ -532,7 +541,6 @@ static const char PRELUDE[] =
 "	function c:count(item, ext) return inv.count(item, ext) end\n"
 "	function c:has(item, n, ext) return inv.count(item, ext) >= (tonumber(n) or 1) end\n"
 "	function c:add(item, n, ext) return inv.change('inventory_add', item, n, ext) end\n"
-"	c.give = c.add\n"
 "	function c:take(item, n, ext) return inv.change('inventory_take', item, n, ext) end\n"
 "	function c:list(ext) return inv.list(ext) end\n"
 "	-- [KIT_GUIDE_BOTS_2] by: as set off by that player or bot (\"player:<id>\", \"bot:<id>\")\n"
@@ -613,7 +621,7 @@ static const char PRELUDE[] =
 "	end\n"
 "	-- [KIT_CTF] its own entity moved (the world's position; fall: down\n"
 "	-- onto the first solid below, on_fall's), a player's speed, the\n"
-"	-- region deciding a cell (a type's `regions`: the smallest holding it)\n"
+"	-- region deciding a cell (a type's `reads_regions`: the smallest holding it)\n"
 "	function c:move(pos, opts)\n"
 "		if type(pos) ~= 'table' then error('move: a position, {x, y, z}', 2) end\n"
 "		if opts ~= nil and type(opts) ~= 'table' then error('move: options are {fall = true}', 2) end\n"
@@ -690,7 +698,7 @@ static const char PRELUDE[] =
 "	end\n"
 "	function c:detach() fx.attach = false end\n"
 "	function c:region_at(pos)\n"
-"		if not req.regions then error('region_at: its type reads no regions (regions = true)', 2) end\n"
+"		if not req.regions then error('region_at: its type reads no regions (reads_regions = true)', 2) end\n"
 "		if type(pos) ~= 'table' then error('region_at: a position, {x, y, z}', 2) end\n"
 "		local p = {}\n"
 "		for k = 1, 3 do local v = (tonumber(pos[k]) or 0) + 0.5 p[k] = v - v % 1 end\n"
@@ -730,16 +738,14 @@ static const char PRELUDE[] =
 "	-- default the sessions it made, {[id] = {players, taken, clock}}\n"
 "	c.session_players = req.session_players or 0\n"
 "	c.sessions = req.sessions or {}\n"
-"	-- [KIT_TOOLS_1] whether it is on a player's entity; c:respawn() puts\n"
-"	-- that player at their spawn after the run (kit/health's death)\n"
+"	-- [KIT_TOOLS_1] whether it is on a player's entity\n"
 "	c.is_player = req.is_player or false\n"
 "	-- [KIT_PANEL_PARENT] the panel it is in (its parent, if a panel)\n"
 "	c.panel = req.panel\n"
-"	function c:respawn() fx.respawn = true end\n"
 "	-- [KIT_CTF] a health's death of its player (c.is_player): Kit's on_died\n"
 "	-- hooks, then kit/game_rules' respawn; every waiting player respawned;\n"
 "	-- a player hurt; a blast (api.h)\n"
-"	function c:died(by, kind) fx.died = {by == nil and NULL or tostring(by), kind == nil and NULL or tostring(kind)} end\n"
+"	function c:died(by, type) fx.died = {by == nil and NULL or tostring(by), type == nil and NULL or tostring(type)} end\n"
 "	function c:respawn_waiting() fx.respawn_waiting = true end\n"
 "	function c:hurt(player, amount)\n"
 "		local h = fx.hurt or {}\n"
@@ -795,10 +801,11 @@ static const char PRELUDE[] =
 "	-- host checks them as a prefab's), their links and a voxel box\n"
 "	local build = {entities = {}}\n"
 "	-- ([KIT_GENERATORS] 4z37f: the type's `children` at most; the scene's\n"
-"	-- entities to read, move.lua's library to check what it makes)\n"
+"	-- entities to read, move.lua's library to check what it makes:\n"
+"	-- c.move_lib, as the clients' kit.move_lib; c:move is another thing)\n"
 "	local most = req.max_children or 63\n"
 "	c.entities = req.entities or {}\n"
-"	if req.handler == 'on_build' then c.move = move end\n"
+"	if req.handler == 'on_build' then c.move_lib = move end\n"
 "	function c:child(t)\n"
 "		if type(t) ~= 'table' or type(t.type) ~= 'string' then error('child: {type = name, pos = {x, y, z}, ...}', 2) end\n"
 "		if #build.entities >= most then error('child: ' .. most .. ' a build at most', 2) end\n"

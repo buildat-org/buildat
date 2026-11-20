@@ -48,8 +48,8 @@ end
 return {
 	version = 1,
 	no_position = true,
-	players = true,
-	teams = true,
+	reads_players = true,
+	reads_teams = true,
 	ui = {kind = "players", text = "param:title",
 		anchor = "param:anchor", x = "param:x", y = "param:y",
 		width = "param:width", height = "param:height", color = "param:color",
