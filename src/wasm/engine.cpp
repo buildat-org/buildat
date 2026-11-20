@@ -912,10 +912,10 @@ static ss_ upper(ss_ s)
 // A child of the process's ([CLIENT_WASM_WINDOWS]): args[0] the program,
 // each argument quoted (none here has a quote or ends in a backslash; one
 // that does is refused), in cwd (the process's when empty), its stdout and
-// stderr into out (an inheritable handle) and its stdin from NUL, those
-// two the only handles it inherits. Its environment is the process's with
-// the program's directory first in PATH (its tools' DLLs, as rccpp does)
-// and, when tmp is given, TMP and TEMP there. No window. In a job object
+// stderr into out (an inheritable handle) and its stdin an empty pipe,
+// those two the only handles it inherits. Its environment is the
+// process's with the program's directory first in PATH (its tools' DLLs,
+// as rccpp does) and, when tmp is given, TMP and TEMP there. No window. In a job object
 // of its own, from before it runs: the compile's memory (a process's),
 // CPU time (the job's) and process count, no error dialog, and killed when
 // the job's last handle closes -- the process's, however it ends. process
@@ -982,19 +982,28 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 		return false;
 	}
 
-	SECURITY_ATTRIBUTES sa;
-	memset(&sa, 0, sizeof sa);
-	sa.nLength = sizeof sa;
-	sa.bInheritHandle = TRUE;
-	HANDLE nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ |
-			FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
-	HANDLE inherit[2] = {out, nul};
+	// [WIN_APPCONTAINER_SPAWN] Its stdin an empty pipe's read end, the
+	// write end closed (end of file at once, as NUL gave): inside the
+	// AppContainer opening NUL is refused (error 5), and the invalid
+	// handle in the list failed CreateProcess, so a sandboxed server had no
+	// compiler. Inheritable only from here to the child's start, and only
+	// the handle list's two go to it
+	HANDLE in_rd = NULL, in_wr = NULL;
+	if(!CreatePipe(&in_rd, &in_wr, NULL, 0)){
+		why = "a pipe for the compile's stdin: "+last_error();
+		CloseHandle(job);
+		job = NULL;
+		return false;
+	}
+	CloseHandle(in_wr);
+	HANDLE inherit[2] = {out, in_rd};
 	SIZE_T size = 0;
 	InitializeProcThreadAttributeList(NULL, 1, 0, &size);
 	sv_<char> attr_buf(size);
 	LPPROC_THREAD_ATTRIBUTE_LIST attrs =
 			(LPPROC_THREAD_ATTRIBUTE_LIST)attr_buf.data();
-	bool ok = nul != INVALID_HANDLE_VALUE &&
+	bool ok = SetHandleInformation(in_rd, HANDLE_FLAG_INHERIT,
+			HANDLE_FLAG_INHERIT) &&
 			InitializeProcThreadAttributeList(attrs, 1, 0, &size);
 	const bool attrs_made = ok;
 	ok = ok && UpdateProcThreadAttribute(attrs, 0,
@@ -1004,7 +1013,7 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 	memset(&si, 0, sizeof si);
 	si.StartupInfo.cb = sizeof si;
 	si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-	si.StartupInfo.hStdInput = nul;
+	si.StartupInfo.hStdInput = in_rd;
 	si.StartupInfo.hStdOutput = out;
 	si.StartupInfo.hStdError = out;
 	si.lpAttributeList = attrs;
@@ -1017,8 +1026,7 @@ static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
 		why = "CreateProcess: "+last_error();
 	if(attrs_made)
 		DeleteProcThreadAttributeList(attrs);
-	if(nul != INVALID_HANDLE_VALUE)
-		CloseHandle(nul);
+	CloseHandle(in_rd);
 	// Never run without its limits
 	if(ok && !AssignProcessToJobObject(job, pi.hProcess)){
 		why = "the compile could not be put under its limits: "+last_error();
