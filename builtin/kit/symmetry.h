@@ -116,6 +116,27 @@ struct Config
 	}
 };
 
+// [KIT_PARAM_AUDIT] The slice names slices and angle take (make()'s), and a
+// slice that fits them: slice itself, else the first name holding it or
+// held in it (+x into quadrants: +x+z; -x-z into halves: -x), else the
+// first. A builder sets slices or angle alone in the inspector
+inline ss_ fit_slice(const ss_ &slices, const ss_ &angle, const ss_ &slice)
+{
+	const bool straight = angle == "straight", halves = slices == "halves";
+	const sv_<ss_> names = halves == straight ?
+			sv_<ss_>{"+x", "-x", "+z", "-z"} : halves ?
+			sv_<ss_>{"+x-z", "-x+z", "+x+z", "-x-z"} :
+			sv_<ss_>{"+x+z", "-x+z", "-x-z", "+x-z"};
+	for(const ss_ &n : names)
+		if(n == slice)
+			return n;
+	for(const ss_ &n : names)
+		if(!slice.empty() && (n.find(slice) != ss_::npos ||
+				slice.find(n) != ss_::npos))
+			return n;
+	return names[0];
+}
+
 // The choices: slices "halves" | "quadrants", angle "straight" | "45", mode
 // "mirrored" | "rotational", slice the authored one's name (below); the
 // map's finite x0, z0, width, depth. False and why for a combination the

@@ -93,7 +93,7 @@
 --   w:under(x, y, z) -> the info of what is under the point (0.6 down)
 --   w:contacts(b) -> {{info, nx, ny, nz}...} what touches the body
 --   w:unbury(pos, b) -> true when lifted: a body b = {r, h} buried by an edit
---     lifted to the lowest free place over it (up to its height and a cell,
+--     lifted to the lowest free place over it (up to 64 m over its feet with its middle in the solid, else its height and a cell;
 --     never sideways), pos {x, y, z} its bottom middle changed (kit/ball's
 --     and kit/car's step first)
 --   w.sin, w.cos, w.atan2, w.sqrt, w.PI
@@ -1504,8 +1504,14 @@ function W:pushed(pos, b)
 end
 
 -- A body buried by an edit (voxels or the heightmap raised into it):
--- lifted to the lowest free place over it, up to its height and a cell,
--- never sideways. pos the body's bottom middle, changed; true: lifted
+-- lifted to the lowest free place over it, up to UNBURY_M over its feet
+-- ([KIT_PARAM_AUDIT] a World generated again under it: a noise ground
+-- risen a dozen cells over a flat one's level; before, its height and a
+-- cell, and the body stayed in the ground), never sideways. pos the body's
+-- bottom middle, changed; true: lifted.
+-- simplified: a body with no free place within the reach checks it all
+-- each step (UNBURY_M * 2 boxes)
+local UNBURY_M = 64
 function W:unbury(pos, b)
 	local x, y, z = pos[1], pos[2], pos[3]
 	local g = self:ground_max(x - b.r, z - b.r, x + b.r, z + b.r)
@@ -1513,7 +1519,10 @@ function W:unbury(pos, b)
 	if g and g > y + EPS then
 		cand = g
 	end
-	local top = y + b.h + 1
+	-- (that far only with its middle in the solid: a body against a wall,
+	-- its box into it, is lifted no further than before, not onto the top)
+	local deep = self:blocked(box_of(x, y + b.h / 2, z, 0.05, 0.05), true)
+	local top = y + (deep and math.max(b.h + 1, UNBURY_M) or b.h + 1)
 	while cand <= top do
 		if not self:blocked(box_of(x, cand, z, b.r, b.h)) then
 			if cand == y then
