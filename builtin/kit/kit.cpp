@@ -23739,6 +23739,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!m_hosted || !m_box)
 			return;
+		const int64_t tick_us = interface::os::time_us();
 		m_box->poll();
 		take_vouches();
 		take_pub_jobs();
@@ -23793,6 +23794,54 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!m_drop_scenes.empty())
 			drop_scenes();
+		meter_tick(tick_us);
+	}
+
+	// [KIT_CROWD_CHECK] BUILDAT_KIT_METER=1: a line every 5 s of the ticks'
+	// gaps, Kit's own time in a tick and the box's meter spent of a tick's
+	// budget (the rounds' together, so over 100 % with sessions), each mean
+	// and worst, and the bodies and drives stepped (util/kit_crowd_check.sh)
+	struct Meter {
+		int64_t spent = 0, budget = 0, since = 0, last = 0, n = 0, gaps = 0;
+		int64_t gap_sum = 0, gap_max = 0, own_sum = 0, own_max = 0;
+		double pct_sum = 0, pct_max = 0;
+	} m_meter;
+	const bool m_meter_on = getenv("BUILDAT_KIT_METER") &&
+			getenv("BUILDAT_KIT_METER")[0] == '1';
+
+	void meter_tick(int64_t t0)
+	{
+		Meter &m = m_meter;
+		const int64_t now = interface::os::time_us();
+		const double pct = m.budget ? 100.0 * m.spent / m.budget : 0;
+		m.spent = 0;
+		if(!m_meter_on)
+			return;
+		if(!m.since)
+			m.since = now;
+		if(m.last){
+			m.gap_sum += t0 - m.last;
+			m.gap_max = std::max(m.gap_max, t0 - m.last);
+			m.gaps++;
+		}
+		m.last = t0;
+		m.n++;
+		m.own_sum += now - t0;
+		m.own_max = std::max(m.own_max, now - t0);
+		m.pct_sum += pct;
+		m.pct_max = std::max(m.pct_max, pct);
+		if(now - m.since < COST_WINDOW_US)
+			return;
+		log_i(MODULE, "meter: %lld ticks in %.1f s, gap %.1f/%.1f ms, Kit's tick "
+				"%.2f/%.2f ms, the box %.1f/%.1f %% of a tick's budget (mean/worst), "
+				"%zu bodies, %zu drives, %zu peers", (long long)m.n,
+				(now - m.since) / 1e6, m.gaps ? m.gap_sum / 1e3 / m.gaps : 0.0,
+				m.gap_max / 1e3, m.own_sum / 1e3 / m.n, m.own_max / 1e3,
+				m.pct_sum / m.n, m.pct_max, m_bodies.size(), m_drives.size(),
+				m_peers.size());
+		m = Meter();
+		m.since = now;
+		m.last = t0;
 	}
 
 	// One round's tick (the default's or a session's, entered); a
@@ -23828,6 +23877,8 @@ struct Module: public interface::Module, public Interface
 		int64_t spent = step_bodies(budget);
 		spent += minds_tick(budget - spent); // [KIT_CREATURES_8A]
 		spent += step_drives(budget - spent);
+		m_meter.spent += spent;
+		m_meter.budget = budget;
 		send_tracks();
 		free_bodies_tick();
 		own_tick(); // [KIT_AIRSHIPS]
@@ -23898,12 +23949,14 @@ struct Module: public interface::Module, public Interface
 		check_zones();
 		check_regions();
 		// The queue, in order, within the tick's budget
+		const int64_t steps = spent;
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
 			m_queue.pop_front();
 			if(!left_out(r.entity))
 				spent += run(r);
 		}
+		m_meter.spent += spent - steps;
 		if(!m_queue.empty())
 			log_v(MODULE, "%zu runs wait for the next tick", m_queue.size());
 		else if(!m_kits_due.empty())
@@ -25250,6 +25303,7 @@ struct Module: public interface::Module, public Interface
 		ss_ cells((size_t)nx * ny * nz, '.');
 		json::Value classes = json::array();
 		std::map<uint32_t, char> cls;
+		std::set<uint64_t> used; // the tracks the links below name
 		const json::Value &extra = voxel_extra();
 		// [KIT_NO_WORLD] no ground: a cell not loaded is air
 		const char unknown = m_w->world_scene == scene && m_w->wp.none() ? '.' : '?';
@@ -25389,6 +25443,7 @@ struct Module: public interface::Module, public Interface
 				if(links.size()){
 					o += ",";
 					lua_lit(links, o);
+					tracks_used(links, used);
 				}
 				o += "},";
 				break;
@@ -25458,6 +25513,7 @@ struct Module: public interface::Module, public Interface
 			if(links.size()){
 				o += ",";
 				lua_lit(links, o);
+				tracks_used(links, used);
 			}
 			o += "},";
 		}
@@ -25488,7 +25544,7 @@ struct Module: public interface::Module, public Interface
 					}
 				o += "}}";
 			});
-		tracks_lit(o, scene_name);
+		tracks_lit(o, scene_name, &used);
 		if(!std::isnan(plane))
 			o += ",plane="+json::Value(plane).stringify()+(level ? ",horizontal=true" :
 					"");
@@ -25498,14 +25554,17 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_VEHICLE_MOVEMENTS] ",tracks={[id]={{t, x, y, z, yaw, pitch, roll}...}}": the
 	// keys of the steered ones in the scene, from TRACK_KEEP back (a stamp is a second
-	// back at most)
-	void tracks_lit(ss_ &o, const ss_ &scene_name)
+	// back at most). [KIT_CROWD_CHECK] used: only those a link sent names
+	// (tracks_used()): every steered one's in every step's request made 50
+	// driving bots' steps O(n^2), in the text and in the box's parse of it
+	void tracks_lit(ss_ &o, const ss_ &scene_name, const std::set<uint64_t> *used = nullptr)
 	{
 		o += ",tracks={";
 		const double from = (motion_t() - 1.5) * 1000;
 		char buf[48];
 		for(auto &d : m_drives){
-			if(d.second.scene != scene_name || d.second.keys.empty())
+			if(d.second.scene != scene_name || d.second.keys.empty() ||
+					(used && !used->count(d.first)))
 				continue;
 			o += "["+itos(d.first)+"]={";
 			const auto &k = d.second.keys;
@@ -25523,6 +25582,16 @@ struct Module: public interface::Module, public Interface
 			o += "},";
 		}
 		o += "}";
+	}
+
+	// The tracks links_of()'s motions name (move.lua's M.link_at reads them)
+	static void tracks_used(const json::Value &links, std::set<uint64_t> &used)
+	{
+		for(unsigned i = 0; i < links.size(); i++){
+			const json::Value &t = links.at(i).at(6u).get("track");
+			if(t.is_number())
+				used.insert((uint64_t)t.as_number());
+		}
 	}
 
 	// Whether e is id or under it
