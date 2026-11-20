@@ -41713,7 +41713,7 @@ struct Module: public interface::Module, public Interface
 			symmetry::Config cf;
 			ss_ why;
 			if(!symmetry_in(pe.second) || !symmetry_in(pe.second)->params.get(
-					"on").is_true() || !sym_config(pe.second, cf, why))
+					"enabled").is_true() || !sym_config(pe.second, cf, why))
 				continue;
 			const SymCounts n = sym_copy(scene_of(pe.second), cf, false, nullptr, by);
 			const ss_ ents = sym_parity_entities(pe.second, cf);
