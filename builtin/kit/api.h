@@ -82,7 +82,9 @@ namespace interface
 // packages (below), named "<fp>/<name>" by the package's key
 // ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt); the
 // game's own are custom types, "local/<name>" (below). An instance records its type and the type's version
-// (the file's `version`). A save from before, its types bare names, is
+// (the file's `version`), each one's written ([KIT_API_1]; one left out:
+// in a file of "kit" 1 or more version 1, in one from before the type's
+// current). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
 //
@@ -344,7 +346,11 @@ namespace interface
 //                               them; then those it does not declare, or
 //                               whose value it refuses, are left out
 //                               (logged). No c; none: the parameters as
-//                               they were, so filtered
+//                               they were, so filtered. [KIT_API_1] What
+//                               is left out goes to the component's
+//                               old_params {name: value} (saved, exported,
+//                               in the entity's Log; the builder op
+//                               clear_old_params, {"id", "comp"}, drops it)
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), [KIT_ZONE_SHAPES] c:params_of(type)
 // (the parameters of the same entity's component of that type, as its own
@@ -1036,8 +1042,10 @@ namespace interface
 //   UI's `stack` (kit/goal's): the shown ones of one anchor and place go
 //   under each other (over, at a bottom anchor), a hidden one or one with no
 //   text leaving no gap, by order then id.
-// `by` is who caused it, "player:<name>" or "app", carried along the links
-// it sets off and kept with a timer. Handlers run only while the server
+// `by` is who caused it, "player:<id>" (a bot's "bot:<id>") or "app",
+// carried along the links it sets off and kept with a timer. [KIT_API_1] A
+// function's player argument (c:hurt, c:speed, c:session_move...) is a
+// player's entity id or such a by. Handlers run only while the server
 // is Running (below).
 // on_start(c) as a round starts from the start (Play, an instance placed
 // or restarted in the round); on_join(c, by) as a player goes through the
@@ -1062,6 +1070,18 @@ namespace interface
 // parameters, links; the composition file the first time) and "runtime"
 // (each instance's state and timer, the disabled ones, the players'
 // items).
+//
+// [KIT_API_1] **Formats and levels.** A composition (the authored row, an
+// export's or scene's composition.json) and a prefab say at their top
+// "kit": the file format, raised when a file's structure changes, a newer
+// Kit reading the older; and "api": the script level the game's own types
+// are written for, which a new game gets as this Kit's and only its builder
+// raises (none: a file from before, 1 each). A Kit kind's meta.json says
+// "kit_api", which an install refuses above this Kit's
+// (interface::aitta::check_manifest). A Kit that meets a newer "kit" or
+// "api" refuses the file whole: "This game was made with a newer Buildat
+// (Kit format 2, Buildat <its version, where known>). ... Update Buildat to
+// open it."
 //
 // Budgets: each handler run has a slice of the box's meter, and a tick a
 // few slices; the queue waits for the next tick past that. A run past its
@@ -1617,7 +1637,7 @@ namespace interface
 // their modify_hit hooks and health as a hit of type `type` ("hurt" by
 // default), by the run's by; Kit refuses it (logged) for a player waiting,
 // under game_rules' peaceful, or where the region at them refuses them
-// damage. 16 a run.
+// damage. 16 a run; a player that is no id or by an error.
 // [KIT_CREATURES_8A] Creatures: an entity with a creature movement
 // (kit/creature_walker's `movement.steered`, the server's drive) and
 // behaviours, types with `creature = true`. A behaviour proposes a goal,

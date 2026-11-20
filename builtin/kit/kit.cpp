@@ -267,6 +267,13 @@ struct Instance
 	// authored: a prefab copy's parameters set on this copy, kept as the
 	// prefab changes ([KIT] stage 4d)
 	std::set<ss_> overrides;
+	// authored ([KIT_API_1]): what a migrate (or an edited local/ type's
+	// file) left out, {name: value}, kept for its builder (get_entity, the
+	// builder op clear_old_params); undefined if none
+	json::Value old_params;
+	// authored: the keys a newer Kit wrote that this one does not read,
+	// written back as they were; undefined if none
+	json::Value rest;
 	// runtime, not saved ([KIT] stage 4l): the meter it spent in this cost
 	// window
 	int64_t spent = 0;
@@ -309,7 +316,36 @@ struct Entity
 	ss_ made_by;
 	uint64_t maker = 0;
 	size_t maker_comp = 0;
+	// authored ([KIT_API_1]): the keys a newer Kit wrote that this one does
+	// not read, written back as they were; undefined if none
+	json::Value rest;
 };
+
+// [KIT_API_1] The keys of j not in known, undefined if none
+static json::Value rest_of(const json::Value &j, const std::set<ss_> &known)
+{
+	json::Value r;
+	for(json::Iterator it(j); j.is_object() && it; ++it){
+		if(known.count(it.key()))
+			continue;
+		if(r.is_undefined())
+			r = json::object();
+		r.set(it.key(), (*it).deepcopy());
+	}
+	return r;
+}
+// Puts rest's keys into j where j has none of that name
+static void put_rest(json::Value &j, const json::Value &rest)
+{
+	for(json::Iterator it(rest); rest.is_object() && it; ++it)
+		if(j.get(it.key()).is_undefined())
+			j.set(it.key(), *it);
+}
+static const std::set<ss_> ENTITY_KEYS = {"id", "parent", "name", "kind",
+		"prefab", "built", "comments", "pos", "yaw", "pitch", "roll",
+		"components"};
+static const std::set<ss_> COMPONENT_KEYS = {"type", "version", "params",
+		"old_params", "overrides", "links"};
 
 struct Type
 {
@@ -1429,6 +1465,10 @@ struct Module: public interface::Module, public Interface
 	sv_<Migrated> m_migrated_objects;
 	// [KIT] stage 4d: authored entities play removed, back at Stop
 	std::map<uint64_t, Removed> m_removed;
+	// [KIT_API_1] The runtime row's made entries this Kit could not read (a
+	// newer Kit's), written back as they were; gone at Stop as the made
+	// ones. simplified: a save-as-start leaves them round-made
+	json::Value m_raw_made = json::array();
 	// The players' entities by name (kept: a player's id is stable), and
 	// what each keeps between plays ("keep inventory": their items)
 	std::map<ss_, uint64_t> m_players;
@@ -4659,9 +4699,10 @@ struct Module: public interface::Module, public Interface
 	// version takes them: through its migrate(params, from) where it has
 	// one, then those it does not declare or whose value it refuses left
 	// out, each logged (a migrate that fails leaves the parameters as
-	// they were for that)
+	// they were for that). [KIT_API_1] dropped: those left out, {name:
+	// [value, why]}
 	void migrate_params(const ss_ &type, int64_t from, json::Value &params,
-			const ss_ &who)
+			const ss_ &who, json::Value *dropped = nullptr)
 	{
 		const Type &t = m_types[type];
 		if(t.handlers.count("migrate")){
@@ -4692,9 +4733,16 @@ struct Module: public interface::Module, public Interface
 					jstr(d, "type") == "entity" ? "" : check_param(d, *it);
 			if(bad.empty())
 				kept.set(it.key(), *it);
-			else
+			else {
 				log_w(MODULE, "%s: %s's %s of version %lli left out: %s",
 						cs(who), cs(type), cs(it.key()), (long long)from, cs(bad));
+				if(dropped){
+					json::Value d = json::array();
+					d.append(*it);
+					d.append(bad);
+					dropped->set(it.key(), d);
+				}
+			}
 		}
 		params = kept;
 	}
@@ -4786,10 +4834,12 @@ struct Module: public interface::Module, public Interface
 			e.pitch = norm_yaw(j.get("pitch").as_number());
 		if(j.get("roll").is_number())
 			e.roll = norm_yaw(j.get("roll").as_number());
+		e.rest = rest_of(j, ENTITY_KEYS); // [KIT_API_1]
 		const json::Value &cs_ = j.get("components");
 		for(unsigned k = 0; k < cs_.size(); k++){
 			const json::Value &cj = cs_.at(k);
 			Instance in;
+			in.rest = rest_of(cj, COMPONENT_KEYS);
 			in.type = full_type(jstr(cj, "type"));
 			if(in.type != jstr(cj, "type") && in.type.compare(0, 11,
 					"kit/terrain") == 0)
@@ -4835,17 +4885,43 @@ struct Module: public interface::Module, public Interface
 			const bool object = migrate_object(e, in, pj);
 			// [KIT] stage 5: an instance of an older version is upgraded to
 			// the type's, its parameters through the type's migrate
+			// [KIT_API_1] what it left out kept, as old_params
+			const json::Value &op = cj.get("old_params");
+			if(op.is_object() && op.size())
+				in.old_params = op.deepcopy();
+			auto keep_old = [&](const ss_ &k, const json::Value &v,
+					const ss_ &bad, int64_t ver){
+				if(in.old_params.is_undefined())
+					in.old_params = json::object();
+				in.old_params.set(k, v);
+				add_log(e.id, "kept as old_params: "+k+" ("+(bad ==
+						"not a parameter of it" ? ss_("no longer a parameter") :
+						"its value "+bad.substr(0, 60)+": not taken")+" of "+
+						in.type+" v"+itos(ver)+")");
+			};
 			if(!object && in.version < t.version){
 				pj = pj.is_object() ? pj.deepcopy() : json::object();
-				migrate_params(in.type, in.version, pj, "Entity "+itos(e.id));
+				json::Value dropped = json::object();
+				migrate_params(in.type, in.version, pj, "Entity "+itos(e.id),
+						&dropped);
+				for(json::Iterator it(dropped); it; ++it)
+					keep_old(it.key(), (*it).at(0), (*it).at(1).as_string(),
+							t.version);
 				log_i(MODULE, "Entity %s's %s upgraded from version %lli to "
 						"%lli", cs(itos(e.id)), cs(in.type), (long long)in.version,
 						(long long)t.version);
 				in.version = t.version;
 				m_upgraded++;
 			}
-			// simplified: a newer version's instance (a type's file put
-			// back to an older one) runs on the file's
+			// [KIT_API_1] A newer version's instance is a newer Kit's (or
+			// package's): refused. simplified: a local/ type's file put back
+			// to an older one runs on the file's
+			if(in.version != t.version && !lenient){
+				why = "entity "+itos(e.id)+": "+interface::aitta::kit_newer(
+						in.type+" version "+itos(in.version), "has "+in.type+
+						" version "+itos(t.version));
+				return false;
+			}
 			if(in.version != t.version)
 				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
 						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
@@ -4870,14 +4946,19 @@ struct Module: public interface::Module, public Interface
 					// what was placed: what it no longer takes is dropped, not
 					// the project
 					if(lenient && (!decl.get(it.key()).is_object() || !bad.empty())){
-						log_w(MODULE, "Entity %s: %s's %s dropped (its file has %s)",
-								cs(itos(e.id)), cs(in.type), cs(it.key()),
+						log_w(MODULE, "Entity %s: %s's %s kept as old_params (its "
+								"file has %s)", cs(itos(e.id)), cs(in.type),
+								cs(it.key()),
 								bad.empty() ? "no such parameter" : cs("it "+bad));
+						keep_old(it.key(), *it, bad.empty() ?
+								ss_("not a parameter of it") : bad, t.version);
 						continue;
 					}
 					if(!decl.get(it.key()).is_object()){
 						why = "entity "+itos(e.id)+": "+in.type+
-								" has no parameter "+it.key();
+								" has no parameter "+it.key()+" ("+
+								interface::aitta::kit_newer(in.type+"'s "+
+								it.key().substr(0, 64), "has no such parameter")+")";
 						return false;
 					}
 					if(!bad.empty()){
@@ -4990,6 +5071,8 @@ struct Module: public interface::Module, public Interface
 			cj.set("type", in.type);
 			cj.set("version", in.version);
 			cj.set("params", in.params);
+			if(!in.old_params.is_undefined())
+				cj.set("old_params", in.old_params);
 			if(!in.overrides.empty()){
 				json::Value ov = json::array();
 				for(const ss_ &o : in.overrides)
@@ -5010,23 +5093,69 @@ struct Module: public interface::Module, public Interface
 				ls.append(lj);
 			}
 			cj.set("links", ls);
+			put_rest(cj, in.rest);
 			comps.append(cj);
 		}
 		j.set("components", comps);
+		put_rest(j, e.rest);
 		return j;
 	}
 
 	// [KIT_TEMPLATES] Host::opens_in_edit's first builder is yet to come
 	bool m_open_tools = false;
 
-	bool load_composition(const json::Value &c, ss_ &why)
+	// [KIT_API_1] The game's script level, its composition's "api" (none:
+	// from before, 1): what its own types are written for. Saving never
+	// raises it
+	int64_t m_api = interface::aitta::KIT_API;
+	// [KIT_API_1] The composition's keys a newer Kit wrote (rest_of()'s),
+	// written back
+	json::Value m_comp_rest;
+
+	// [KIT_API_1] A component's version in a file (a composition, a
+	// prefab): its own; none, in a file of "kit" 1 or more 1 (Kit writes
+	// each one's since), in one from before the type's current (Kit left
+	// that out then); 0: the type's current, for entity_from_json()
+	static int64_t file_version(const json::Value &file, const json::Value &c)
 	{
+		const json::Value &v = c.get("version");
+		if(v.is_number())
+			return (int64_t)v.as_number();
+		return json::jint(file, "kit", 0) >= 1 ? 1 : 0;
+	}
+	// The file's entities with file_version()'s, each component's
+	static json::Value file_versions(const json::Value &file,
+			const json::Value &es)
+	{
+		if(json::jint(file, "kit", 0) < 1 || !es.is_array())
+			return es;
+		json::Value out = es.deepcopy();
+		for(unsigned i = 0; i < out.size(); i++){
+			if(!out.at(i).get("components").is_array())
+				continue;
+			json::Value &cs = out[i]["components"];
+			for(unsigned k = 0; k < cs.size(); k++)
+				if(cs.at(k).is_object() && cs.at(k).get("version").is_undefined())
+					cs[k].set("version", (int64_t)1);
+		}
+		return out;
+	}
+
+	// by: the Buildat that wrote it, if known (a template's meta.json's)
+	bool load_composition(const json::Value &c, ss_ &why, const ss_ &by = "")
+	{
+		why = interface::aitta::kit_level_refusal(c, by);
+		if(!why.empty())
+			return false;
+		m_api = std::max<int64_t>(1, json::jint(c, "api", 1));
+		m_comp_rest = rest_of(c, {"kit", "api", "entities", "next_id", "scene",
+				"outside"});
 		Entity root;
 		root.id = 1;
 		root.kind = "app";
 		root.name = "app";
 		m_entities[1] = root;
-		const json::Value &es = c.get("entities");
+		const json::Value es = file_versions(c, c.get("entities"));
 		m_pending_ids.clear();
 		m_from_dig_zone.clear();
 		for(unsigned i = 0; i < es.size(); i++)
@@ -5108,6 +5237,9 @@ struct Module: public interface::Module, public Interface
 		for(auto &r : m_removed)
 			all[r.first] = &r.second.e;
 		json::Value c = json::object();
+		// [KIT_API_1] its format and the game's level
+		c.set("kit", (int64_t)interface::aitta::KIT_FORMAT);
+		c.set("api", m_api);
 		json::Value es = json::array();
 		for(auto &p : all){
 			// What play moved (c:move, a vehicle) at its place before:
@@ -5122,6 +5254,7 @@ struct Module: public interface::Module, public Interface
 		}
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
+		put_rest(c, m_comp_rest);
 		return c;
 	}
 
@@ -5189,6 +5322,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(for_start)
 			return r;
+		for(unsigned i = 0; i < m_raw_made.size(); i++)
+			made.append(m_raw_made.at(i));
 		json::Value removed = json::array();
 		for(auto &rm : m_removed){
 			json::Value m = json::object();
@@ -5380,6 +5515,9 @@ struct Module: public interface::Module, public Interface
 		// Authored: the save's, or the app's file the first time
 		ss_ authored;
 		bool first = false;
+		// [KIT_API_1] a template's maker, for a refusal (a save's is not
+		// kept: __save's version is the last to open it)
+		ss_ by;
 		if(!m_store->get("authored", authored)){
 			authored = read_file(host.composition_path);
 			if(authored.empty()){
@@ -5387,6 +5525,19 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			first = true;
+			// [KIT_API_1] A newer Buildat's template refused before any of
+			// it is stored: its levels, its edits' generators
+			const ss_ dir = host.composition_path.substr(0,
+					host.composition_path.rfind('/'));
+			json::json_error_t merr;
+			by = jstr(json::load_file((dir+"/meta.json").c_str(), &merr),
+					"buildat_version");
+			why = interface::aitta::kit_level_refusal(json::load_string(
+					authored.c_str()), by);
+			if(why.empty() && host.opens_in_edit)
+				read_edits(dir, &why);
+			if(!why.empty())
+				return false;
 			// [KIT_CUSTOM_TYPES] and its template's types
 			if(!host.local_types_path.empty())
 				import_local_types(host.local_types_path);
@@ -5399,7 +5550,7 @@ struct Module: public interface::Module, public Interface
 			why = "the composition is not a JSON object";
 			return false;
 		}
-		if(!load_composition(c, why))
+		if(!load_composition(c, why, by))
 			return false;
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
@@ -5799,6 +5950,38 @@ struct Module: public interface::Module, public Interface
 	// The save's: the uploaded textures served, the builders' types
 	// registered, before a section is loaded (the save's names then
 	// resolve to them)
+	// [KIT_API_1] A row's "format" this Kit reads ("" none: one from
+	// before)
+	static bool format_ok(const json::Value &row, const char *format)
+	{
+		const json::Value &f = row.get("format");
+		return f.is_undefined() || (f.is_string() && f.as_string() == format);
+	}
+	// A field of a voxel type's row world::Material::parse() does not read
+	// (nor the row's own), "" none: a newer Kit's. simplified: the list is
+	// parse()'s by hand; a field it gains goes here too
+	static ss_ unknown_voxel_field(const json::Value &row)
+	{
+		static const std::set<ss_> KNOWN = {"format", "author", "name",
+				"version", "package", "texture", "top", "side", "bottom", "kind",
+				"heightmap", "solid", "transparent", "light", "friction",
+				"blast_resist", "surface", "spots", "static_spots", "bumpiness",
+				"translucency", "group", "sound_dig", "sound_place", "drop",
+				"level", "seasons", "tint"};
+		for(json::Iterator it(row); row.is_object() && it; ++it)
+			if(!KNOWN.count(it.key()))
+				return it.key();
+		return "";
+	}
+	// What a file's unknown behaviour field is refused as (what: "the voxel
+	// type x/y", the field)
+	static ss_ newer_field(const ss_ &what, const ss_ &field)
+	{
+		return what+" has a field this Buildat does not know, "+
+				field.substr(0, 64)+": "+interface::aitta::kit_newer(what+"'s "+
+				field.substr(0, 64), "does not read it");
+	}
+
 	void load_builder_voxels()
 	{
 		for(const ss_ &k : m_store->list("texture:")){
@@ -5817,6 +6000,15 @@ struct Module: public interface::Module, public Interface
 			if(!m_store->get(k, row))
 				continue;
 			const json::Value r = json::load_string(row.c_str());
+			// [KIT_API_1] (the row kept: a newer Kit's save opens there)
+			if(!format_ok(r, "kit_voxel")){
+				log_w(MODULE, "The voxel type %s: not \"format\": \"kit_voxel\": "
+						"not loaded", cs(k.substr(6)));
+				continue;
+			}
+			if(!unknown_voxel_field(r).empty())
+				log_w(MODULE, "%s", cs(newer_field("the voxel type "+k.substr(6),
+						unknown_voxel_field(r))));
 			m_voxel_types[k.substr(6)] = r;
 			register_builder_voxel(k.substr(6), r);
 		}
@@ -6996,6 +7188,14 @@ struct Module: public interface::Module, public Interface
 				const json::Value j = json::load_string(f.second.c_str());
 				if(!j.is_object())
 					return f.first+": not a JSON object";
+				// [KIT_API_1]
+				if(kind == ".voxel.json" && !unknown_voxel_field(j).empty())
+					return f.first+": "+newer_field("the voxel type "+fp+"/"+n,
+							unknown_voxel_field(j));
+				if(kind != ".prefab.json" && !format_ok(j, kind == ".voxel.json" ?
+						"kit_voxel" : "kit_item"))
+					return f.first+": its \"format\" is not "+(kind ==
+							".voxel.json" ? "kit_voxel" : "kit_item");
 				json::Value r = j.deepcopy();
 				resolve_names(r, keys);
 				(kind == ".prefab.json" ? prefabs : kind == ".voxel.json" ?
@@ -7098,6 +7298,10 @@ struct Module: public interface::Module, public Interface
 			if(!item_sheet(it.second, json::object(), sheet, iwhy))
 				return "types/"+it.first.substr(fp.size() + 1)+".item.json: "+
 						iwhy;
+			if(!unknown_item_field(it.second, sheet).empty())
+				return "types/"+it.first.substr(fp.size() + 1)+".item.json: "+
+						newer_field("the item type "+it.first,
+						unknown_item_field(it.second, sheet));
 			ss_ row;
 			if(m_store->get("item:"+it.first, row) && jstr(json::load_string(
 					row.c_str()), "package") != name)
@@ -7607,9 +7811,9 @@ struct Module: public interface::Module, public Interface
 	//   items.json, sounds.json, voxels.json, prefabs.json: {"<author>/<n>":
 	//   its row}, the builders' (a package's left out);
 	//   textures/<hash>.png: the uploads those rows wear;
-	//   edits.bin: zlib's of {"format": "kit_world_edits", "materials":
-	//   heightmap::MAX_MATERIALS, "scenes": {"<scene>": {"names": [voxel...],
-	//   "cells": [x, y, z, its name's index, the rest of its word (param,
+	//   edits.bin: zlib's of {"format": "kit_world_edits", "generator":
+	//   world::VERSION, "materials": heightmap::MAX_MATERIALS, "scenes":
+	//   {"<scene>": {"names": [voxel...], "cells": [x, y, z, its name's index, the rest of its word (param,
 	//   tint)...], "hm": [x, z, the height's float's bits, weights...],
 	//   "decor": [the builders' decorations, the row's]}}}: each World's
 	//   cells that differ from its generator's (in the sections written,
@@ -7772,6 +7976,8 @@ struct Module: public interface::Module, public Interface
 			{"kind", kind}, {"author", author}, {"name", name}, {"title", title},
 			{"version", "1.0.0"},
 			{"engine_api", (int64_t)interface::aitta::ENGINE_API},
+			// [KIT_API_1] the game's script level (check_manifest's gate)
+			{"kit_api", m_api},
 			{"license_code", "LicenseRef-All-rights-reserved"},
 			{"license_media", "LicenseRef-All-rights-reserved"},
 			{"description", what+", exported by "+author+"."},
@@ -7801,8 +8007,8 @@ struct Module: public interface::Module, public Interface
 		export_head(files, "template", author, plain_id(m_host.project,
 				"game"), title, "The Workbench game "+title,
 				game_of(author_of(p), true));
-		// The composition
-		ss_ comp = "{\n\t\"entities\": [\n";
+		// The composition ([KIT_API_1] its format and the game's level first)
+		ss_ comp = "{\n"+levels_text(true)+"\t\"entities\": [\n";
 		if(!export_entities(authored_json(false).get("entities"), comp, why))
 			return false;
 		int64_t next = m_next_id;
@@ -7838,10 +8044,24 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_API_1] An export's composition's first lines: "kit" and "api"
+	// (rest: and the composition's keys a newer Kit wrote)
+	ss_ levels_text(bool rest = false)
+	{
+		ss_ s = "\t\"kit\": "+itos(interface::aitta::KIT_FORMAT)+",\n\t\"api\": "+
+				itos(m_api)+",\n";
+		for(json::Iterator it(m_comp_rest); rest && m_comp_rest.is_object() &&
+				it; ++it)
+			s += "\t"+json::Value(it.key()).stringify()+": "+json_line(*it)+
+					",\n";
+		return s;
+	}
+
 	// The composition's lines, an entity a line (load_composition()'s form):
 	// each param only where it is not its type's default or the app gives one
-	// (Host::defaults: another project's may differ), a version only where it
-	// is not the type's. Refused: a type not Kit's or the project's own
+	// (Host::defaults: another project's may differ), each one's version
+	// ([KIT_API_1]: a type bumped later migrates it). Refused: a type not
+	// Kit's or the project's own
 	bool export_entities(const json::Value &es, ss_ &comp, ss_ &why)
 	{
 		for(unsigned i = 0; i < es.size(); i++){
@@ -7857,8 +8077,6 @@ struct Module: public interface::Module, public Interface
 					return false;
 				}
 				const Type &t = m_types[type];
-				if(json::jint(cj, "version", 0) == t.version)
-					cj.del_key("version");
 				const json::Value &decl = t.decl.get("params"),
 						&app = m_defaults.get(type), &ps = cj.get("params");
 				json::Value kept = json::object();
@@ -7905,6 +8123,9 @@ struct Module: public interface::Module, public Interface
 			e.set("parent", (int64_t)sc.first);
 			e.set("name", "World");
 			cj.set("type", "kit/terrain");
+			std::string tw;
+			if(load_type("kit/terrain", tw))
+				cj.set("version", m_types["kit/terrain"].version);
 			if(m_defaults.get("kit/terrain").size())
 				cj.set("params", m_defaults.get("kit/terrain"));
 			comps.append(cj);
@@ -8055,6 +8276,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		json::Value b = json::object();
 		b.set("format", "kit_world_edits");
+		// [KIT_API_1] the generators' version its cells differ from
+		b.set("generator", (int64_t)world::VERSION);
 		b.set("materials", (int64_t)heightmap::MAX_MATERIALS);
 		b.set("scenes", scenes);
 		std::ostringstream os(std::ios::binary);
@@ -8262,8 +8485,8 @@ struct Module: public interface::Module, public Interface
 		export_head(files, "scene", author, plain_id(scene, "scene"), title,
 				"The scene "+scene+" of the Workbench game "+
 				title_cut(m_host.project), game_of(author_in, true));
-		ss_ comp = "{\n\t\"scene\": "+json::Value(scene).stringify()+
-				",\n\t\"entities\": [\n";
+		ss_ comp = "{\n"+levels_text()+"\t\"scene\": "+
+				json::Value(scene).stringify()+",\n\t\"entities\": [\n";
 		if(!export_entities(es, comp, why))
 			return false;
 		world_stand_in(scene_ids, next, comp);
@@ -8488,7 +8711,15 @@ struct Module: public interface::Module, public Interface
 			return "composition.json: past 4 MiB";
 		const json::Value c = json::load_file((dir+"/composition.json").c_str(),
 				&err);
-		const json::Value &es = c.get("entities"), &outside = c.get("outside");
+		// [KIT_API_1] (add_scene_data() names its maker)
+		why = interface::aitta::kit_level_refusal(c);
+		if(!why.empty())
+			return why;
+		read_edits(dir, &why); // [KIT_API_1] its edits' generators this build's
+		if(!why.empty())
+			return why;
+		const json::Value es = file_versions(c, c.get("entities")),
+				&outside = c.get("outside");
 		// Its scene entity on the root, each other one under it
 		// ([KIT_SCENE_TREE] the scenes under it too)
 		std::map<uint64_t, uint64_t> up;
@@ -9359,6 +9590,7 @@ struct Module: public interface::Module, public Interface
 		m.set("title", title);
 		m.set("version", version);
 		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+		m.set("kit_api", m_api); // [KIT_API_1]
 		m.set("license_code", licence);
 		m.set("license_media", licence);
 		m.set("description", jstr(j, "description"));
@@ -9530,7 +9762,8 @@ struct Module: public interface::Module, public Interface
 			if(fp.empty() || !pub_name_ok(name) || !hex || !m.is_object() ||
 					jstr(m, "kind") != kind || r.get("delisted").is_true() ||
 					api < interface::aitta::ENGINE_API_MIN ||
-					api > interface::aitta::ENGINE_API)
+					api > interface::aitta::ENGINE_API ||
+					json::jint(m, "kit_api", 1) > interface::aitta::KIT_API)
 				continue;
 			const ss_ key = fp+"/"+name;
 			auto had = newest.find(key);
@@ -9893,6 +10126,9 @@ struct Module: public interface::Module, public Interface
 			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
 					game ? "" :
 					m_registered.count(it.key()) ? "the app's or Kit's voxel" :
+					!format_ok(r, "kit_voxel") ? "not \"format\": \"kit_voxel\"" :
+					!unknown_voxel_field(r).empty() ? newer_field("the voxel type "+
+					it.key(), unknown_voxel_field(r)) :
 					!m.parse(r) ? "not a voxel type's row" :
 					!worn(r, {"texture", "top", "side", "bottom"}) ?
 					"a texture no voxel or upload has" : n >= MAX_VOXEL_TYPES ?
@@ -9905,13 +10141,17 @@ struct Module: public interface::Module, public Interface
 		for(json::Iterator it(is); it; ++it){
 			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object(),
 					sheet;
+			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					!format_ok(r, "kit_item") ? "not \"format\": \"kit_item\"" : "";
 			for(const char *f : {"format", "author", "name", "version",
 					"look_data", "package"})
 				r.del_key(f);
-			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" : "";
 			if(why.empty() && !item_sheet(r, json::object(), sheet, why) &&
 					why.empty())
 				why = "not an item type's row";
+			if(why.empty() && !unknown_item_field(r, sheet).empty())
+				why = newer_field("the item type "+it.key(),
+						unknown_item_field(r, sheet));
 			if(why.empty() && !worn(sheet, {"icon"}))
 				why = "an icon no voxel or upload has";
 			if(why.empty() && n >= MAX_ITEM_TYPES)
@@ -9976,8 +10216,24 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// An export's edits.bin (undefined: none or not one, logged)
-	json::Value read_edits(const ss_ &dir)
+	// [KIT_API_1] "" if this build's generators made what an edits.bin's
+	// cells differ from (none: a file from before, taken as this build's)
+	static ss_ edits_refusal(const json::Value &edits)
+	{
+		const json::Value &g = edits.get("generator");
+		if(g.is_undefined() || json::jint(edits, "generator", -1) ==
+				world::VERSION)
+			return "";
+		return "its edits were made over the terrain generators' version "+
+				itos(json::jint(edits, "generator", -1))+", this Buildat's is "+
+				itos(world::VERSION)+" (made with "+(json::jint(edits, "generator",
+				-1) > world::VERSION ? "a newer" : "an older")+" Buildat): not "
+				"taken";
+	}
+
+	// An export's edits.bin (undefined: none or not one, logged; why: a
+	// refusal's, edits_refusal()'s)
+	json::Value read_edits(const ss_ &dir, ss_ *why = nullptr)
 	{
 		json::Value edits;
 		const ss_ z = read_file(dir+"/edits.bin");
@@ -9995,6 +10251,13 @@ struct Module: public interface::Module, public Interface
 			log_w(MODULE, "The template's edits.bin: not kit_world_edits");
 			edits = json::Value();
 		}
+		if(!edits_refusal(edits).empty()){
+			log_w(MODULE, "The template's edits.bin: %s",
+					cs(edits_refusal(edits)));
+			if(why)
+				*why = "edits.bin: "+edits_refusal(edits);
+			edits = json::Value();
+		}
 		return edits;
 	}
 
@@ -10004,17 +10267,26 @@ struct Module: public interface::Module, public Interface
 	{
 		const json::Value &sc = edits.get("scenes");
 		const int M = heightmap::MAX_MATERIALS, C = HM_EDIT_CHUNK;
+		// [KIT_API_1] each sample's weights the file's count, this build's
+		// padded with 0 or cut
+		const int64_t FM = json::jint(edits, "materials", 0);
+		if(FM < 1 || FM > 64){
+			if(sc.is_object() && sc.size())
+				log_w(MODULE, "edits.bin's heightmap: no \"materials\" of 1...64: "
+						"its samples left out");
+			return;
+		}
 		for(json::Iterator it(sc); sc.is_object() && it; ++it){
 			if(!name_ok(it.key()))
 				continue;
 			const ss_ at = it.key() == m_host.world_scene ? "" : ":"+it.key();
 			const json::Value &hm = (*it).get("hm");
 			std::map<std::pair<int, int>, ss_> chunks;
-			for(unsigned i = 0; json::jint(edits, "materials", 0) == M &&
-					hm.is_array() && i + 3 + M <= hm.size(); i += 3 + M){
-				int64_t v[3 + heightmap::MAX_MATERIALS];
+			for(unsigned i = 0; hm.is_array() && i + 3 + FM <= hm.size();
+					i += 3 + FM){
+				int64_t v[3 + heightmap::MAX_MATERIALS] = {0};
 				bool ok = true;
-				for(int k = 0; k < 3 + M; k++){
+				for(int k = 0; k < 3 + std::min<int>(M, FM); k++){
 					const json::Value &x = hm.at(i + k);
 					ok = ok && x.is_number() && x.as_number() == std::floor(
 							x.as_number()) && std::fabs(x.as_number()) < 5e9;
@@ -15767,6 +16039,7 @@ struct Module: public interface::Module, public Interface
 	void load_round(const json::Value &rt)
 	{
 		const json::Value &made = rt.get("made");
+		m_raw_made = json::array();
 		for(unsigned i = 0; i < made.size(); i++)
 			m_pending_ids.insert((uint64_t)json::jint(made.at(i).get("entity"),
 					"id", 0));
@@ -15774,7 +16047,18 @@ struct Module: public interface::Module, public Interface
 			const json::Value &m = made.at(i);
 			Entity e;
 			ss_ why;
-			if(!entity_from_json(m.get("entity"), e, why) || e.kind != "" ||
+			// [KIT_API_1] one this Kit does not read kept as it is
+			const int64_t rid = json::jint(m.get("entity"), "id", 0);
+			const bool read = entity_from_json(m.get("entity"), e, why);
+			if(!read && rid >= 2 &&
+					rid < (int64_t)9e15 && !m_entities.count((uint64_t)rid)){
+				log_w(MODULE, "An entity the round made is kept as it was (not "
+						"read: %s)", cs(why));
+				m_raw_made.append(m.deepcopy());
+				m_next_id = std::max(m_next_id, (uint64_t)rid + 1);
+				continue;
+			}
+			if(!read || e.kind != "" ||
 					m_entities.count(e.id) || !m_entities.count(e.parent)){
 				log_w(MODULE, "An entity the round made is dropped: %s",
 						why.empty() ? cs(m.get("entity").stringify().substr(0,
@@ -18119,6 +18403,9 @@ struct Module: public interface::Module, public Interface
 			why = "not a JSON object of \"format\": \"kit_prefab\"";
 			return false;
 		}
+		why = interface::aitta::kit_level_refusal(j);
+		if(!why.empty())
+			return false;
 		const json::Value &v = j.get("version");
 		if(!v.is_undefined() && (!v.is_number() || v.as_number() < 1 ||
 				v.as_number() > 1e9 || v.as_number() != std::floor(
@@ -18237,11 +18524,11 @@ struct Module: public interface::Module, public Interface
 				// [KIT] stage 5: a member of an older version of its type
 				// is checked as its copies will be made, migrated
 				json::Value ps = c.get("params");
-				if(ps.is_object() && json::jint(c, "version", 1) <
-						m_types[type].version){
+				const int64_t cv = file_version(j, c) ? file_version(j, c) :
+						m_types[type].version;
+				if(ps.is_object() && cv < m_types[type].version){
 					ps = ps.deepcopy();
-					migrate_params(type, json::jint(c, "version", 1), ps,
-							"A prefab's "+who);
+					migrate_params(type, cv, ps, "A prefab's "+who);
 				}
 				if(ps.is_object())
 					for(json::Iterator it(ps); it; ++it){
@@ -18783,6 +19070,9 @@ struct Module: public interface::Module, public Interface
 		}
 		json::Value pf = json::object();
 		pf.set("format", "kit_prefab");
+		// [KIT_API_1]
+		pf.set("kit", (int64_t)interface::aitta::KIT_FORMAT);
+		pf.set("api", m_api);
 		pf.set("version", (int64_t)1);
 		pf.set("entities", es);
 		return pf;
@@ -18867,8 +19157,8 @@ struct Module: public interface::Module, public Interface
 				const ss_ type = full_type(jstr(c, "type"));
 				json::Value cj = json::object(), ls = json::array();
 				cj.set("type", type);
-				if(c.get("version").is_number())
-					cj.set("version", c.get("version"));
+				if(file_version(pf, c)) // [KIT_API_1]
+					cj.set("version", file_version(pf, c));
 				json::Value params = c.get("params").is_object() ?
 						c.get("params").deepcopy() : json::object();
 				const json::Value &decl = m_types[type].decl.get("params");
@@ -19645,6 +19935,11 @@ struct Module: public interface::Module, public Interface
 					pf.get("voxels").stringify() ? voxels_version(*old) : version);
 		if(old && old->get("published").is_true())
 			pf.set("published", true);
+		// [KIT_API_1] the old row's keys a newer Kit wrote
+		if(old)
+			put_rest(pf, rest_of(*old, {"format", "kit", "api", "author", "name",
+					"group", "version", "entities", "root", "voxels",
+					"voxels_version", "published"}));
 		if(!check_prefab(pf, why))
 			return false;
 		// The copies that will follow, at their most
@@ -28068,6 +28363,18 @@ struct Module: public interface::Module, public Interface
 		return name_ok(s.substr(0, sl)) && name_ok(s.substr(sl + 1));
 	}
 
+	// [KIT_API_1] A field of an item type's row (j) its sheet (item_sheet()'s
+	// of it) does not have, nor the row's own: "" none, else a newer Kit's
+	static ss_ unknown_item_field(const json::Value &j, const json::Value &sheet)
+	{
+		static const std::set<ss_> ROW = {"format", "author", "name",
+				"version", "package", "preset", "look_data"};
+		for(json::Iterator it(j); j.is_object() && it; ++it)
+			if(sheet.get(it.key()).is_undefined() && !ROW.count(it.key()))
+				return it.key();
+		return "";
+	}
+
 	// An item type's sheet from what a builder or a file gives (j), over
 	// base (a preset's; null: the defaults): each field checked, those it
 	// does not know left out. One flat sheet for every use kind; 7c-2's
@@ -28313,8 +28620,22 @@ struct Module: public interface::Module, public Interface
 		}
 		for(const ss_ &k : m_store->list("item:")){
 			ss_ row;
-			if(m_store->get(k, row))
-				m_item_types[k.substr(5)] = json::load_string(row.c_str());
+			if(!m_store->get(k, row))
+				continue;
+			const json::Value r = json::load_string(row.c_str());
+			// [KIT_API_1] (the row kept: a newer Kit's save opens there)
+			json::Value sheet;
+			ss_ why;
+			if(!format_ok(r, "kit_item")){
+				log_w(MODULE, "The item type %s: not \"format\": \"kit_item\": "
+						"not loaded", cs(k.substr(5)));
+				continue;
+			}
+			if(item_sheet(r, json::object(), sheet, why) &&
+					!unknown_item_field(r, sheet).empty())
+				log_w(MODULE, "%s", cs(newer_field("the item type "+k.substr(5),
+						unknown_item_field(r, sheet))));
+			m_item_types[k.substr(5)] = r;
 		}
 		std::set<ss_> sorted;
 		for(auto &it : m_item_types)
@@ -28500,8 +28821,10 @@ struct Module: public interface::Module, public Interface
 		m_sounds.clear();
 		const json::Value own = json::load_string(read_file(
 				m_server->get_module_path(MODULE)+"/sounds.json").c_str());
-		for(json::Iterator it(own.get("sounds")); own.get("sounds").
-				is_object() && it; ++it){
+		if(jstr(own, "format") != "kit_sounds") // [KIT_API_1]
+			log_w(MODULE, "sounds.json: not \"format\": \"kit_sounds\"");
+		for(json::Iterator it(own.get("sounds")); jstr(own, "format") ==
+				"kit_sounds" && own.get("sounds").is_object() && it; ++it){
 			json::Value r = json::object();
 			r.set("params", jstr(*it, "params"));
 			r.set("author", ss_("kit"));
@@ -33787,6 +34110,13 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"comp": {"type": "integer", "description": "From 0"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
+			// [KIT_API_1]
+			{"clear_old_params", "clear_old_params", "Removes the old_params "
+				"of entity id's component comp: the values an upgrade of its "
+				"type left out (shown in get_state, logged). One undo.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"comp": {"type": "integer", "description": "From 0"}},
+				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"keep", "keep", "When Stopped: puts the builds the last Stop "
 				"discarded (what players built and made in play) into the start: "
 				"all of them, or those named in names.",
@@ -38304,7 +38634,8 @@ struct Module: public interface::Module, public Interface
 			why = "its voxels are not kit_world_edits";
 			return false;
 		}
-		return true;
+		why = edits_refusal(edits);
+		return why.empty();
 	}
 
 	ss_ checkpoint_list()
@@ -41218,6 +41549,7 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "The round's entities: %zu made gone, %zu removed "
 					"back", made.size(), m_removed.size());
 		m_removed.clear();
+		m_raw_made = json::array();
 		sync_free_objects();
 	}
 
@@ -43269,6 +43601,23 @@ struct Module: public interface::Module, public Interface
 					" bytes)";
 			return true;
 		}
+		// [KIT_API_1] {"op": "clear_old_params", "id", "comp"}: what a
+		// migrate left out of that component, gone
+		if(op == "clear_old_params"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			if(in->old_params.is_undefined()){
+				why = "entity "+itos(e->id)+"'s "+in->type+" has no old_params";
+				return false;
+			}
+			Entity copy = *e;
+			copy.comps[in - &e->comps[0]].old_params = json::Value();
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = "cleared "+itos(e->id)+"'s "+in->type+"'s old_params";
+			return true;
+		}
 		if(op == "add_component" || op == "remove_component" ||
 				op == "move_component")
 			return component_change(op, j, change, what, why);
@@ -44031,6 +44380,7 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> marks_dirty;
 		sv_<Discarded> discarded;
 		std::map<uint64_t, Removed> removed;
+		json::Value raw_made = json::array();
 		std::map<ss_, uint64_t> players;
 		json::Value aside = json::object();
 		json::Value flows = json::array();
@@ -44090,6 +44440,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_marks_dirty, c.marks_dirty);
 		swap(m_discarded, c.discarded);
 		swap(m_removed, c.removed);
+		swap(m_raw_made, c.raw_made);
 		swap(m_players, c.players);
 		swap(m_aside, c.aside);
 		swap(m_flows, c.flows);

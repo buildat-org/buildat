@@ -339,6 +339,16 @@ ss_ check_manifest(const json::Value &m, bool service)
 		return "\"engine_api\": the engine API it is written against, 1 or more";
 	if(!service && !engine_api_refusal(api.as_integer()).empty())
 		return engine_api_refusal(api.as_integer());
+	// [KIT_API_1] A Kit kind's script level (none: from before, 1): one
+	// above this Kit's is refused at install, before anything is
+	// downloaded into a save
+	const json::Value &ka = m.get("kit_api");
+	if(!ka.is_undefined() && (!ka.is_integer() || ka.as_integer() < 1))
+		return "\"kit_api\": the Kit API level it is made for, 1 or more";
+	if(!service && kit_kind(str("kind")) && ka.is_integer() &&
+			ka.as_integer() > KIT_API)
+		return kit_newer("Kit API "+itos(ka.as_integer()), "reads up to Kit "
+				"API "+itos(KIT_API), str("buildat_version"));
 	if(str("license_code").empty() || str("license_media").empty())
 		return "\"license_code\" and \"license_media\": its licences";
 	if(str("description").size() > 300)
@@ -697,6 +707,9 @@ ss_ template_refusal(const ss_ &dir)
 	if(!es.is_array())
 		return "a template has composition.json at its root, its \"entities\" "
 				"a list";
+	// [KIT_API_1] its file format and script level this Kit's or older
+	if(!kit_level_refusal(c).empty())
+		return "composition.json: "+kit_level_refusal(c);
 	for(unsigned i = 0; i < es.size(); i++){
 		const json::Value &cs = es.at(i).get("components");
 		for(unsigned k = 0; cs.is_array() && k < cs.size(); k++){
