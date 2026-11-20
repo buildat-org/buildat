@@ -1,0 +1,5 @@
+{
+	"kitboss/brick": {"name": "brick", "kind": "solid", "version": 1, "author": "kitboss", "blast_resist": 0, "drop": "", "format": "kit_voxel", "friction": 1, "group": "", "level": 0, "light": 0, "solid": true, "sound_dig": "", "sound_place": "", "surface": "", "texture": "kit/stone.png", "transparent": false},
+	"kitboss/mossy": {"name": "mossy", "kind": "solid", "version": 1, "author": "kitboss", "blast_resist": 0, "drop": "", "format": "kit_voxel", "friction": 1, "group": "", "level": 0, "light": 0, "solid": true, "sound_dig": "", "sound_place": "", "surface": "", "texture": "kit/stone.png", "top": "generated/weave/weave1/00000g4l2936b99n4kgq97veq0mo1bsdefv00c1399f5aga3bl765", "transparent": false},
+	"kitboss/redstone": {"name": "redstone", "kind": "solid", "version": 1, "author": "kitboss", "blast_resist": 0, "drop": "", "format": "kit_voxel", "friction": 1, "group": "", "level": 0, "light": 0, "solid": true, "sound_dig": "", "sound_place": "", "surface": "", "texture": "kit/up/ae1bb6ecad4b1134.png", "transparent": false}
+}

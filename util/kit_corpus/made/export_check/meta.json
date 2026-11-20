@@ -1,0 +1,14 @@
+{
+	"kind": "template",
+	"author": "kitboss",
+	"name": "project",
+	"title": "project",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"kit_api": 1,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "The Workbench game project, exported by kitboss.",
+	"game": "kitboss/project",
+	"buildat_version": "0.8.0-alpha.51"
+}

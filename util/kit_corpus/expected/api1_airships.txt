@@ -1,0 +1,112 @@
+# util/kit_corpus_check.sh's record of api1/airships (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 53 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#4aa9ea1d/97d170e1
+4 1 kit/game_rules@2#9e7ed0d3/97d170e1 kit/environment@1#3419ac72/97d170e1
+5 2 kit/region@1#33801648/97d170e1
+6 2 kit/trigger_zone@1#d30a4cf8/97d170e1
+7 2 kit/terrain_region@1#40713d0e/97d170e1
+8 2 kit/spawner@2#d3da9e6d/97d170e1
+9 2 kit/button@2#cd6231c1/42087098
+10 2 kit/button@2#67c40b1e/0828612b
+11 2 kit/sign@1#4885b3ee/97d170e1
+12 2 kit/sign@1#09009858/97d170e1
+13 2 kit/ui_text@2#d65c0032/97d170e1
+14 2 kit/arena@3#224ee1b1/ff3e0101
+15 2 kit/symmetry@2#a40ef902/97d170e1
+16 2 kit/terrain_region@1#e4685470/97d170e1
+17 2 kit/supply@1#159b88ab/97d170e1
+18 2 kit/terrain_region@1#e4685470/97d170e1
+19 2 kit/supply@1#88f31b59/97d170e1
+20 15 kit/terrain_region@1#5fc6e75d/97d170e1
+21 2 kit/team@1#459f83f5/97d170e1
+22 2 kit/shop@1#e852d008/2f0c5e33
+23 2 kit/part@1#4f383b6e/97d170e1
+24 2 kit/shop@1#a9ded89b/2f0c5e33
+25 2 kit/shop@1#618306f2/97d170e1
+26 2 kit/shop@1#66d50913/97d170e1
+27 2 kit/shop@1#87b5cdc9/97d170e1
+28 2 kit/part@1#19f90889/97d170e1
+29 2 kit/supply@1#1fe06f6a/97d170e1
+30 15 kit/terrain_region@1#5fc6e75d/97d170e1
+31 2 kit/team@1#b706817a/97d170e1
+32 2 kit/shop@1#3b1b09ea/d3faa0e4
+33 2 kit/part@1#f6721e7d/97d170e1
+34 2 kit/shop@1#6ac3b1d9/d3faa0e4
+35 2 kit/shop@1#a915a5fa/97d170e1
+36 2 kit/shop@1#77286976/97d170e1
+37 2 kit/shop@1#32637450/97d170e1
+38 2 kit/pause_menu_action@1#7fdfe79b/fe847d17
+39 2 kit/supply@1#1fe06f6a/97d170e1
+40 2 kit/prefab_copy@1#0d3e782e/97d170e1 kit/airship@1#fc84eff3/97d170e1 kit/hull@1#f6b91f41/97d170e1
+41 40 kit/part@1#167eac24/97d170e1 kit/seat@1#30c598c2/97d170e1
+42 40 kit/part@1#85637c6d/97d170e1 kit/turret@1#3a466216/97d170e1 kit/seat@1#30c598c2/97d170e1
+43 2 kit/explosive@1#f6fd4a16/97d170e1 kit/health@1#e9310b0c/02d7f578
+44 2 kit/explosive@1#f6fd4a16/97d170e1 kit/health@1#e9310b0c/a1eb3348
+45 2 kit/explosive@1#f6fd4a16/97d170e1 kit/health@1#e9310b0c/ed4cdcb0
+46 2 kit/explosive@1#f6fd4a16/97d170e1 kit/health@1#e9310b0c/d0cc68cf
+47 2 kit/explosive@1#f6fd4a16/97d170e1 kit/health@1#e9310b0c/da87aaba
+48 2 kit/goal@1#71291dd3/97d170e1
+49 2 kit/goal@1#fa8589ea/97d170e1
+50 2 kit/spawner@2#f5b7730a/97d170e1
+51 2 kit/pause_menu_action@1#32cefbf1/4942bfc2
+52 2 kit/pause_menu_action@1#a1e4a007/e2adb9c7
+53 2 kit/goal@1#5f7ae496/97d170e1
+54 2 kit/goal@1#a745a7aa/97d170e1
+[rows]
+[round]
+kit: World: the heightmap from (-512,-512) to (511,511)
+kit: World: noise 1024x1024, seed 0, biome grassland, a heightmap, border void; ground -76 to -46, heights hash 42c3648c; version 2, decorations 0 (hash 811c9dc5, 0 under the water); materials kit/default
+kit: World: 0 edited voxel sections over the heightmap
+kit: World: a heightmap's section (0,0,0) generated for an edit
+kit: World: a heightmap's section (0,-1,0) generated for an edit
+kit: World: a heightmap's section (-1,-1,-1) generated for an edit
+kit: World: a heightmap's section (0,-1,-1) generated for an edit
+kit: World: a heightmap's section (-1,0,0) generated for an edit
+kit: World: a heightmap's section (-1,-1,0) generated for an edit
+kit: World: a heightmap's section (0,0,-1) generated for an edit
+kit: World: a heightmap's section (-1,0,-1) generated for an edit
+kit: World: kit/terrain_region: 4 regions, 6273 cells written, 0 cleared (0 changed since kept), 3329 symmetry images
+kit: Hosted: 54 entities, 63 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit: Entity 40's kit/airship steps in play
+kit: Entity 42's kit/turret steps in play
+kit/region 5: holds dig none, place none, enter all, pvp all, damage all, use all
+kit/goal 48: active from the start
+kit/goal 49: active from the start
+kit/goal 53: active from the start
+kit/goal 54: waits for activate
+kit/spawner 50: made 55 for app
+kit/spawner 50: made 56 for app
+kit/bot 55: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit/bot 56: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit: Entity 55's kit/creature_walker steps in play
+kit: Entity 56's kit/creature_walker steps in play
+[keys]
+kit/airship ceiling climb drag floor mass rate substeps thrust top_speed turn_rate
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/button color color_down hold own_look sound_press use
+kit/environment ambient cloud_cover cloud_height cloud_wind_dir cloud_wind_speed day_minutes fog_end fog_start gravity intensity latitude lighting moon north season sky stars sun time weather weather_fade
+kit/explosive armed blink_color blink_fast blink_slow color friendly_fire fuse hurt kill own_look power radius share size sound sound_every
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/health max
+kit/hull build cost
+kit/part collision color material own_look rotation shape size voxel
+kit/pause_menu_action label order shown to
+kit/prefab_copy mode
+kit/region capture damage dig enter owner owners place pvp resize_time show_border size use
+kit/seat use
+kit/shop color free_outside_rounds mount own_look pad prefab price start_money title use
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/supply color every money own_look repair size
+kit/symmetry angle enabled mode slice slices
+kit/team color friendly_fire name own_look win_score
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/terrain_region biome decorations generator height level seed shape size soil_depth spread
+kit/trigger_zone deadly size
+kit/turret cooldown pitch_max pitch_min pitch_rate rate shot_damage shot_gravity shot_speed turn_rate
+kit/ui_text anchor background border color height order shown size style text to width x y

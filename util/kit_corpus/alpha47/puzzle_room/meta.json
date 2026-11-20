@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "puzzle_room",
+	"title": "Puzzle room",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "A closed room to get out of: a button, a gate on a timer, three levers and an exit door, wired together, with goals that lead the way. Opens in edit mode, ready to play and to change."
+}

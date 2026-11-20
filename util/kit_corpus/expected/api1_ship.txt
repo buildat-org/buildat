@@ -1,0 +1,109 @@
+# util/kit_corpus_check.sh's record of api1/ship (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 32 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#1629aab2/97d170e1
+4 1 kit/game_rules@2#9eb49df6/97d170e1
+10 2 kit/prefab_copy@1#0d3e782e/97d170e1 kit/sea_vessel@1#37c29d63/97d170e1 kit/wave@1#c7ca2631/97d170e1
+11 10 kit/part@1#b9af3cca/97d170e1 kit/seat@1#30c598c2/97d170e1
+12 10 kit/part@1#413e3a59/97d170e1 kit/turret@1#94ab0bdb/97d170e1
+13 12 kit/part@1#18daa3ce/97d170e1 kit/seat@1#30c598c2/97d170e1
+14 10 kit/part@1#362ba572/97d170e1
+15 10 kit/spawner@2#d3da9e6d/97d170e1
+16 2 kit/teleporter@1#352991cd/97d170e1
+20 2 kit/part@1#bc0159b6/97d170e1
+21 2 kit/part@1#ed8187e7/97d170e1
+22 2 kit/part@1#d736750a/97d170e1
+23 2 kit/part@1#22d63e40/97d170e1
+24 2 kit/part@1#fcc8793d/97d170e1
+25 2 kit/sign@1#1859b6cf/97d170e1
+30 2 kit/explosive@1#7e7a1e3a/aa077bb9 kit/health@1#e9310b0c/04da7622
+31 2 kit/explosive@1#7e7a1e3a/aa077bb9 kit/health@1#e9310b0c/d0044aba
+32 2 kit/explosive@1#7e7a1e3a/aa077bb9 kit/health@1#e9310b0c/d2eb049c
+33 2 kit/explosive@1#7e7a1e3a/aa077bb9 kit/health@1#e9310b0c/6ca1dcd9
+34 2 kit/explosive@1#7e7a1e3a/aa077bb9 kit/health@1#e9310b0c/c58322f7
+40 2 kit/counter@1#b6e93b8d/5fbcd3fc
+41 2 kit/effect@2#9ffb61e2/97d170e1
+42 2 kit/ui_text@2#e8fd063d/97d170e1
+43 2 kit/goal@1#903bfaf9/182862a9
+44 2 kit/goal@1#7e72c8a3/88cd6e4b
+45 2 kit/ui_text@2#e55071c8/97d170e1
+46 2 kit/ui_text@2#a0d32034/97d170e1
+47 2 kit/goal@1#bc7efd0a/97d170e1
+48 2 kit/spawner@2#f5b7730a/97d170e1
+49 2 kit/pause_menu_action@1#32cefbf1/73cf8206
+50 2 kit/pause_menu_action@1#a1e4a007/37752f29
+[rows]
+[round]
+kit: World: flat 128x128, seed 0, biome grassland, voxels, border wall; ground -6 to -6, heights hash ab149dc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 33 entities, 41 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit: Entity 10's kit/sea_vessel steps in play
+kit: Entity 12's kit/turret steps in play
+kit/goal 43: active from the start
+kit/goal 44: waits for activate
+kit/goal 47: active from the start
+kit/spawner 48: made 51 for app
+kit/spawner 48: made 52 for app
+kit/bot 51: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit/bot 52: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit: Entity 51's kit/creature_walker steps in play
+kit: Entity 52's kit/creature_walker steps in play
+kit/bot 51: goal 43 attack "Sink the five red mines with the cannon"
+kit/bot 52: goal 43 attack "Sink the five red mines with the cannon"
+kit/bot 51: takes the gun at 13 for goal 43
+kit/bot 52: goal 47 reach "Sail out among the mines"
+kit/bot 52: takes the helm at 11 for goal 47
+kit/health 30: hit 10 normal by Bot 51 hp 0
+kit/health 30: died
+kit/explosive 30: explodes
+kit/counter 40: count 1 by Bot 51
+kit/ui_text 42: value for everyone
+kit/goal 47: done for everyone by Bot 52
+kit/health 32: hit 10 normal by Bot 51 hp 0
+kit/health 32: died
+kit/explosive 32: explodes
+kit/counter 40: count 2 by Bot 51
+kit/ui_text 42: value for everyone
+kit/health 31: hit 10 normal by Bot 51 hp 0
+kit/health 31: died
+kit/explosive 31: explodes
+kit/counter 40: count 3 by Bot 51
+kit/ui_text 42: value for everyone
+kit/health 33: hit 10 normal by Bot 51 hp 0
+kit/health 33: died
+kit/explosive 33: explodes
+kit/counter 40: count 4 by Bot 51
+kit/ui_text 42: value for everyone
+kit/health 34: hit 10 normal by Bot 51 hp 0
+kit/health 34: died
+kit/explosive 34: explodes
+kit/counter 40: count 5 by Bot 51
+kit/counter 40: reached 5
+kit/ui_text 42: value for everyone
+kit/goal 43: done for everyone by Bot 51
+kit/goal 44: active for everyone
+kit/bot 52: goal 44 reach "Sail back to the harbour"
+kit/goal 44: done for everyone by Bot 52
+kit/ui_text 46: show for everyone
+[keys]
+kit/counter own_look target
+kit/effect along_hit arc_color arc_time at_entity axis box color color2 count drag every fade flash_color flash_time gravity grow land light_brightness light_color light_range light_time offset repeats scale_by_damage shape size_max size_min speed_max speed_min spin spread team_color trigger ttl_max ttl_min where
+kit/explosive armed blink_color blink_fast blink_slow color friendly_fire fuse hurt kill own_look power radius share size sound sound_every
+kit/game_rules building dig drop_items feed_anchor feed_x feed_y full hand_level health_anchor health_background health_blink_below health_border health_color health_direction health_form health_height health_label health_order health_size health_style health_width health_x health_y hint_anchor hint_x hint_y hotbar hotbar_anchor hotbar_x hotbar_y item_line_anchor item_line_x item_line_y on_death peaceful place placed_only respawn screen show_health slots stack
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/health max
+kit/part collision color material own_look rotation shape size voxel
+kit/pause_menu_action label order shown to
+kit/prefab_copy mode
+kit/sea_vessel buoyancy draft drag gravity rate side_drag substeps thrust top_speed turn_rate water water_level
+kit/seat use
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/teleporter own_look pad scene target to two_way use
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/turret cooldown pitch_max pitch_min pitch_rate rate shot_damage shot_gravity shot_speed turn_rate
+kit/ui_text anchor background border color height order shown size style text to width x y
+kit/wave pivot wave_heave wave_heave_period wave_pitch wave_pitch_period wave_roll wave_roll_period wave_yaw wave_yaw_period

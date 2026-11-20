@@ -1,0 +1,124 @@
+# util/kit_corpus_check.sh's record of alpha47/ctf (RECORD=1 writes it)
+[warnings]
+[composition]
+entities 72 (kit 1, api 1)
+2 1 scene
+3 2 kit/terrain@2#0753ad86/97d170e1
+4 2 kit/spawner@2#2f075759/97d170e1
+5 2 kit/part@1#996c43ce/97d170e1
+6 2 kit/part@1#3c4ebd3a/97d170e1
+7 2 kit/arena@3#ad80eeaf/0f79aa85
+8 2 kit/sign@1#6bc010fa/97d170e1
+9 2 kit/sign@1#cbcf1d72/97d170e1
+10 2 kit/ui_text@2#0b0bc0ae/97d170e1
+11 2 kit/part@1#3c5ba33d/97d170e1
+12 2 kit/part@1#3c5ba33d/97d170e1
+13 2 kit/part@1#3c5ba33d/97d170e1
+14 2 kit/part@1#3c5ba33d/97d170e1
+15 1 scene
+16 15 kit/terrain@2#c6cfafc4/97d170e1
+17 15 kit/symmetry@2#a40ef902/97d170e1
+18 17 kit/team@1#459f83f5/97d170e1
+19 18 kit/region@1#a77bdf63/97d170e1
+20 18 kit/part@1#5a11dfb7/97d170e1
+21 18 kit/part@1#9abc7c65/97d170e1
+22 18 kit/part@1#9abc7c65/97d170e1
+23 17 kit/part@1#f343d9db/97d170e1
+24 17 kit/part@1#db9ee3a9/97d170e1
+25 17 kit/part@1#f343d9db/97d170e1
+26 17 kit/part@1#4855aa16/97d170e1
+27 15 kit/region@1#3ef6a3f3/97d170e1
+28 15 kit/flag@1#64cfcf65/ddcafb14
+29 28 kit/part@1#8839eb01/97d170e1
+30 15 kit/timer@2#98ba4903/151cefb3
+31 15 kit/ui_panel@2#89e7f007/97d170e1
+32 31 kit/ui_bar@2#22f31e97/97d170e1
+33 31 kit/ui_text@2#63aba32c/97d170e1
+34 15 kit/ui_panel@2#a2c91774/97d170e1
+35 34 kit/ui_text@2#cb712fd4/97d170e1
+36 34 kit/ui_text@2#9b0d125f/97d170e1
+37 15 kit/ui_panel@2#bf60ab13/97d170e1
+38 37 kit/ui_bar@2#0f0c752d/97d170e1
+39 37 kit/ui_bar@2#17cf2f3a/97d170e1
+40 37 kit/ui_bar@2#0fe82787/97d170e1
+41 15 kit/ui_text@2#42b30581/97d170e1
+42 15 kit/starting_kit@1#0a025a6a/97d170e1
+43 15 kit/effect@2#0df307cf/97d170e1
+44 15 kit/effect@2#cc711f5d/97d170e1
+45 15 kit/effect@2#d814ae5b/97d170e1
+46 15 kit/effect@2#cd98b4f2/97d170e1
+47 17 kit/team@1#b706817a/97d170e1
+48 17 kit/part@1#f343d9db/97d170e1
+49 17 kit/part@1#db9ee3a9/97d170e1
+50 17 kit/part@1#f343d9db/97d170e1
+51 17 kit/part@1#4855aa16/97d170e1
+52 47 kit/region@1#a77bdf63/97d170e1
+53 47 kit/part@1#aeffe303/97d170e1
+54 47 kit/part@1#9abc7c65/97d170e1
+55 47 kit/part@1#9abc7c65/97d170e1
+56 15 kit/goal@1#22a6fce5/0bbc12f5
+57 15 kit/goal@1#283c84e8/97d170e1
+58 2 kit/action@1#28e5845a/93755f72
+60 15 kit/ui_panel@2#a42e5f27/97d170e1
+61 2 kit/spawner@2#716498db/97d170e1
+62 2 kit/pause_menu_action@1#32cefbf1/fd959de8
+63 2 kit/pause_menu_action@1#a1e4a007/866ef9ce
+64 2 kit/goal@1#bcac6f76/97d170e1
+65 15 kit/goal@1#238f60ee/97d170e1
+66 15 kit/goal@1#4d3ccbb9/97d170e1
+67 15 kit/goal@1#da2fe9f3/97d170e1
+68 15 kit/placer@1#3f89064f/97d170e1
+69 17 kit/pickup@1#49ea896c/97d170e1
+70 17 kit/pickup@1#49ea896c/97d170e1
+71 17 kit/pickup@1#7850014a/97d170e1
+72 17 kit/pickup@1#7850014a/97d170e1
+73 17 kit/pickup@1#49ea896c/97d170e1
+74 17 kit/pickup@1#49ea896c/97d170e1
+[rows]
+[round]
+kit: World: flat 32x32, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 76efddc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: World: flat 96x96, seed 0, biome grassland, voxels, border wall; ground 0 to 0, heights hash 6589ddc5; version 2, decorations 0 (hash 00000000, 0 under the water); materials kit/default
+kit: World: the save holds 0 sections (0 edited)
+kit: Hosted: 73 entities, 70 instances (the composition's first start); 0 players, 0 entities made in the round
+kit: Play by app: a round from the start
+kit/region 19: holds dig all, place all, enter all, pvp all, damage all, use all
+kit/region 27: holds dig none, place none, enter all, pvp all, damage all, use all
+kit/region 52: holds dig all, place all, enter all, pvp all, damage all, use all
+kit/goal 56: active from the start
+kit/goal 57: waits for activate
+kit/goal 64: active from the start
+kit/goal 65: active from the start
+kit/goal 66: active from the start
+kit/goal 67: active from the start
+kit/spawner 61: made 75 for app
+kit/spawner 61: made 76 for app
+kit/ui_text 33: value for everyone
+kit/ui_bar 32: value 0 for everyone
+kit/bot 75: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit/bot 76: knobs: aim 75%, reaction 0.4 s, speed 90%
+kit: Entity 75's kit/creature_walker steps in play
+kit: Entity 76's kit/creature_walker steps in play
+kit/bot 75: goal 64 reach ""
+kit/bot 76: goal 64 reach ""
+[keys]
+kit/action action key label
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/effect along_hit arc_color arc_time at_entity axis box color color2 count drag every fade flash_color flash_time gravity grow land light_brightness light_color light_range light_time offset repeats scale_by_damage shape size_max size_min speed_max speed_min spin spread team_color trigger ttl_max ttl_min where
+kit/flag click_range color enabled holder_hint home_range hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y immunity lift marker_color marker_label marker_lift marker_style on_blast on_death own_look place_action place_by place_key place_label placed_range poll return_time score_interval score_points score_to speed steal steal_range take_home take_placed use
+kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
+kit/part collision color material own_look rotation shape size voxel
+kit/pause_menu_action label order shown to
+kit/pickup count item own_look size sound
+kit/placer consume distance item prefab signal
+kit/region capture damage dig enter owner owners place pvp resize_time show_border size use
+kit/sign background board both_sides color facing material own_look size solid text
+kit/spawner copy every max own_look players prefab spread
+kit/starting_kit clear items when
+kit/symmetry angle enabled mode slice slices
+kit/team color friendly_fire name own_look win_score
+kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/timer autostart interval repeats scope
+kit/ui_bar anchor background blink_below border color direction form height label max min order shown size source start style to width x y
+kit/ui_panel anchor background border color gap height keyboard layout order screen shown size style title to width x y
+kit/ui_text anchor background border color height order shown size style text to width x y
