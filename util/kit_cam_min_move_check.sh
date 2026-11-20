@@ -321,8 +321,11 @@ wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
 EOF
-joined >> "$t/brim.cmds"
+# (not joined(): its second "Joined as" wait looks back over the client's
+# recent lines, and Brimstone's load logs enough to push the join out)
 cat >> "$t/brim.cmds" <<EOF
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
 wait_log_any 10000 kit editor: kit/controls' edit view 2d
 keypress F2
 wait_log 5000 kit editor: the view is 3D
