@@ -1,0 +1,104 @@
+Kit parameter audit: a builder's simple change, seen in play
+===========================================================
+[KIT_PARAM_AUDIT] (2026-11-21) Each Workbench template opened from New, one
+interesting parameter changed in the editor, played, and looked at
+(screenshots on a headless weston, the logs' lines). Verdicts: pass (as
+a builder would expect), FIXED (a Kit fault, fixed with the audit),
+fault (a Kit fault left), proposal (a template or Kit improvement; works
+as written, could be clearer). util/kit_param_audit_check.sh keeps the
+first five Brimstone rows; util/kit_racer_check.sh step 6 the chase
+camera, util/kit_symmetry_check.sh the symmetry fit.
+
+Brimstone Speedway (top-down racer)
+-----------------------------------
+alteration                     | expected                  | seen                                       | verdict
+-------------------------------+---------------------------+--------------------------------------------+---------
+controls camera first_person   | the eye turns with the car| it did not: the eye stayed at its yaw, the | FIXED
+  (no mouse look)              |                           | car drove out of view. Now first_person    |
+                               |                           | with chase_follow > 0 follows the heading  |
+                               |                           | as chase does, level (eb777479e)           |
+controls camera chase or       | follows the car           | the template had chase_follow 0: a fixed   | FIXED
+  first_person alone           |                           | yaw. Template now 0.3 (604b94e66)          |
+controls camera side           | a side view               | a cross-section of a flat track: not       | pass
+                               |                           | playable, as expected for the world        |
+movement walker (top_down)     | a walker on the track     | W walks +z 5 m; the body is small to see   | pass
+place kit/environment, cartoon | about as without one      | sunlit road (112,86,76) vs (114,88,78)     | pass
+lighting physical              | shadows, shade bluer      | wall shadow (88,87,91) b/r 1.03 vs sunlit  | pass
+                               |                           | (176,158,144) b/r 0.82; the brown road     |
+                               |                           | washes to pale beige (proposal: Kit's      |
+                               |                           | physical exposure, or the road's colour)   |
+time 18.5 / weather rain       | dusk / rain               | orange dusk; drops, overcast, no shadows   | pass
+trial_laps 2                   | HUD "Lap 1/2", 2 laps     | "Lap 1/2" after Retry; lap end kit_racer's | pass
+yard generator seed 7, width 8 | a new, narrower track     | narrower road, junk moved; the driver      | pass
+                               |                           | got through the U bend                     |
+trial ground flat -> noise     | hills, still drivable     | dunes -10..8; the car drives over them,    | proposal
+                               |                           | but road, walls, polygons stay at the old  |
+                               |                           | level (floating or buried): the Bone Yard  |
+                               |                           | generator could lay the road on the ground |
+undo of each of the above      | exactly as before         | the authored entities equal (next_id aside)| pass
+
+Puzzle room (walker, first person)
+----------------------------------
+lighting physical (env placed) | shadows, shade bluer      | (102,96,90) b/r 0.88 vs (151,135,118) 0.78;| pass
+                               |                           | sign text in shade low in contrast         | proposal
+camera chase                   | behind the walker         | behind it; with chase_follow it follows    | pass
+camera top_down                | playable from above       | the body hidden behind the south wall near | proposal
+                               |                           | spawn: a cutaway, or angle ~80 in the      |
+                               |                           | template's hint                            |
+camera side                    | a side view               | understandable                             | pass
+movement click_to_move +       | walks to the click        | walks there                                | pass
+  top_down                     |                           |                                            |
+terrain flat -> noise          | hills under the room      | ground -6..1 with sea_level 0: the room    | proposal
+                               |                           | flooded, the player underwater; the parts  |
+                               |                           | stay at the old level. A lower sea_level   |
+                               |                           | (or level) gives dry hills                 |
+noise -> flat (undo)           | the room as before        | the body stayed buried 4.5 m down (unbury  | FIXED
+                               |                           | reached 2.7 m): unbury now lifts up to     |
+                               |                           | 64 m (319a477e1)                           |
+undo                           | exact                     | exact                                      | pass
+
+Arena (teams, rounds)
+---------------------
+arena duration 90              | HUD "1:30 left", round    | "1:30 left"; at 0 "tied ... overtime"      | pass
+                               | ends                      |                                            |
+duplicate red team (a third),  | three teams in the HUD    | "Red 0 : Blue 0 : Green 0"                 | pass
+  named Green                  |                           |                                            |
+  the copy's guide goals       | its own                   | the guide goals are scene-level: a copied  | proposal
+                               |                           | team gets none; its children keep red      |
+                               |                           | names. Goals under the team entity         |
+signs/hints' rules text        | follows duration/score    | hard-coded "First to 3 points ... 3        | proposal
+                               |                           | minutes", "Two teams": stale after an edit.|
+                               |                           | Kit: a text placeholder for a param, or    |
+                               |                           | the arena publishing its rules             |
+undo (after end_rounds)        | exact                     | exact; refused while a round runs (says so)| pass
+
+Capture the flag
+----------------
+symmetry slices quadrants      | four slices (4 teams)     | refused for the old slice (+x is no        | FIXED
+  (set alone)                  |                           | quadrant), and slice +x+z first refused    |
+                               |                           | for halves: unreachable from the inspector.|
+                               |                           | Now the slice is fitted (f9604dcc7); then  |
+                               |                           | refused with the real reason: entity 19 at |
+                               |                           | (24,-6) is outside the quadrant            | pass
+                               |                           | (the map spans the +x half). A 4-team map  | proposal
+                               |                           | needs its content moved into a quadrant    |
+arena duration 120             | HUD "2:00 left"           | "2:00 left | Red 0 : Blue 0"               | pass
+bots' spawner max 2, 3 spawns  | 2 bots                    | 2 spawned, then a round: bots on Red and   | pass
+                               |                           | Blue beside the player                     |
+signs' "10 minutes"            | follows duration          | hard-coded (as arena)                      | proposal
+
+Crag Trial (side-view bike)
+---------------------------
+controls camera chase          | behind the bike           | behind it, the track ahead                 | pass
+controls camera first_person   | the rider's view          | the track ahead, the bike's front          | pass
+controls camera top_down       | from above                | readable: the ramp, the bike, the rocks    | pass
+crag_bike speed 16 -> 48       | faster                    | no difference in a 1-2 s run: speed is a   | proposal
+                               |                           | top speed and power bounds the start; the  |
+                               |                           | param's description could say so. The side |
+                               |                           | camera kept the bike in view               | pass
+undo of the 13 edits           | exact                     | exact                                      | pass
+
+Bot skill: util/kit_bot_knobs_check.sh (not repeated here).
+Airships, survival, ship: their kit/environment is the same type as above;
+not driven in this audit. Web client (headless Chrome): the changed
+client Lua run by util/run_all.sh --changed's web pick.
