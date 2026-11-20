@@ -91,7 +91,7 @@ namespace interface
 // never loads it half-way.
 // Outside the promise (any release may change them):
 // - what is marked experimental: generators (on_build, c:child, c:link,
-//   c:voxel_box, c.entities, c.move, c:generate, the "points" keys `values`
+//   c:voxel_box, c.entities, c.move_lib, c:generate, the "points" keys `values`
 //   and `level`), driving bots (c:drive, c.body, c.path, kit/path and
 //   kit/bot's drive, skill and ask; a kit/bot walking the goals is API
 //   1's), kit/parallax and a movement's touch_axes; a type of its own by
@@ -734,7 +734,7 @@ namespace interface
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
 //   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
-//   c:child, c:link, c:voxel_box, c.entities, c.move, c:generate and the
+//   c:child, c:link, c:voxel_box, c.entities, c.move_lib, c:generate and the
 //   "points" keys `values` and `level` may change in any release; publishing
 //   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a

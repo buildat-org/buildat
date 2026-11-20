@@ -9535,7 +9535,7 @@ struct Module: public interface::Module, public Interface
 		static const char *const N[] = {
 			// generators
 			"on_build", "c:child", "c:link", "c:voxel_box", "c.entities",
-			"c:generate",
+			"c.move_lib", "c:generate",
 			// driving bots
 			"c:drive", "c.body", "c.path",
 			// a movement's touch bar
