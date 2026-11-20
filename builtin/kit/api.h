@@ -88,7 +88,7 @@ namespace interface
 // weave1 formats. Within API 1 Kit only adds things; a renamed thing keeps
 // its old name as an alias until API 2. A Kit that meets a game made with a
 // newer one refuses it with a message saying which Buildat to use, and
-// never loads it half-way.
+// never loads it half-way. Its inventory, name by name: doc/kit_api1.txt.
 // Outside the promise (any release may change them):
 // - what is marked experimental: generators (on_build, c:child, c:link,
 //   c:voxel_box, c.entities, c.move_lib, c:generate, the "points" keys `values`

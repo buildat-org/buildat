@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-18)
-# covers: apps/workbench/templates/brimstone_speedway/** util/kit_racer_drive.py builtin/kit/client_lua/music.lua builtin/kit/types/mute_button.prefab.json builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
+# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/types/controls.lua util/kit_racer_drive.py builtin/kit/client_lua/music.lua builtin/kit/types/mute_button.prefab.json builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
 # [KIT_TOP_DOWN] (7), (8) The Brimstone Speedway template (a top-down racer:
 # local/brim_car in kit/controls' plane horizontal, its race, checkpoints,
 # crates and mines) on Workbench; one server, kitboss (the admin) and kitbob
@@ -56,8 +56,13 @@
 #   the scripted run (muted), clicked: "kit: sound on" and it reads "Sound
 #   on" (lobby_sound.png), clicked again muted (SDL's dummy driver: nothing
 #   heard either way).
+#   6. [KIT_CHASE_HEADING] Switched to a chase camera behind the car by
+#      kit/controls' camera chase and chase_follow 0.3 alone: a trial through
+#      a U bend, the camera's yaw following the car's (chase_east.png,
+#      chase_west.png), a right drag not turning it.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lobby_sound.png, $t/grid.png, $t/push.png,
-# $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png
+# $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png,
+# $t/chase_east.png, $t/chase_west.png
 #   util/kit_racer_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -80,8 +85,10 @@ scene = {e["name"]: e["id"] for e in d["entities"] if e.get("kind") == "scene"}
 def find(name, s):
     return [e["id"] for e in d["entities"] if e.get("name") == name and
             e.get("parent") == scene[s]]
-print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
-      find("the race", "trial")[0], find("crate", "world")[1]))
+print("RACE=%d TRIAL=%d CRATE=%d CONTROLS=%d" % (find("the race", "world")[0],
+      find("the race", "trial")[0], find("crate", "world")[1],
+      [e["id"] for e in d["entities"] if any(c["type"] == "kit/controls"
+       for c in e.get("components", []))][0]))
 # (4z37h) Two bends' run-off on one side close together joined: on the
 # east straight between corners 7 and 8 (x 95, both 5 m) the outside wall
 # out at 6 + 5 m all along, none at the road's edge (6 m)
@@ -586,8 +593,62 @@ echo "ok: the music: the lobby's, none in a countdown, the race's from GO, none 
 ! grep -aE "the loop [0-9]+ m, [0-9]+ corners" "$SL" ||
 	fail "the Bone Yard's generator ran in play ($SL)"
 echo "ok: the joins and the runs' starts did not run the Bone Yard's generator"
+
+# 6. [KIT_CHASE_HEADING] The chase camera by kit/controls' params alone (camera
+# chase, chase_follow 0.3): a trial's start through the U of corners 2 and 3
+# (east, then west at z -34), a screenshot on each straight; the camera's yaw
+# following the car's drawn one (turned with it, never far behind, on it
+# once straight), a right drag not turning it
+mc=$(mark "$CL")
+step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+for e in 'camera "chase"' 'chase_follow 0.3'; do
+	set -- $e
+	step 10 "entities, [0-9]+ to undo" "event kit_edit {\"op\": \"set\", \"id\": $CONTROLS, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"
+done
+step 10 "the server is Running" 'event kit_edit {"op": "play"}'
+step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
+await "$CL" "$mc" 10 "kit: controls: camera chase, pointer cursor, movement local/brim_car"
+m=$(mark "$SL")
+step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
+await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+mc=$(mark "$CL")
+SHOTS="30,-58,$t/chase_east.png 35,-34,$t/chase_west.png" \
+	drive boss 30 'kit: body at (1[5-9]|2[0-9])\.[0-9]+,-?[0-9.]+,-3[0-9]\.'
+mm=$(mark "$CL")
+step 5 "kit: chase yaw" "frames 3" "event kit_body"
+cmd "mouse_pos 500 350" "mouse_down right"
+for i in 1 2 3 4 5; do
+	cmd "mouse_move 80 0" "frames 2"
+done
+cmd "mouse_up right"
+step 5 "kit: chase yaw" "frames 3" "event kit_body"
+python3 -I - "$CL" "$mc" "$mm" <<'PY' || fail "the chase camera's yaw ($CL)"
+import re, sys
+s = open(sys.argv[1], "rb").read().decode(errors="replace")
+def yaws(a, b=None):
+    return [(float(m[1]), float(m[2])) for m in re.finditer(
+        r"kit: chase yaw (-?[0-9.]+), the body's (-?[0-9.]+)", s[int(a):int(b) if b else None])]
+def off(a, b):
+    return abs((a - b + 540) % 360 - 180)
+D, M = yaws(sys.argv[2], sys.argv[3]), yaws(sys.argv[3])
+assert len(D) > 20 and len(M) == 2, (len(D), M)
+# (east first, west last: turned half a turn with the car; behind it at most
+# its turn rate times the lag and a sample's worth, 45 degrees)
+assert off(D[0][1], 90) < 20 and off(D[-1][1], 270) < 20, (D[0], D[-1])
+assert off(D[-1][0], 270) < 20, D[-1]
+most = max(off(c, b) for c, b in D)
+assert most < 45, "the camera %.0f degrees off the car: %r" % (most, D)
+assert off(D[-1][0], D[-1][1]) < 4, D[-1]
+# (the right drag, 40 degrees' worth in mouse look: the camera still behind
+# the car, turned as the coasting car turned and no more)
+drag = off(M[1][0] - M[0][0], M[1][1] - M[0][1])
+assert all(off(c, b) < 4 for c, b in M) and drag < 3, M
+print("ok: the chase camera followed the car from %.0f to %.0f degrees, at most %.0f off, %.1f once straight; a right drag turned it %.1f more than the car" %
+      (D[0][0], D[-1][0], most, off(D[-1][0], D[-1][1]), drag))
+PY
+echo "ok: Brimstone with camera chase and chase_follow 0.3: $t/chase_east.png, $t/chase_west.png"
 cmd "quit"
 as bob
 cmd "quit"
-echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a handbrake drift, a trial's lap only over every checkpoint with no correction, the top speed approached slowly, the car's smoke, dust and marks; screenshots $t/lobby.png $t/grid.png $t/push.png $t/drift.png $t/wreck.png $t/result.png $t/track.png $t/trial.png"
+echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a handbrake drift, a trial's lap only over every checkpoint with no correction, the top speed approached slowly, the car's smoke, dust and marks, a chase camera behind the car by two params; screenshots $t/lobby.png $t/grid.png $t/push.png $t/drift.png $t/wreck.png $t/result.png $t/track.png $t/trial.png $t/chase_east.png $t/chase_west.png"
 # vim: set noet ts=4 sw=4:
