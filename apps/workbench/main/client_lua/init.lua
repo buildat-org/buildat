@@ -20,6 +20,8 @@
 --   down the held slot's voxel ([KIT_INVENTORY_PLAY]); E the inventory
 --   screen, Q a drop
 --   F: out of a seat (kit/car, kit/ball: a use takes it)
+--   M: the sound muted and unmuted, the client settings' Mute
+--   ([WB_MUTE_KEY]; not while typing, nor where the world's action has M)
 --   ([KIT_TOOLS_1]) the wheel (first person): the item in hand, Kit's
 --   hotbar; a melee item's left click hits a player or an entity with
 --   health, a dig that takes time goes on while the button is held
@@ -69,6 +71,8 @@ for i = 1, 10 do
 	KEYS[#KEYS + 1] = {id = "voxel" .. i, label = "Voxel in hand: " ..
 		MATERIALS[i], default = tostring(i % 10)}
 end
+KEYS[#KEYS + 1] = {id = "mute", label = "Mute and unmute the sound",
+	default = "M"}
 kit.declare_keys("Workbench", KEYS)
 
 -- The login was join.lua's ([WB_LAN]); this instance has the account's
@@ -370,9 +374,29 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		if not ui_utils.mouse_look_escape() and not kit.close_screens() then
 			menu.escape()
 		end
+		return
 	elseif menu.held() then
 		return
-	elseif kit.editing() or kit.building() ~= "inventory" then
+	end
+	-- [WB_MUTE_KEY] As kit/ui_button's "mute" (the preference, saved as from
+	-- the client settings): a Kit screen's keys too (the lobby's mute
+	-- button is there); in play a world action on the key has it
+	local mk = kit.key_name("mute") or ""
+	if mk ~= "" and magic.input:GetKeyFromName(mk) == key and
+			not data:GetBool("Repeat") then
+		local clash = false
+		for _, a in ipairs(kit.editing() and {} or kit.world_actions()) do
+			clash = clash or kit.key(a.name, key)
+		end
+		if not clash then
+			local mute, db = buildat.get_sound()
+			local ok, err = buildat.set_sound(not mute, db)
+			log:info("workbench: the mute key: sound " .. (not ok and
+					"not set: " .. tostring(err) or mute and "on" or "muted"))
+			return
+		end
+	end
+	if kit.editing() or kit.building() ~= "inventory" then
 		-- [KIT_INVENTORY_PLAY] the palette's keys (in "inventory" building
 		-- Kit's hotbar has them in play)
 		for i = 1, 10 do

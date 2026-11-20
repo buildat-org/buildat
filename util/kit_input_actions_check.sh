@@ -17,6 +17,9 @@
 #   3b. [KIT_KEY_ACTIONS_CAP] the check's types workbench/acts_a (8
 #      actions) and acts_b (7) placed: with fire the world's 16 actions;
 #      each key pressed reaches the server; the store has the 16th;
+#   3c. [WB_MUTE_KEY] Workbench's M in the editor mutes, again unmutes; M
+#      in an inspector field does not, nor in play where the world's b1 is
+#      on M (b1 is pressed);
 #   4. kitbob on a touchscreen (BUILDAT_TOUCH=1): a Fire button over
 #      the touch bar; pressed, the counter counts again; the sign shows him
 #      "[Tap] ... [Fire] ... [Forward ...]" (on a touchscreen: a tap, the
@@ -111,12 +114,30 @@ delay 500
 keyup I
 frames 2
 event kit_cam_where after
+keypress M
+wait_log 5000 workbench: the mute key: sound
+keypress M
+wait_log 5000 workbench: the mute key: sound
 EOF
 	edit '{"op": "place", "type": "kit/action", "pos": [2, 1, 4]}'
 	edit '{"op": "place", "type": "kit/counter", "pos": [3, 1, 4]}'
 	edit '{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 4, "input": "count"}'
 	edit '{"op": "place", "type": "kit/sign", "pos": [0, 2, 10]}'
 	set_p 5 text '"Press [use] to use, [fire] to fire, [forward] to walk"'
+	# (M typed in a field: no mute; a click on the world takes the focus)
+	cat <<'EOF'
+event kit_select 5
+frames 5
+click LineEdit "position x"
+frames 2
+keypress M
+frames 2
+screenshot @T@/field.png
+mouse_pos 512 200
+frames 2
+mouse_click left
+frames 3
+EOF
 	edit '{"op": "place", "type": "kit/counter", "pos": [4, 1, 4]}'
 	edit '{"op": "link", "id": 3, "comp": 0, "output": "held", "to": 6, "input": "count"}'
 	cat <<'EOF'
@@ -219,6 +240,14 @@ done
 grep -aqP '^action\t[^\t]+\tb7\tEnd\t' "$t/cu_kitboss/keys.txt" ||
 	fail "the key store lacks the world's 16th action"
 echo "ok: the world's 16 actions: each key reached the server"
+# [WB_MUTE_KEY] M in the editor muted and unmuted; in a field, and in play
+# where the world's action b1 has M, it did not
+m=$(grep -aoP "workbench: the mute key: sound \K\S+" "$c" | tr '\n' ' ')
+[ "$m" = "muted on " ] || [ "$m" = "on muted " ] ||
+	fail "the mute key: not muted and unmuted once each in the editor alone: $(grep -a "workbench: the mute key" "$c" | sed 's/^.*: //' | tr '\n' ' ') ($c)"
+grep -aqP '^action\t[^\t]+\tmute\tM\t' "$t/cu_kitboss/keys.txt" ||
+	fail "the key store lacks Workbench's mute key"
+echo "ok: M muted and unmuted in the editor, not in a field nor over the world's b1 in play; the store has it"
 want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk"' \
 	"kit: the gamepad read"
 k=$t/cu_kitboss/keys.txt
@@ -234,4 +263,4 @@ echo "ok: a touch client: the Fire button, pressed, reached the counter"
 for p in keys sign touch; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: Kit's input actions: a rebound key walks and flies the editor; an action's signal linked; [use] in a sign; a touch button; screenshots $t/keys.png $t/sign.png $t/touch.png"
+echo "PASS: Kit's input actions: a rebound key walks and flies the editor; an action's signal linked; [use] in a sign; a touch button; Workbench's mute key; screenshots $t/keys.png $t/sign.png $t/touch.png"
