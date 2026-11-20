@@ -90,7 +90,7 @@ set_ 6 0 every 1
 set_ 6 0 max 3
 set_ 6 0 radius 16
 set_ 6 0 apart 8
-set_ 6 0 on '"kit/sand"'
+set_ 6 0 on_voxels '"kit/sand"'
 srv_mark
 step 15 "the server is Running" 'event kit_edit {"op": "play"}'
 # kitbob at the spawn; kitboss 300 m off
@@ -108,7 +108,7 @@ srv_mark
 try 6 enable
 srv 10 "kit/spawn_rule 6: finds no spot"
 srv_mark
-set_ 6 0 on '"kit/grass, kit/stone"'
+set_ 6 0 on_voxels '"kit/grass, kit/stone"'
 set_ 6 0 light_max 7
 srv 10 "kit/spawn_rule 6: finds no spot"
 # On the ground's voxel: made, up to the cap

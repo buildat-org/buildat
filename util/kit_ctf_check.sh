@@ -468,7 +468,7 @@ EOF
 	done
 	# Blue's side: the copies of its sources (by id: the team, the
 	# spawner, then the zone under the team), Blue's name and colour its own
-	set_ $SYM on true
+	set_ $SYM enabled true
 	BLUE=$((id + 1)); id=$((id + 3))
 	set_ $BLUE name '"Blue"'
 	set_ $BLUE color '"#3050e0"'
