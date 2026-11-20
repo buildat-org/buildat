@@ -7650,6 +7650,11 @@ struct Module: public interface::Module, public Interface
 		ss_ why;
 		if(!prefab_export(p, "", j, why))
 			return refuse(why);
+		// [KIT_API_1] its text files (types, prefabs)
+		sv_<std::pair<ss_, ss_>> files;
+		for(json::Iterator it(j.get("files")); it; ++it)
+			files.push_back({it.key(), (*it).as_string()});
+		pub_warn_experimental(peer, p, files);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:export", j.stringify());
 		});
@@ -8559,6 +8564,7 @@ struct Module: public interface::Module, public Interface
 			});
 			return;
 		}
+		pub_warn_experimental(peer, p, files);
 		json::Value a = json::object(), t = json::object(), h = json::object();
 		static const char *H = "0123456789abcdef";
 		for(auto &f : files){
@@ -9518,6 +9524,121 @@ struct Module: public interface::Module, public Interface
 		return L;
 	}
 
+	// [KIT_API_1] (kit_api1_review.md items 3, 4 and 10) What a game's own
+	// type or client part may use that Kit API 1 does not promise: it may
+	// change in any release (api.h's "Kit API 1"). get_guide, put_type's
+	// text and api.h say "(experimental)" beside each; a whole type of
+	// Kit's is marked by its own `experimental = true` (kit/path,
+	// kit/parallax). A name ending in "(" is a call
+	static const char *const* experimental_names()
+	{
+		static const char *const N[] = {
+			// generators
+			"on_build", "c:child", "c:link", "c:voxel_box", "c.entities",
+			"c:generate",
+			// driving bots
+			"c:drive", "c.body", "c.path",
+			// a movement's touch bar
+			"touch_axes",
+			// outside the promise: the client's whole module, a movement's
+			// internal w methods (move.lua's head)
+			".internal", "w:pose_at(", "w:deck_velocity(", "w:height(",
+			"w:ground_max(", "w:sweep(", "w:sweep_turned(", "w:sweep_polys(",
+			"w:shed(", "w:blocked(", "w:pushed(", "w:slide(", "w:ray_objects(",
+			"w:floor_at(", "w:hold(", "w:plane_edges(", "w:frame_world(",
+			"w:walk_on(", "w:walk_flat(", nullptr};
+		return N;
+	}
+
+	// The experimental parts of Kit a release's files use, as a warning
+	// ("" none): the placed types marked experimental (any {"type": ...} in
+	// its JSON files), a kit/bot that drives, and each Lua file naming one
+	// of experimental_names() outside a comment. Publishing is not blocked.
+	// simplified: a comment is "--" to the line's end (a string holding
+	// "--" hides the rest of its line, a --[[ block's later lines are read
+	// as code); a kit/bot_driver a spawner names is
+	// not seen (Brimstone's generator says it anyway)
+	ss_ pub_experimental(const sv_<std::pair<ss_, ss_>> &files)
+	{
+		auto word = [](char c){
+			return isalnum((unsigned char)c) || c == '_';
+		};
+		std::set<ss_> types;
+		sm_<ss_, std::set<ss_>> by;
+		std::function<void(const json::Value&)> walk =
+				[&](const json::Value &v){
+			if(v.is_object()){
+				const ss_ t = jstr(v, "type");
+				auto it = m_types.find(t);
+				if(it != m_types.end() &&
+						it->second.decl.get("experimental").is_true())
+					types.insert(t);
+				if(t == "kit/bot" && v.get("params").get("drive").is_true())
+					types.insert("kit/bot's drive");
+			}
+			if(v.is_object() || v.is_array())
+				for(json::Iterator it(v); it; ++it)
+					walk(*it);
+		};
+		for(auto &f : files){
+			const ss_ &n = f.first;
+			if(n.size() > 5 && n.compare(n.size() - 5, 5, ".json") == 0){
+				walk(json::load_string(f.second.c_str()));
+				continue;
+			}
+			if(n.size() <= 4 || n.compare(n.size() - 4, 4, ".lua") != 0)
+				continue;
+			ss_ src;
+			for(size_t at = 0; at < f.second.size();){
+				size_t nl = f.second.find('\n', at);
+				nl = nl == ss_::npos ? f.second.size() : nl;
+				src += f.second.substr(at, std::min(f.second.find("--", at),
+						nl) - at)+"\n";
+				at = nl + 1;
+			}
+			for(const char *const *x = experimental_names(); *x; x++){
+				const ss_ name = *x;
+				for(size_t at = src.find(name); at != ss_::npos;
+						at = src.find(name, at + 1)){
+					const size_t end = at + name.size();
+					if((at == 0 || !word(name[0]) || !word(src[at - 1])) &&
+							(end >= src.size() || !word(name.back()) ||
+							!word(src[end]))){
+						by[name].insert(n);
+						break;
+					}
+				}
+			}
+		}
+		ss_ s;
+		for(auto &b : by){
+			ss_ in;
+			for(const ss_ &n : b.second)
+				in += (in.empty() ? "" : ", ")+n;
+			s += (s.empty() ? "" : ", ")+b.first+" ("+in+")";
+		}
+		for(const ss_ &t : types)
+			s += (s.empty() ? "" : ", ")+t;
+		if(s.size() > 600)
+			s = s.substr(0, 597)+"...";
+		return s.empty() ? s : "Uses experimental parts of Kit, which may "
+				"change in any release: "+s+".";
+	}
+
+	// The warning on a release made by the builder's own key (an export's
+	// publish): logged, and to the builder's client as a kit:warning
+	void pub_warn_experimental(size_t peer, const Peer &p,
+			const sv_<std::pair<ss_, ss_>> &files)
+	{
+		const ss_ w = pub_experimental(files);
+		if(w.empty())
+			return;
+		log_i(MODULE, "%s publishes with the own key: %s", cs(p.name), cs(w));
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:warning", w);
+		});
+	}
+
 	// {"op": "server_publish", "what": "scene", "project" or "prefabs",
 	// "scene" (none: the builder's), "name", "version" (none: the next of
 	// the last published, else 1.0.0), "license", "description", "title"
@@ -9589,6 +9710,8 @@ struct Module: public interface::Module, public Interface
 			}
 			deps = x.get("dependencies");
 		}
+		// [KIT_API_1] (item 10) in the answer, not blocking
+		const ss_ exp = pub_experimental(files);
 		json::Value m = json::object();
 		for(auto it = files.begin(); it != files.end();){
 			if(it->first == "meta.json")
@@ -9664,19 +9787,20 @@ struct Module: public interface::Module, public Interface
 		row.set("sha256", jstr(json::load_string(sig.c_str()), "sha256"));
 		row.set("aitta", aitta);
 		log_i(MODULE, "%s publishes %s/%s %s (%s, %zu bytes, sha256 %s) as the "
-				"server to %s", cs(p.name), cs(author), cs(name), cs(version),
-				cs(kind), zip.size(), cs(jstr(row, "sha256")), cs(aitta));
+				"server to %s%s", cs(p.name), cs(author), cs(name), cs(version),
+				cs(kind), zip.size(), cs(jstr(row, "sha256")), cs(aitta),
+				cs(exp.empty() ? exp : ". "+exp));
 		m_edit_what = "Publishing "+author+"/"+name+" "+version+" to "+aitta+
 				"...";
 		pub_wait(peer);
-		pub_thread([this, peer, aitta, sig, zip, row](){
+		pub_thread([this, peer, aitta, sig, zip, row, exp](){
 			ss_ result, err;
 			try {
 				result = interface::aitta::upload(aitta, sig, zip);
 			} catch(std::exception &e){
 				err = e.what();
 			}
-			return std::function<void()>([this, peer, row, result, err](){
+			return std::function<void()>([this, peer, row, result, err, exp](){
 				json::Value a = json::object();
 				const ss_ id = jstr(row, "package")+" "+jstr(row, "version");
 				a.set("ok", err.empty());
@@ -9687,7 +9811,8 @@ struct Module: public interface::Module, public Interface
 					pub_store()->set("log/"+itos(interface::os::time_us() +
 							(int64_t)10000000000000000LL), row.stringify());
 					a.set("what", "Published "+id+" as the server on "+
-							jstr(row, "aitta")+": "+result);
+							jstr(row, "aitta")+": "+result+(exp.empty() ? exp :
+							". "+exp));
 				} else {
 					a.set("why", "Not published: "+err.substr(0, 300));
 				}
@@ -33555,7 +33680,8 @@ struct Module: public interface::Module, public Interface
 					"Instead of param and value: {param: value, ...}"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
 			// [KIT_GENERATORS] (4z37f)
-			{"run_generator", "build", "Runs a generator (an entity whose type "
+			{"run_generator", "build", "Runs a generator (experimental; an "
+				"entity whose type "
 				"has on_build; get_state's generators lists them, with their last "
 				"run): params (some of its parameters' values) set first, then its "
 				"children built again: those it made last time replaced, "
@@ -33849,7 +33975,7 @@ struct Module: public interface::Module, public Interface
 				"on_enter(c, by) and on_leave(c, by) as a body enters and leaves "
 				"it. Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
-				"on_timer(c, name), on_params(c, changed), on_remove(c). c: "
+				"on_timer(c, name, player), on_params(c, changed), on_remove(c). c: "
 				"c.id, c.pos, c.params, c.state (read and write), "
 				"c:params_of(type) (the params of the same entity's component of "
 				"that type, a copy read at use, so always current; nil: none; "
@@ -33868,7 +33994,10 @@ struct Module: public interface::Module, public Interface
 				"i.out_of_play true while out of play: dead waiting, a "
 				"kit/lobby's lobby or result), w the world (w:move({x, y, z, r, "
 				"h}, dx, dy, dz, step_up) -> mx, my, mz, hits; w.sin, w.cos, "
-				"w.sqrt, w.PI), p its params; it runs on the server and on each "
+				"w.sqrt, w.PI; Kit API 1's methods: w:cell, walk, move, ray, "
+				"down, under, contacts, circle, segment, unbury, the rest "
+				"internal: move.lua's head), p its params; it runs on the "
+				"server and on each "
 				"client (get_type kit/ball). [KIT_PLANE] The side view's: "
 				"w:circle(x, y, r) -> {{depth, nx, ny, info}...}, w:segment(x0, "
 				"y0, x1, y1) -> t, nx, ny, info (info.surface, info.friction: a "
@@ -33899,7 +34028,8 @@ struct Module: public interface::Module, public Interface
 				"in play, the body stops. movement.raw_keys = true: the side "
 				"camera's keys as they are (f, r); touch = \"drive\" (Gas, "
 				"Brake, the stick's r), touch_buttons = {{\"Turn\", \"jump\"}} "
-				"(above Brake; a third \"low\": under Gas), touch_axes = "
+				"(above Brake; a third \"low\": under Gas), touch_axes "
+				"(experimental) = "
 				"{{\"Left\", \"r\", -1}, {\"Right\", \"r\", 1}} (a stack at the "
 				"lower left, each holding f or r at that value); help = "
 				"{{\"[forward]/[back]\", \"gas, brake\", \"f\"}...} and "
@@ -34148,7 +34278,9 @@ struct Module: public interface::Module, public Interface
 				"textures/<hash>.png and edits.bin (the World's hand-edited "
 				"voxels and heightmap, zlib) in base64. Zipped, they are what "
 				"New's Start from: From a file... takes; as a directory, what "
-				"the repo's templates/ holds.",
+				"the repo's templates/ holds. warning: the experimental parts "
+				"of Kit it uses (outside Kit API 1; get_guide), as publishing "
+				"says them.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_SCENE_PACKAGES]
 			{"export_scene", "=export_scene", "One scene of the game's start "
@@ -34203,7 +34335,8 @@ struct Module: public interface::Module, public Interface
 				"author name and key, published_by your account (shown in the "
 				"release), the LICENSE naming you. Needs the right to publish as "
 				"the server (the Host's to give; an admin has it). Answers when "
-				"the Aitta has taken it.",
+				"the Aitta has taken it, naming the experimental parts of Kit "
+				"it uses (outside Kit API 1: they may change).",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "The package's name: a-z, 0-9 and _"},
 				"version": {"type": "string", "description": "SemVer; none: the one after the last published"},
@@ -37480,6 +37613,10 @@ struct Module: public interface::Module, public Interface
 			o.set("game", m_host.project);
 			o.set("files", t);
 			o.set("base64", b);
+			// [KIT_API_1] (item 10) as a publish's
+			const ss_ w = pub_experimental(files);
+			if(!w.empty())
+				o.set("warning", w);
 			return o.stringify();
 		}
 		if(op == "=projects" || op == "=copy_project" ||
@@ -39861,7 +39998,8 @@ struct Module: public interface::Module, public Interface
 			"plane: 2d, its right drag panning).\n"
 			"\n## Side views: backdrops and parallax\n"
 			"A side camera gives far scenery no depth by itself (ortho none at "
-			"all). For a skyline, hills or clouds use kit/parallax, never a "
+			"all). For a skyline, hills or clouds use kit/parallax "
+			"(experimental: outside Kit API 1, it may change in any release), never a "
 			"movement's or a type's client code: place it, then the scenery "
 			"under it (place's parent, or set_parent; polygons, parts, nested "
 			"too). What is under it moves with the camera by 1 - follow of "
@@ -39996,7 +40134,7 @@ struct Module: public interface::Module, public Interface
 			"get_type reads a type's file (Kit's are examples), "
 			"delete_type removes one. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
-			"its client part's draw(s, node) draws them (the Crag Trial "
+			"its client part's draw(s, node, yaw) draws them (the Crag Trial "
 			"template's local/crag_bike). State with kept = true (best "
 			"times) outlives Stop and restarts; clear_kept clears it.\n"
 			"- Work in small steps and read back: get_state (or list_types), "
@@ -40023,7 +40161,24 @@ struct Module: public interface::Module, public Interface
 			"the server, client_lua the client).\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
-			s += "- Scenes in a tree: a scene may sit under another "
+			// [KIT_API_1] (items 11 and 12, api.h's)
+			s += "- Kit API 1: a game made with it keeps loading and playing "
+				"the same way in every later Buildat. Promised: the game file's "
+				"structure; each Kit type's params (defaults, meanings), inputs, "
+				"outputs and state keys; the type API (c:, the handlers, the "
+				"type fields, signal types); movements (s, i, p and w's 10 "
+				"methods: cell, walk, move, ray, down, under, contacts, circle, "
+				"segment, unbury); client parts' handlers, e and their kit's 15 "
+				"names; jam1, blip1 and weave1. Kit only adds within API 1, a "
+				"renamed thing keeping its old name. Not promised, changing in "
+				"any release: what is marked experimental (generators, driving "
+				"bots and kit/path, kit/parallax, touch_axes; publishing warns), "
+				"kit.internal and w's other methods, the texts of refusals, "
+				"errors, logs, these tools and this guide (never branch on an "
+				"error's text), network protocols, per-run caps and rates (c:hurt "
+				"16 a run, c:after 64, set_voxels 4096...: never rely on meeting "
+				"one), and the editor's UI.\n"
+				"- Scenes in a tree: a scene may sit under another "
 				"(new_scene's parent, set_parent with a scene's id; get_state's "
 				"scenes_under), a group (a hub or a menu, a real scene with its "
 				"own World) and its tracks. Root types (kit/controls, the "
@@ -40038,7 +40193,8 @@ struct Module: public interface::Module, public Interface
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
 				// [KIT_GENERATORS] (4z37f)
-				"- Generators: a type with on_build(c) builds its own children "
+				"- Generators (experimental: outside Kit API 1, they may change "
+				"in any release; publishing warns): a type with on_build(c) builds its own children "
 				"from its params (a track, a maze, scatter): c:child{type, name, "
 				"pos (its frame's), yaw, pitch, params, parent} -> a number, "
 				"c:link(child, output, to, input) (to: a child's number, 0 the "
@@ -40058,7 +40214,9 @@ struct Module: public interface::Module, public Interface
 				"saved, the authored one back at stop. Brimstone Speedway's "
 				"local/brim_yard is one.\n"
 				// [KIT_BOT_DRIVE] (4z37i (4))
-				"- Driving bots: a kit/bot with drive = true (the prefab "
+				"- Driving bots (experimental, as generators: kit/bot's drive, "
+				"skill and ask, kit/path, a type's c:drive, c.body and c.path; a "
+				"kit/bot walking the goals is Kit API 1's): a kit/bot with drive = true (the prefab "
 				"kit/bot_driver) drives the players' movement (the scene's "
 				"kit/controls movement: a race's car) along a kit/path (its "
 				"path param, else the scene's first; a loop through its points, "
@@ -40131,13 +40289,18 @@ struct Module: public interface::Module, public Interface
 				"it), e.state (the shared state), e:shown(key) (as drawn: a "
 				"per_player state this player's own), e:predict(key, v, secs), "
 				"e.mine, e.you, e:near(d), e:log(text) (that client's own log, "
-				"not get_log). local kit = require(\"buildat/module/kit\"): "
+				"not get_log). local kit = require(\"buildat/module/kit\") has "
+				"15 names: shared, pointed, use, body_state, body_pos, seated, "
+				"shake, effect, mark, clear_marks, ui_keys, press_action, "
+				"key_down, key_name and key_text (any other is nil; "
+				"kit.internal, the whole client module, is outside Kit API 1 "
+				"and may change in any release). "
 				"kit.shared is one table all client parts on that client share "
 				"(by convention keyed by your type's name; a part's reload, a "
 				"scene switch, Play and Stop keep it; clear your keys in "
 				"on_remove), kit.body_state() is this client's predicted body. "
 				// [RACER_FEEL] (2), (3)
-				"From a handler or a movement's draw(s, node), on that client "
+				"From a handler or a movement's draw(s, node, yaw), on that client "
 				"alone, at once: kit.shake(amount) shakes the camera (0 to 5, "
 				"decaying at kit/controls' shake_decay; a crash felt the frame "
 				"it is predicted); kit.effect{at = {x, y, z}, count, ...} a "
@@ -40247,7 +40410,10 @@ struct Module: public interface::Module, public Interface
 				for(json::Iterator it(ps); ps.is_object() && it; ++it)
 					params += (params.empty() ? "" : ", ")+it.key();
 				s += "- "+t+(addable(t) ? " (addable)" : "")+
-						(m_local_types.count(t) ? " (custom)" : "")+": "+
+						(m_local_types.count(t) ? " (custom)" : "")+
+						// [KIT_API_1] (item 10)
+						(ty.decl.get("experimental").is_true() ?
+						" (experimental)" : "")+": "+
 						jstr(ty.decl.get("about"), "what");
 				for(auto &k : {std::make_pair(" In: ", ports(ty.in_types)),
 						std::make_pair(" Out: ", ports(ty.out_types)),

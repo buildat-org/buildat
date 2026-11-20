@@ -6,7 +6,7 @@
 -- not) and the editor (editor.lua, [KIT] stage 3, its UX floorplanner's
 -- since stage 4e2; builtin/kit/api.h says what the server takes). An app
 -- hosting Kit turns the editor on with
---   local kit = require("buildat/module/kit")
+--   local kit = require("buildat/module/kit").internal
 --   kit.editor{scene = scene, camera = camera_node, ground_y = 1,
 --       solid = function(x, y, z) return <a voxel there> end}
 -- editor.lua's head says what it does and its options; input.lua's the
@@ -171,7 +171,7 @@ end
 --   on_add(e), on_state(e, key) (a shared state changed: e.state[key]),
 --   on_update(e, dt) (each frame), on_use(e) (this player used it, before
 --   the server hears of it), on_remove(e); [KIT_PLANE] stage 4: a movement's
---   draw(s, node) draws the players' bodies (move.lua's top)
+--   draw(s, node, yaw) draws the players' bodies (move.lua's top)
 --   [KIT_CLIENT_REACT] (1) on_enter(e), on_leave(e): this player's own
 --   predicted body met its zone or left it, by this client's own test
 --   (update_zones below), before the server's on_enter hears of it
@@ -183,10 +183,14 @@ end
 --   e:near(d) (this player's entity within d of it),
 --   e:predict(key, value, seconds) (drawn so at once, until the server's
 --   value changes or the seconds, 1, pass), e:log(text) (this client's log);
---   [KIT_CLIENT_REACT] require("buildat/module/kit") is this module (M):
---   kit.shared, kit.body_state()..., [RACER_FEEL] (2), (3) kit.shake(a)
---   (controls.lua's head), kit.effect{...}, kit.mark(...) (effects.lua),
---   also from a movement's draw; a handler that errs is off for that
+--   [KIT_CLIENT_REACT] require("buildat/module/kit") is [KIT_API_1] the
+--   table at this file's end: kit.shared, kit.pointed, kit.use,
+--   kit.body_state(), kit.body_pos(), kit.seated(), [RACER_FEEL] (2), (3)
+--   kit.shake(a) (controls.lua's head), kit.effect{...}, kit.mark(...),
+--   kit.clear_marks() (effects.lua), kit.ui_keys() (ui.lua),
+--   kit.press_action, kit.key_down, kit.key_name, kit.key_text (input.lua),
+--   also from a movement's draw; kit.internal (this module) is outside Kit
+--   API 1; a handler that errs is off for that
 --   entity here, its first failure sent (call() below). api.h's client
 --   parts paragraph says what else a part reaches and what is refused
 -- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray
@@ -3289,5 +3293,21 @@ magic.SubscribeToEvent("command_seq:kit_parallax", function(_, data)
 	end
 end)
 
-return M
+-- [KIT_API_1] (item 3) What require("buildat/module/kit") gives: the 15
+-- names of Kit API 1 for client parts and a movement's draw, and
+-- `internal`, this whole module, outside the promise. The apps that host
+-- Kit (Workbench, sample_kit, skeldat) take .internal; a game's part that
+-- does may break in any release, and publishing it warns (kit.cpp's
+-- EXPERIMENTAL). Any other name is nil here.
+-- simplified: a plain table, no facade: a part runs in Kit's own
+-- environment (buildat.eval), so the hatch is only marked, not closed; an
+-- environment of a part's own is the upgrade (client/api.lua's eval owner
+-- gate, security code)
+local API = {internal = M}
+for _, k in ipairs({"shared", "pointed", "use", "body_state", "body_pos",
+		"seated", "shake", "effect", "mark", "clear_marks", "ui_keys",
+		"press_action", "key_down", "key_name", "key_text"}) do
+	API[k] = assert(M[k], "kit: no " .. k)
+end
+return API
 -- vim: set noet ts=4 sw=4:

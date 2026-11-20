@@ -15,7 +15,8 @@
 --     metres its target is raised, touch = "stick"|"tap"|"drive",
 --     touch_buttons = {{"Fire", "jump"}...}: the touch bar's buttons, each
 --     held while pressed as that input (jump or down), for the default Jump,
---     [KIT_TOUCH_THUMBS] touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}}:
+--     [KIT_TOUCH_THUMBS] touch_axes (experimental, [KIT_API_1]: it may
+--     change in any release) = {{"Left", "r", -1}, {"Right", "r", 1}}:
 --     a stack at the lower left beside the stick (top to bottom), each holding
 --     that input (f or r) at that value while pressed (full steering taps),
 --     [KIT_PLAY_HINTS] help = {{"[forward]/[back]", "gas, brake", "f"}...}
@@ -51,10 +52,11 @@
 --     put_type steps a new version once (an empty world) and refuses it so,
 --     the version before kept. Three client steps past 50 ms in a row turn
 --     its prediction off
---   draw = function(s, node) in its .client.lua: each frame, each body drawn
---     (players.lua): node at its feet as drawn (no turn; its children the
---     hook's), s this client's predicted state or another's {pos, pose}; the
---     humanoid not drawn
+--   draw = function(s, node, yaw) in its .client.lua: each frame, each body
+--     drawn (players.lua): node at its feet as drawn (no turn; its children
+--     the hook's), s this client's predicted state or another's {pos, pose},
+--     yaw the own body's as drawn between its steps (degrees); the humanoid
+--     not drawn
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; [KIT_BODY_VARS] s.vars (nil: none) the values
 -- the server's components set on this body (c:body_var(by, key, value)), read
@@ -65,10 +67,23 @@
 -- go (0/1: a target), tx, ty, tz (where to go), [KIT_CLIENT_REACT] (10)
 -- out_of_play (true while the player is out of play: dead and waiting to
 -- respawn, in a kit/lobby's lobby or result; its keys none then; nil in play;
--- c:speed(by, 0) stays the freeze); dt seconds; p its
--- parameters; w the world:
---   w:cell(i, j, k) -> info or nil (air): the voxel centred on i, j, k
---   w:walk(s, b, wx, wz, jump, dt, p): a character's step, s.frame below
+-- c:speed(by, 0) stays the freeze), [KIT_AUTO_JUMP] auto (1 while the
+-- movement's auto_jump param is on for this client: w:walk's auto, up a
+-- one-voxel step without Jump; else nil); dt seconds; p its
+-- parameters; w the world. [KIT_API_1] (item 4) Kit API 1's w is these 10
+-- methods, w:cell, w:walk, w:move, w:ray, w:down, w:under, w:contacts,
+-- w:circle, w:segment and w:unbury, and the fields w.sin, w.cos, w.atan2,
+-- w.sqrt, w.PI, w.plane, w.horizontal and w.bodies (below; atan is the
+-- file's math.atan). The other 18 methods a step can reach (W's:
+-- w:pose_at, deck_velocity, height, ground_max, sweep, sweep_turned,
+-- sweep_polys, shed, blocked, pushed, slide, ray_objects, floor_at, hold,
+-- plane_edges, frame_world, walk_on, walk_flat) and the other fields
+-- (w.polys, w.floors, w.boxes, w.cache...) are internal: the official ones
+-- use them, they may change in any release, and publishing a game whose
+-- step calls one (w:<name>( in its file) warns (kit.cpp's EXPERIMENTAL).
+--   w:cell(i, j, k) -> info or nil (air, and a liquid: solids only): the
+--     voxel centred on i, j, k
+--   w:walk(s, b, wx, wz, jump, dt, p, auto): a character's step, s.frame below
 --   w:move(b, dx, dy, dz, step) -> dx, dy, dz moved, hits {x, y, z}
 --     (hit sides: -1, 0 or 1): the body b = {x, y, z, r, h} swept along
 --     y, then x and z, up a step of `step` where blocked, and onto the
@@ -77,7 +92,11 @@
 --   w:down(x, y, z, len) -> how far down the first solid is, its info
 --   w:under(x, y, z) -> the info of what is under the point (0.6 down)
 --   w:contacts(b) -> {{info, nx, ny, nz}...} what touches the body
---   w.sin, w.cos, w.atan2, w.sqrt
+--   w:unbury(pos, b) -> true when lifted: a body b = {r, h} buried by an edit
+--     lifted to the lowest free place over it (up to its height and a cell,
+--     never sideways), pos {x, y, z} its bottom middle changed (kit/ball's
+--     and kit/car's step first)
+--   w.sin, w.cos, w.atan2, w.sqrt, w.PI
 -- info = {solid = true, friction = n (1), surface = "<tag>"}: a voxel's
 -- (its type's `friction` and `surface` where it has them, else 1 and its
 -- name without the author), an object's ("object"), the heightmap's

@@ -53,7 +53,7 @@ do
 	local light = sun:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 end
-local kit = require("buildat/module/kit")
+local kit = require("buildat/module/kit").internal
 kit.editor{scene = scene, camera = camera_node, ground_y = 1,
 	solid = function(x, y, z)
 		-- 0: not there, 1: air
