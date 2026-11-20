@@ -1031,7 +1031,8 @@ static ss_ compiler_version(const ss_ &cmd)
 
 // A directory only this user can reach ([CLIENT_WASM] security: the cache
 // the process loads code from): made with a protected DACL granting this
-// user alone everything, inherited by what is made in it; or, there
+// user alone (and its AppContainer, in one) everything, inherited by what
+// is made in it; or, there
 // already, a directory (not a link) whose owner is this user, the same
 // DACL set on it again. false with why.
 static bool private_dir(const ss_ &path, ss_ &why)
@@ -1044,14 +1045,32 @@ static bool private_dir(const ss_ &path, ss_ &why)
 		return false;
 	}
 	const bool got = GetTokenInformation(token, TokenUser, &tu, sizeof tu, &n);
+	// [WIN_APPCONTAINER_SPAWN] In a sandboxed server's AppContainer its SID
+	// too: a box gets into a directory only if the DACL names it as well as
+	// the user, and the server and its compiles run in the box. Still this
+	// user's alone, and of the boxes this app's alone
+	DWORD in_box = 0;
+	union { TOKEN_APPCONTAINER_INFORMATION ac; char bytes[256]; } ta;
+	char *box = NULL;
+	const bool box_ok = !GetTokenInformation(token, TokenIsAppContainer,
+			&in_box, sizeof in_box, &n) || !in_box ||
+			(GetTokenInformation(token, TokenAppContainerSid, &ta, sizeof ta, &n) &&
+			ta.ac.TokenAppContainer &&
+			ConvertSidToStringSidA(ta.ac.TokenAppContainer, &box));
 	CloseHandle(token);
 	char *sid = NULL;
-	if(!got || !ConvertSidToStringSidA(tu.user.User.Sid, &sid)){
-		why = "the user's SID: "+last_error();
+	if(!got || !box_ok || !ConvertSidToStringSidA(tu.user.User.Sid, &sid)){
+		why = ss_(box_ok ? "the user's SID: " : "the AppContainer's SID: ")+
+				last_error();
+		if(box)
+			LocalFree(box);
 		return false;
 	}
-	const ss_ sddl = ss_("D:P(A;OICI;FA;;;")+sid+")";
+	const ss_ sddl = ss_("D:P(A;OICI;FA;;;")+sid+")"+
+			(box ? ss_("(A;OICI;FA;;;")+box+")" : ss_());
 	LocalFree(sid);
+	if(box)
+		LocalFree(box);
 	PSECURITY_DESCRIPTOR sd = NULL;
 	if(!ConvertStringSecurityDescriptorToSecurityDescriptorA(sddl.c_str(),
 			SDDL_REVISION_1, &sd, NULL)){
