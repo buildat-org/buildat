@@ -34,7 +34,10 @@
 // menu=projects shows Manage (project= selected), menu=new its New. With
 // none of them (a server no launcher started) the project that ran last
 // opens again. BUILDAT_WORKBENCH_PROJECT=<name> opens it, made if it is not
-// there (the checks; a server nobody sits at). A project runs until the
+// there (the checks; a server nobody sits at); with
+// BUILDAT_WORKBENCH_FROM=<a .zip> made of that export, and
+// BUILDAT_WORKBENCH_PLAY a round started and inputs sent to it
+// (util/kit_corpus_check.sh). A project runs until the
 // server stops, or until an admin switches or closes it.
 //
 // [WORKBENCH_SWITCH_PROJECT] An admin (world_menu's picker: the launcher's
@@ -83,6 +86,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include <array>
+#include <fstream>
 #include <map>
 #include <set>
 #include <cmath>
@@ -250,8 +254,54 @@ struct Module: public interface::Module
 		configure_menu();
 		const char *env = getenv("BUILDAT_WORKBENCH_PROJECT");
 		if(env && env[0]){
-			if(!start_project(env, true))
+			// [KIT_API1_CORPUS] BUILDAT_WORKBENCH_FROM=<a template's or an
+			// export's .zip, readable by the server>: the project, not there
+			// yet, made of it as New's From a file... makes one.
+			// BUILDAT_WORKBENCH_PLAY (set, maybe empty): once it is hosted,
+			// a new round (Stop if Running, then Play, by "app"), and to
+			// each "<entity> <input> [<JSON value>]" of it (";" between)
+			// that input by app. Never set but by a check
+			const char *from = getenv("BUILDAT_WORKBENCH_FROM");
+			bool ok = false;
+			if(from && from[0]){
+				std::ifstream f(from, std::ios::binary);
+				std::stringstream data;
+				data<<f.rdbuf();
+				storage::access(m_server, [&](storage::Interface *i){
+					if(storage::Save *s = i->create(env))
+						i->close(s);
+				});
+				const ss_ why = f ? unpack_import(env, data.str()) : "not read";
+				if(!why.empty())
+					log_w(MODULE, "workbench: %s: %s", from, cs(why));
+				else
+					ok = start_project(env, false, true, "file");
+			} else
+				ok = start_project(env, true);
+			if(!ok){
 				m_server->shutdown(1, "workbench: no project");
+				return;
+			}
+			const char *play = getenv("BUILDAT_WORKBENCH_PLAY");
+			if(play)
+				kit::access(m_server, [&](kit::Interface *k){
+					if(k->running())
+						k->set_running(false, "app");
+					k->set_running(true, "app");
+					std::stringstream all(play);
+					ss_ one;
+					while(std::getline(all, one, ';')){
+						std::istringstream in(one);
+						uint64_t id = 0;
+						ss_ input, value;
+						if(!(in>>id>>input))
+							continue;
+						std::getline(in>>std::ws, value);
+						log_i(MODULE, "workbench: to entity %llu: %s %s",
+								(unsigned long long)id, cs(input), cs(value));
+						k->input(id, input, value);
+					}
+				});
 			return;
 		}
 		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
