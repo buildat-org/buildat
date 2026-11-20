@@ -143,7 +143,10 @@ EOF
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" native admin
 
-# kitboss: New, "Ship", the tools; Play mode; the wheel
+# kitboss: New, "Ship", the tools; Play mode; the wheel. (Play's put is
+# waited for, not "the body's frame: 10": the join already stood him on
+# the deck, so the put may land on it again with no new frame line, and
+# the first one is past wait_log_any's 400 lines by then)
 {
 	cat <<EOF
 wait_log_any 60000 Joined as kitboss
@@ -175,9 +178,9 @@ keypress F3
 wait_log 5000 kit editor: the view is
 frames 5
 click Button "Play mode"
+wait_log 20000 the server put the player at
 wait_log_any 10000 kit editor: the server is Running (by kitboss)
 wait_log_any 10000 kit: controls: camera first_person
-wait_log_any 20000 kit: the body's frame: 10
 frames 10
 look_dir 0 0 1
 EOF
