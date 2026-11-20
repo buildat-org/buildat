@@ -637,6 +637,24 @@ function M.own_stack_top(x0, x1)
 	return by + bh - lift - 4
 end
 
+-- [WIN_TEXT_CLIPS] The top (screen UI y) of Kit's own bottom frames shown
+-- over x0..x1, if one of them reaches below y0; else nil. The editor's guide
+-- goes over them (at 800x600 it ran over the hotbar's frame)
+function M.own_frames_top(x0, x1, y0)
+	local top, hit
+	for _, r in pairs(U) do
+		if r.own and r.el and r.w and shown(r.el) and
+				tostring(r.ui.anchor):find("bottom") then
+			local p = r.el.screenPosition
+			if p.x < x1 and p.x + r.w > x0 then
+				top = math.min(top or p.y, p.y)
+				hit = hit or p.y + r.h > y0
+			end
+		end
+	end
+	return hit and top or nil
+end
+
 function M.own_place(name, w, h)
 	local bx, by, bw, bh = hud_box()
 	local V = vmin()

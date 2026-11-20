@@ -94,8 +94,11 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 
 	if(hFind == INVALID_HANDLE_VALUE)
 	{
-		_tprintf(TEXT("Invalid file handle. Error is %u.\n"),
-				GetLastError());
+		// [WIN_TEXT_CLIPS] a missing directory lists empty, as on POSIX,
+		// without a line on stdout
+		DWORD e = GetLastError();
+		if(e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND)
+			_tprintf(TEXT("Invalid file handle. Error is %u.\n"), e);
 		retval = (-1);
 	}
 	else

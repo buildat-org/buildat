@@ -147,12 +147,13 @@ local PREFERENCES = {
 		end,
 	},
 	-- The most items a Page Up or Down moves ([LIST_PAGE_SIZE]); never
-	-- more than are in sight either
+	-- more than are in sight either. ([WIN_TEXT_CLIPS] the "at most" in the
+	-- value: in the label it ran under the dropdown at 800x600)
 	{
 		name = "page_size",
-		label = "Page Up/Down moves at most",
+		label = "Page Up/Down moves",
 		values = {3, 5, 10, 15, 20, 30, 50, 100},
-		show = function(v) return v .. " items" end,
+		show = function(v) return "at most " .. v .. " items" end,
 	},
 	-- The editors' text ([KIT_EDITOR_FONT]): a row in the game settings of
 	-- the app that declares it (buildat.declare_preference), not here
