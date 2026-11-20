@@ -1948,7 +1948,70 @@ struct Module: public interface::Module, public Interface
 		return full_type("kit/"+type);
 	}
 
-	bool load_type(const ss_ &name, ss_ &why)
+	// [KIT_API_1] (decision 4) The names a type table may hold: Kit's
+	// (api.h's "Types"), a helper goes in a local. kit_plan 4z37j (3) C's
+	// experimental too
+	static const std::set<ss_> &type_fields()
+	{
+		static const std::set<ss_> F = {"about", "actions", "between_plays",
+				"bot", "builds", "children", "component", "container", "controls",
+				"creature", "environment", "equipment", "events", "experimental",
+				"gizmo", "grants", "health", "hud", "inputs", "inventory",
+				"linked_in", "listed", "look", "marker", "movement", "nearby",
+				"no_position", "outputs", "owns_voxel", "parallax", "params",
+				"placeable", "player", "reads_players", "reads_regions",
+				"reads_teams", "reads_voxels", "region", "right_use", "root",
+				"seat", "senses", "sight", "space", "spawn", "spawn_spots",
+				"state", "takes_text", "team", "ui", "usable", "use_range",
+				"use_when", "version", "volume", "voxel_box", "world",
+				"world_region", "zone"};
+		return F;
+	}
+	// ... and the functions: its handlers
+	static const std::set<ss_> &handler_names()
+	{
+		static const std::set<ss_> H = {"allow", "inventory_add",
+				"inventory_count", "inventory_list", "inventory_take", "migrate",
+				"modify_hit", "on_action", "on_blast", "on_build", "on_daytime",
+				"on_died", "on_enter", "on_event", "on_fall", "on_give", "on_hit",
+				"on_input", "on_inventory", "on_item", "on_join", "on_leave",
+				"on_params", "on_reload", "on_remove", "on_session_end",
+				"on_session_start", "on_start", "on_timer", "on_tool", "on_ui",
+				"on_use", "on_voxel", "plan", "step"};
+		return H;
+	}
+	// Why its table is not one Kit knows, each ("": it is): a field or a
+	// function not Kit's, a field of before (read as its new name: renamed,
+	// {old, new}), a parameter or state key in Kit's kit_ prefix
+	static sv_<ss_> type_table_faults(const json::Value &decl,
+			const std::set<ss_> &handlers)
+	{
+		sv_<ss_> out;
+		for(json::Iterator it(decl); it; ++it){
+			const ss_ &k = it.key();
+			if(k == "handlers" || type_fields().count(k))
+				continue;
+			if(k == "players" || k == "teams" || k == "regions")
+				out.push_back(k+" = true is reads_"+k+" = true now");
+			else
+				out.push_back(k.substr(0, 64)+": not a type field Kit knows (a "
+						"helper goes in a local)");
+		}
+		for(const ss_ &h : handlers)
+			if(!handler_names().count(h))
+				out.push_back(h.substr(0, 64)+": a function, and no handler Kit "
+						"knows (a helper goes in a local)");
+		for(const char *k : {"params", "state"})
+			for(json::Iterator it(decl.get(k)); it; ++it)
+				if(it.key().compare(0, 4, "kit_") == 0)
+					out.push_back(ss_(k)+" "+it.key().substr(0, 64)+": names "
+							"starting kit_ are Kit's");
+		return out;
+	}
+
+	// strict: put by a builder (put_type, the editor), where
+	// type_table_faults() refuse it; a load only warns of them
+	bool load_type(const ss_ &name, ss_ &why, bool strict = false)
 	{
 		if(m_types.count(name))
 			return true;
@@ -2003,6 +2066,17 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		names("handlers", t.handlers);
+		// [KIT_API_1] (decision 4) its table's names Kit's
+		{
+			const sv_<ss_> faults = type_table_faults(t.decl, t.handlers);
+			if(strict && !faults.empty()){
+				why = name+": "+faults[0]+(faults.size() > 1 ? " (and "+
+						itos(faults.size() - 1)+" more)" : ss_());
+				return false;
+			}
+			for(const ss_ &f : faults)
+				log_w(MODULE, "Component type %s: %s", cs(name), cs(f));
+		}
 		// [KIT_API_1] (decision 5) players, teams and regions of before read
 		// as reads_*
 		auto reads = [&](const char *k){
@@ -6480,7 +6554,8 @@ struct Module: public interface::Module, public Interface
 	// Installed at once, Running or not; refused, the version before
 	// stays (its error in the Log of each entity it is on). what: the
 	// edit's text
-	ss_ install_local(const ss_ &name, const json::Value &row, ss_ &what)
+	ss_ install_local(const ss_ &name, const json::Value &row, ss_ &what,
+			bool strict = false)
 	{
 		auto old = m_local_types.find(name);
 		const json::Value was = old == m_local_types.end() ? json::Value() :
@@ -6504,7 +6579,7 @@ struct Module: public interface::Module, public Interface
 				m_local_types[name] = row;
 			else
 				m_local_types.erase(name);
-			if(row.is_object() && (!load_type(name, why) ||
+			if(row.is_object() && (!load_type(name, why, strict) ||
 					(is_movement(name) && !steps_tried(name, why)))){
 				m_types.erase(name);
 				m_sources.erase(name);
@@ -6720,7 +6795,7 @@ struct Module: public interface::Module, public Interface
 			row.set("by", p.name);
 		}
 		const json::Value before = had ? m_local_types[name] : json::Value();
-		why = install_local(name, row, what);
+		why = install_local(name, row, what, !del);
 		// (a plain type loads in a few ms; a loop to the budget's end
 		// takes about 100, the box's restart after it as much again)
 		const int64_t took = interface::os::time_us() - now;
@@ -33965,7 +34040,9 @@ struct Module: public interface::Module, public Interface
 				"linking to it, which it reaches (c:send); inputs = {name = "
 				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
 				"outputs likewise; usable = true (players use it: on_use); "
-				"reads_players = true (c.players), reads_teams = true (c.teams); look "
+				"reads_players = true (c.players), reads_teams = true (c.teams); "
+				"no other field or function (a helper goes in a local), no kit_ "
+				"param or state name (Kit's); look "
 				"= {shape = \"box\"|\"sphere\", size = n or {x, y, z}, color = "
 				"\"#rrggbb\", solid = true, text = \"<shared state key>\"}; zone "
 				"= \"<a position param>\" (a box of cells from its place) or "

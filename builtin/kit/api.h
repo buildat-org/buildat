@@ -455,7 +455,16 @@ namespace interface
 // (every player with `reads_players = true`), the panel it is in (c.panel), the
 // entities linking to it with `linked_in = true`, nothing else.
 //
-// [KIT_API_1] **Names** (kit_api1_review.md item 7). Kit's rules for its
+// [KIT_API_1] **Names** (kit_api1_review.md items 5 and 7). A type's table
+// holds the fields above and its handlers alone: put_type (and the
+// editor's type put) refuses another field ("x: not a type field Kit
+// knows"), a function under a name that is no handler (a helper goes in a
+// local), and a parameter or state key starting kit_; a save's or a
+// package's type with one still loads, each warned of in the log. The
+// prefix kit_ is Kit's: every name Kit adds after API 1 on e (client
+// parts), s and i (movements' steps), w, an inventory call's ext and the
+// parameters it injects (use, own_look) starts kit_, so a game's own
+// names, which never do, never meet a later Kit's. Kit's rules for its
 // own names:
 // - A bool parameter "active from the start" is `enabled`; no parameter
 //   is named `on`.
@@ -478,7 +487,7 @@ namespace interface
 //   c:died(by, type), on_died(c, player, by, type).
 // - A type field giving read access is reads_*: reads_players,
 //   reads_teams, reads_regions, reads_voxels (players, teams and regions
-//   = true of before are read as them).
+//   = true of before are read as them, warned of; put_type refuses them).
 // - A label in a signal's type, "string:<label>", is free text the editor
 //   shows ("string:player", "string:team", ...); a link does not read it.
 // Renamed in 4z37j (each type's migrate takes a placed one forward):
