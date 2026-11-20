@@ -27010,7 +27010,10 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		if(!f.ship){
-			if(m_bot_seats.count(e.id) || ship_of(f.foe))
+			// [KIT_CTF_BOTS_FIX] nor while it carries something to place (a
+			// flag): it carries it on, its foe after it
+			if(m_bot_seats.count(e.id) || ship_of(f.foe) ||
+					(jstr(best, "kind") == "place_item" && best.get("carry").is_number()))
 				return;
 			double at[3];
 			place_of(ti->second, at);
@@ -27543,6 +27546,25 @@ struct Module: public interface::Module, public Interface
 				crew.push_back(bs.first);
 		for(uint64_t b : crew)
 			mark(b, ship);
+	}
+
+	// [KIT_CTF_BOTS_FIX] A player's or a bot's death ends the fights it was
+	// in: its own fighting back and every bot's at it. (A respawn at once
+	// left the foe alive, so bot_foe_lit's player_alive() never ended
+	// one: each hit renewed it, and four bots with swords fought on with
+	// the flag left at home)
+	void bot_foes_forget(uint64_t dead)
+	{
+		for(auto it = m_bot_foes.begin(); it != m_bot_foes.end();){
+			if(it->first != dead && it->second.foe != dead){
+				++it;
+				continue;
+			}
+			auto bi = m_entities.find(it->first);
+			if(bi != m_entities.end())
+				log_i(MODULE, "%s stops fighting back", cs(bot_name(bi->second)));
+			it = m_bot_foes.erase(it);
+		}
 	}
 
 	// Who holds a vehicle, a player or a bot, but `bot` ("": nobody)
@@ -30337,6 +30359,7 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		player_died(player);
+		bot_foes_forget(player);
 		const uint64_t bid = actor_id(by);
 		const ss_ bn = !bid || !m_entities.count(bid) ? by :
 				is_bot(m_entities[bid]) ? bot_name(m_entities[bid]) : m_entities[bid].name;

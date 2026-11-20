@@ -37,7 +37,9 @@
 -- attack on them through that ship's gun if nobody else holds it (kit.cpp's
 -- bot_foe_lit). A ship's gun's shots pass its own crew.
 -- [KIT_AIRSHIPS_BOTS_2] Hurt on foot: the "fight back" goal is an attack on
--- them on foot (kit.cpp's bot_foe_lit). Kind "crew" (kit.cpp's crew_lit) comes
+-- them on foot (kit.cpp's bot_foe_lit); [KIT_CTF_BOTS_FIX] not while it
+-- carries something to place (a flag home), and a death, its or theirs,
+-- ends it. Kind "crew" (kit.cpp's crew_lit) comes
 -- as the step it is on, each its own text (a new step a new goal here): a
 -- helm's `keep` (m) is how far from the goal's place it stops, a gun's
 -- `hold` aims without firing.
