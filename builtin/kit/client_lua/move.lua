@@ -93,7 +93,7 @@
 --   w:under(x, y, z) -> the info of what is under the point (0.6 down)
 --   w:contacts(b) -> {{info, nx, ny, nz}...} what touches the body
 --   w:unbury(pos, b) -> true when lifted: a body b = {r, h} buried by an edit
---     lifted to the lowest free place over it (up to 64 m over its feet,
+--     lifted to the lowest free place over it (up to 64 m over its feet with its middle in the solid, else its height and a cell;
 --     never sideways), pos {x, y, z} its bottom middle changed (kit/ball's
 --     and kit/car's step first)
 --   w.sin, w.cos, w.atan2, w.sqrt, w.PI
@@ -1519,7 +1519,10 @@ function W:unbury(pos, b)
 	if g and g > y + EPS then
 		cand = g
 	end
-	local top = y + math.max(b.h + 1, UNBURY_M)
+	-- (that far only with its middle in the solid: a body against a wall,
+	-- its box into it, is lifted no further than before, not onto the top)
+	local deep = self:blocked(box_of(x, y + b.h / 2, z, 0.05, 0.05), true)
+	local top = y + (deep and math.max(b.h + 1, UNBURY_M) or b.h + 1)
 	while cand <= top do
 		if not self:blocked(box_of(x, cand, z, b.r, b.h)) then
 			if cand == y then
