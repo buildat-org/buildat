@@ -187,7 +187,8 @@ namespace interface
 //              Restart and a server restart keep it; it is in the runtime
 //              row, never the start's (Save as start leaves it out); a
 //              builder's op clear_kept puts its default back (best times,
-//              keyed by c:name(by), a high score)
+//              keyed by c:name(by), a high score); in a game session the
+//              session's own (Sessions)
 //   linked_in = true         -- [CRAG_BEST_RESET] c.linked_in = {input =
 //              {id...}}: the entities with a link to it, by its input,
 //              which it reaches (c:send to each: crag_run's gems)
@@ -495,6 +496,16 @@ namespace interface
 // kit/spawn_rule's `on` `on_voxels` (v2), kit/voxel_replace's and
 // kit/voxel_states' `start_on` `enabled` (v2); on_build's c.move is
 // c.move_lib; a client part's kit.mark takes a table.
+// Reserved for a later Kit (not there yet; a game uses none of them for
+// its own): an inventory call's ext.player (that player's inventory;
+// refused now, "ext.player is reserved"); kit/goal's pick = "nearest_type"
+// with the parameter pick_type (a type name), when_state (a key of the
+// bot's own entity state: the goal counts while it is true, "!key" while
+// false) and kind = "dig" (the cells of its size box); c:voxel_at(x, y, z)
+// (a voxel's name or nil, world cells of the entity's scene) and
+// c:set_voxels_at({{x, y, z, name}...}) (4096 a run, game changes as
+// c:set_voxels'), both for a type with world_voxels = true; a client
+// part's kit.report(value) and the server handler on_report(c, by, value).
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
 // no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
@@ -1040,7 +1051,8 @@ namespace interface
 // ext), c:take(item, n, ext) (all n or none: true if
 // taken), c:list(ext) ({item = n}), c:has(item, n, ext) (count >= n); n is
 // 1 if left out, an item letters, digits and _, ext a free-form table the
-// provider may read (nil: {}). The provider is the player entity's own
+// provider may read (nil: {}; [KIT_API_1] its player and kit_ keys Kit's,
+// refused: "ext.player is reserved"). The provider is the player entity's own
 // kit/inventory ([KIT] stage 4d; Kit's counts before); one component may
 // replace it for every player: a type with
 //   inventory = true, inventory_count(c, player, item, ext),
@@ -1489,6 +1501,10 @@ namespace interface
 // "written" and "shared": the default's loaded sections it holds no copy
 // of). Sessions are not saved: a
 // restart drops them and their scenes (the row "sessions").
+// [KIT_API_1] (decision 6) Kept state (kept = true) in a session belongs to
+// that session: it starts at its default there and is gone at the
+// session's end, the default's untouched; what a session leaves behind
+// goes out through c:session_end(id, result).
 // [KIT_PREFAB_BENCH] {"op": "prefab_bench", "prefab": name} takes a builder
 // to a prefab's temporary scene: a draft (kind "bench"; "kit:edit_state"'s
 // session adds prefab, root, box, ready) of an empty World with nothing from
