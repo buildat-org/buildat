@@ -134,11 +134,22 @@ end
 function M.level_plane()
 	return C.ctl ~= nil and C.ctl.horizontal == true
 end
--- Whether the mouse or a drag turns the view (a top-down's and [KIT_PLANE] a
--- side camera's never turn)
+-- [KIT_CHASE_HEADING] A chase camera following the body's heading:
+-- kit/controls' chase_follow (its lag, seconds; 0: mouse look), out of a seat
+-- (a seat's chase as before); heading: its body has one (s.yaw)
+local function chase_follow(heading)
+	local lag = tonumber(params().chase_follow) or 0
+	if lag > 0 and camera_mode() == "chase" and not M.seated() and
+			(not heading or C.s and tonumber(C.s.yaw)) then
+		return lag
+	end
+	return nil
+end
+-- Whether the mouse or a drag turns the view (a top-down's, [KIT_PLANE] a
+-- side camera's and a chase following the heading never turn)
 function M.view_turns()
 	local m = camera_mode()
-	return m ~= "top_down" and m ~= "side"
+	return m ~= "top_down" and m ~= "side" and not chase_follow(true)
 end
 -- [KIT_TOOLS_2] A shot's recoil: the view kicked up by deg degrees
 function M.kick(deg)
@@ -148,7 +159,8 @@ end
 function M.pointer_free()
 	local p = params().pointer or "auto"
 	if p == "auto" then
-		return camera_mode() == "top_down" or camera_mode() == "side"
+		return camera_mode() == "top_down" or camera_mode() == "side" or
+				chase_follow() ~= nil
 	end
 	return p == "cursor"
 end
@@ -467,6 +479,8 @@ buildat.sub_packet("kit:body", function(data)
 		C.prev = pos_of(C.s)
 		C.prev_at, C.prev_frame = nil, nil
 		C.prev_yaw = tonumber(C.s.yaw)
+		-- ([KIT_CHASE_HEADING] the chase's turn taken at once, not swung to)
+		C.chase_yaw = nil
 		C.offset = {0, 0, 0}
 		C.acc = 0
 		C.ready = false
@@ -604,6 +618,9 @@ local function log_body()
 	-- [KIT_SHIP_VIEW] A chase view's distance from what it looks at
 	if C.chase_dist then
 		log:info(string.format("kit: camera %.2f m behind", C.chase_dist))
+		-- ([KIT_CHASE_HEADING] its turn and the body's as drawn)
+		log:info(string.format("kit: chase yaw %.2f, the body's %s", C.chase_yaw or
+				C.yaw, C.draw_yaw and string.format("%.2f", C.draw_yaw) or "none"))
 	end
 	-- [KIT_COMPONENTS] What a vehicle's numbers are compared by
 	local v = C.s and type(C.s.vel) == "table" and C.s.vel
@@ -2656,13 +2673,33 @@ local function place_camera(dt, at)
 		local dist = (tonumber(decl().camera_distance) or tonumber(par.distance) or 6) *
 				C.zoom
 		local yaw = C.yaw
+		local pitch = math.max(-10, math.min(80, C.pitch + 15))
+		local lag = chase_follow(true)
 		-- A vehicle's view behind it, turning as it turns
 		if own and M.seated() and C.s and tonumber(C.s.yaw) then
 			C.chase_yaw = lerp_yaw(C.chase_yaw or C.s.yaw, C.draw_yaw or C.s.yaw,
 					1 - math.exp(-dt / 0.25))
 			yaw = C.chase_yaw
+		elseif lag then
+			-- [KIT_CHASE_HEADING] Behind the way the body points as drawn (no 30 Hz
+			-- steps), lag seconds behind it, at most half a turn a second: a spin
+			-- does not whip the view round. The heading, not the way it goes: in
+			-- reverse the view stays behind the nose. Another's body followed
+			-- (a target, spectating): the turn kept.
+			-- simplified: that body's own heading if a spectator wants it
+			if own then
+				local want = C.draw_yaw or tonumber(C.s.yaw)
+				local was = C.chase_yaw or want
+				local d = ((want - was) % 360 + 540) % 360 - 180
+				local most = 180 * dt
+				C.chase_yaw = (was + math.max(-most, math.min(most,
+						d * (1 - math.exp(-dt / lag))))) % 360
+			end
+			-- (the view's yaw for the rest: the input's and the body drawn)
+			C.yaw = C.chase_yaw or C.yaw
+			yaw = C.yaw
+			pitch = tonumber(par.chase_pitch) or 15
 		end
-		local pitch = math.max(-10, math.min(80, C.pitch + 15))
 		rot = magic.Quaternion(pitch, yaw, roll)
 		if C.tilt then
 			rot = C.tilt * rot
