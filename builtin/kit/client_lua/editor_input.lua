@@ -1861,9 +1861,24 @@ local function mouse_wheel(wheel, q)
 	if over_ui(S.mx, S.my) then
 		return
 	end
-	-- In notches; the web's in tenths (its SDL port counts them so)
-	zoom_at(math.max(-10, math.min(10, WEB and wheel / 10 or wheel)), S.mx,
-			S.my)
+	-- In notches; the web's in tenths (its SDL port counts them so).
+	-- [KIT_EDITOR_PAN_ZOOM] Added up and zoomed once a frame (wheel_frame):
+	-- a zoom a notch, each with its pick, queued up behind slow frames on
+	-- the web (its events come between frames) and went on zooming long
+	-- after the wheel stopped
+	S.wheel = (S.wheel or 0) + (WEB and wheel / 10 or wheel)
+end
+
+local function wheel_frame()
+	local n = S.wheel
+	if not n or n == 0 then
+		return
+	end
+	S.wheel = 0
+	if not E.editing then
+		return
+	end
+	zoom_at(math.max(-10, math.min(10, n)), S.mx, S.my)
 	log:info("kit editor: the wheel: " .. (S.view == "2d" and
 			string.format("the plan %.1f across", S.span) or S.view == "front" and
 			string.format("the front %.1f high", S.fspan) or S.pos and
@@ -1891,7 +1906,13 @@ zoom_at = function(notches, mx, my)
 	elseif S.view == "3d" then
 		local o, v = M.screen_ray(mx, my)
 		local p = pick(mx, my, nil, true)
-		local dist = p and p.t or 10
+		-- [KIT_EDITOR_PAN_ZOOM] A bigger step than the plan's (0.7 a notch);
+		-- the ground's plane where the pick has no distance, as far as the
+		-- camera is above it where the ray misses it (both were 10 ahead)
+		local g = not (p and p.t) and plane_at(o, v, O.ground_y - 0.5)
+		local dist = p and p.t or g and (g - o):Length() or
+				math.max(10, o.y - (O.ground_y - 0.5))
+		f = 0.7 ^ notches
 		local step = math.min(dist * (1 - f), math.max(0, dist - 0.3))
 		-- [KIT_CAM_MIN_MOVE] at least a cell a notch: close to a surface,
 		-- or under it, the wheel still moves along the look
@@ -3932,6 +3953,7 @@ function M.editor(options)
 	magic.SubscribeToEvent("Update", function(_, data)
 		local dt = data:GetFloat("TimeStep")
 		MEM.tick(dt)
+		wheel_frame()
 		-- [KIT_EDIT_VIEW] kit/controls' edit_view at this client's first edit
 		-- mode, once the controls are here: over a remembered view
 		-- (MEM.restore leaves it), the builder's own picks after it

@@ -8203,7 +8203,10 @@ local function pan3d_start(mx, my)
 	local hit = pick(mx, my, nil, true)
 	local c0 = ax == "y" and O.ground_y - 0.5 or ax == "z" and plane_z() or 0
 	local p = hit and hit.t and o + v * hit.t or plane_at(o, v, c0, ax)
-	return {dist = p and (p - cam3d_node.position):Length() or 5, ax = ax,
+	-- ([KIT_EDITOR_PAN_ZOOM] on the sky: as far as the camera is above the
+	-- ground, not 5: from high up a drag there hardly moved)
+	return {dist = p and (p - cam3d_node.position):Length() or
+			math.max(5, S.pos.y - (O.ground_y - 0.5)), ax = ax,
 		at = p and p[ax] or c0, from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
 end
 
