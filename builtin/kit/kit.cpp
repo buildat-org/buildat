@@ -8806,9 +8806,10 @@ struct Module: public interface::Module, public Interface
 	// client fetched, or the server for a builder) added by the builder at
 	// peer; a: the answer's fields. "" when added. [KIT_SCENE_TREE] parent:
 	// the scene it goes under ("": the root); the packet's data may begin
-	// \1<parent>\0 for it
+	// \1<parent>\0 for it. dup: a copy of this game's own scene
+	// (duplicate_scene())
 	ss_ add_scene_data(size_t peer, const ss_ &d_in, json::Value &a,
-			ss_ parent = "")
+			ss_ parent = "", bool dup = false)
 	{
 		ss_ d = d_in;
 		if(!d.empty() && d[0] == '\1'){
@@ -8882,7 +8883,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(why.empty()){
 			why = import_scene(pi->second, peer, tmp+"/x", aitta, sig, a,
-					parent);
+					parent, dup);
 			// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when
 			// another
 			json::json_error_t e;
@@ -8892,6 +8893,31 @@ struct Module: public interface::Module, public Interface
 		}
 		interface::fs::remove_all(tmp);
 		return why;
+	}
+
+	// [KIT_SCENE_DUPLICATE] (kit_plan 4z37u) A scene copied beside itself,
+	// under the scene it is under: scene_files()'s package added back as
+	// import_scene() adds one (the next free name, world_2; new ids; its
+	// World's edits; one undo), as a copy (its dup); scene "": the
+	// builder's. a: kit:scene's answer
+	// simplified: through a zip, so a scene past an import's caps (its
+	// package's MiB, composition.json's 4, edits.bin's 16) is refused as its
+	// export would be; a copy straight from the entities and the World's
+	// rows is the upgrade
+	ss_ duplicate_scene(size_t peer, ss_ scene, json::Value &a)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return "the app has not placed the player";
+		if(scene.empty())
+			scene = pi->second.scene;
+		sv_<std::pair<ss_, ss_>> files;
+		ss_ why;
+		if(!scene_files(author_of(pi->second), scene, files, why))
+			return why;
+		const sv_<uint64_t> chain = scene_chain(scene);
+		return add_scene_data(peer, interface::aitta::zip_files(files), a,
+				chain.size() > 2 ? m_entities[chain[1]].name : "", true);
 	}
 
 	// A scene package unpacked in dir, added as a new scene: its name the
@@ -8907,8 +8933,16 @@ struct Module: public interface::Module, public Interface
 	// simplified: a refusal after its types went in leaves them (the
 	// builder deletes them in the types' window); a check of its entities
 	// against the types before any goes in is the upgrade
+	// [KIT_SCENE_DUPLICATE] dup: the package a copy of this game's scene
+	// (its composition's "scene"): a link or entity parameter onto an
+	// entity outside it stays onto that one (not by name); an entity outside
+	// whose scene list (a choices_from "scene_list" parameter: kit/arena's
+	// maps) names the scene gets the copy in it too, and each of its links
+	// into the scene one into the copy's entity as well; the copy's own
+	// kit/scene_info title gets its name after it. All in the one undo
 	ss_ import_scene(Peer &p, size_t peer, const ss_ &dir, const ss_ &aitta,
-			const json::Value &sig, json::Value &a, const ss_ &parent)
+			const json::Value &sig, json::Value &a, const ss_ &parent,
+			bool dup = false)
 	{
 		json::json_error_t err;
 		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
@@ -9057,6 +9091,9 @@ struct Module: public interface::Module, public Interface
 		auto onto = [&](uint64_t to, const ss_ &label){
 			if(to <= 1 || ids.count(to))
 				return to <= 1 ? to : ids[to];
+			auto ex = m_entities.find(to);
+			if(dup && ex != m_entities.end() && authored(ex->second))
+				return to;
 			const ss_ n = jstr(outside, itos(to).c_str());
 			for(auto &e : m_entities)
 				if(!n.empty() && e.second.name == n && authored(e.second))
@@ -9131,8 +9168,83 @@ struct Module: public interface::Module, public Interface
 				cj.set("params", ps);
 				comps.set_at(k, cj);
 			}
+			// [KIT_SCENE_DUPLICATE] the copy's title its own in a scene list
+			for(unsigned k = 0; dup && up[was] == sid && !e.get("pos").is_array() &&
+					k < comps.size(); k++){
+				json::Value cj = comps.at(k), ps = cj.get("params");
+				if(full_type(jstr(cj, "type")) != "kit/scene_info" ||
+						jstr(ps, "title").empty())
+					continue;
+				ps.set("title", jstr(ps, "title")+" ("+name+")");
+				cj.set("params", ps);
+				comps.set_at(k, cj);
+			}
 			e.set("components", comps);
 			change.push_back(std::make_pair(ids[was], e));
+		}
+		// [KIT_SCENE_DUPLICATE] the scene lists naming it
+		const ss_ orig = jstr(c, "scene");
+		for(auto &x : m_entities){
+			if(!dup)
+				break;
+			bool lists = false;
+			for(const Instance &in : x.second.comps){
+				auto ty = m_types.find(in.type);
+				const json::Value &decl = ty == m_types.end() ? json::Value() :
+						ty->second.decl.get("params");
+				for(json::Iterator it(decl); decl.is_object() && it; ++it)
+					lists = lists || jstr(*it, "choices_from") == "scene_list";
+			}
+			if(!lists || !authored(x.second))
+				continue;
+			// (entity_json()'s parts are the entity's own)
+			json::Value e = entity_json(x.second).deepcopy(),
+					comps = e.get("components");
+			bool changed = false;
+			for(unsigned k = 0; k < comps.size(); k++){
+				json::Value cj = comps.at(k), ps = cj.get("params");
+				auto ty = m_types.find(jstr(cj, "type"));
+				if(ty == m_types.end())
+					continue;
+				const json::Value &decl = ty->second.decl.get("params");
+				bool named = false;
+				for(json::Iterator it(decl); decl.is_object() && it; ++it){
+					if(jstr(*it, "choices_from") != "scene_list" ||
+							!ps.get(it.key()).is_string())
+						continue;
+					const ss_ v = ps.get(it.key()).as_string();
+					bool has = false;
+					for(size_t i = 0; i <= v.size() && !has;){
+						size_t e2 = v.find_first_of(", ", i);
+						e2 = e2 == ss_::npos ? v.size() : e2;
+						has = v.substr(i, e2 - i) == orig;
+						i = e2 + 1;
+					}
+					if(!has)
+						continue;
+					ps.set(it.key(), v+", "+name);
+					named = true;
+				}
+				if(!named)
+					continue;
+				json::Value ls = cj.get("links");
+				for(unsigned l = 0, n = ls.size(); l < n; l++){
+					const uint64_t to = (uint64_t)json::jint(ls.at(l), "to", 0);
+					if(!ids.count(to))
+						continue;
+					json::Value lj = ls.at(l).deepcopy();
+					lj.set("to", (int64_t)ids[to]);
+					ls.append(lj);
+				}
+				cj.set("params", ps);
+				cj.set("links", ls);
+				comps.set_at(k, cj);
+				changed = true;
+			}
+			if(!changed)
+				continue;
+			e.set("components", comps);
+			change.push_back(std::make_pair(x.first, e));
 		}
 		// [KIT_SCENE_ADD_LIVE] Running: in unlisted (its kit/scene_info's
 		// listed off), for its builder to try and then list
@@ -9204,9 +9316,10 @@ struct Module: public interface::Module, public Interface
 		world_check(p.name);
 		ss_ what = "the scene "+name+(scene_name.size() > 1 ? " (and "+
 				itos(scene_name.size() - 1)+" under it)" : ss_())+
-				(under > 1 ? " under "+parent : ss_())+" ("+jstr(m, "author")+"/"+
-				jstr(m, "name")+" "+jstr(m, "version")+(aitta.empty() ? ss_() :
-				" from "+interface::aitta::aitta_host(aitta))+"): "+
+				(under > 1 ? " under "+parent : ss_())+(dup ? " (a copy of "+orig :
+				" ("+jstr(m, "author")+"/"+jstr(m, "name")+" "+jstr(m, "version"))+
+				(aitta.empty() ? ss_() : " from "+
+				interface::aitta::aitta_host(aitta))+"): "+
 				itos(change.size())+" entities, "+itos(dropped.size())+
 				" links or entity parameters left out, "+itos(added)+
 				" types added, "+itos(kept.size())+" kept as the game's, "+
@@ -34874,6 +34987,20 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"copy": {"type": "boolean"}, "parent": {"type": "string"}},
 				"required": ["name"]})J", ""},
+			// [KIT_SCENE_DUPLICATE]
+			{"duplicate_scene", "duplicate_scene", "Copies scene name (none: "
+				"yours) as a new scene beside it, as the Scenes window's "
+				"Duplicate does, and takes your edits there: the next free name "
+				"(track_2...), its entities new ids, the links and entity "
+				"parameters among them onto the copy's, those onto entities "
+				"outside it as they are, its World's voxels, heightmap and "
+				"decorations. Its kit/scene_info title gets \" (<name>)\" "
+				"after it; a scene list naming the scene (kit/arena's maps) "
+				"gets the copy too, with that entity's links into the scene "
+				"also into the copy. One undo; not in a draft. While Running "
+				"it is added unlisted. Answers as import_scene.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"}}})J",
+				""},
 			// [KIT_ROOT_EDIT] the editor's Remove scene
 			{"delete_scene", "remove_scene", "Removes scene name, all its "
 				"entities and the links to them, one undo (its World's voxels "
@@ -35598,6 +35725,13 @@ struct Module: public interface::Module, public Interface
 			return agent_read(p, peer, op, a, failed);
 		if(op == "import_scene")
 			return agent_import_scene(peer, a, failed);
+		if(op == "duplicate_scene"){
+			json::Value s = json::object();
+			const ss_ why = duplicate_scene(peer, jstr(a, "name").substr(0, 64),
+					s);
+			failed = !why.empty();
+			return failed ? "Refused: "+why : s.stringify();
+		}
 		if(op == "view")
 			return agent_view(p, peer, a, failed);
 		if(op.compare(0, 5, "play_") == 0)
@@ -43414,6 +43548,22 @@ struct Module: public interface::Module, public Interface
 			return export_package(peer, p, refuse);
 		if(op == "export_scene")
 			return export_scene(peer, p, j, refuse);
+		// [KIT_SCENE_DUPLICATE] {"op": "duplicate_scene", "name"}: the Scenes
+		// window's Duplicate, answered as a scene added from a file
+		// ("kit:scene"); import_scene()'s history line its only one
+		if(op == "duplicate_scene"){
+			json::Value a = json::object();
+			const ss_ why = duplicate_scene(peer, jstr(j, "name").substr(0, 64),
+					a);
+			m_edit_what.clear();
+			if(!why.empty())
+				return refuse(why);
+			a.set("ok", true);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:scene", a.stringify());
+			});
+			return;
+		}
 		// [KIT_SERVER_PUBLISH]
 		if(op == "server_publish")
 			return server_publish(peer, p, j, refuse);
