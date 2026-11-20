@@ -25250,6 +25250,7 @@ struct Module: public interface::Module, public Interface
 		ss_ cells((size_t)nx * ny * nz, '.');
 		json::Value classes = json::array();
 		std::map<uint32_t, char> cls;
+		std::set<uint64_t> used; // the tracks the links below name
 		const json::Value &extra = voxel_extra();
 		// [KIT_NO_WORLD] no ground: a cell not loaded is air
 		const char unknown = m_w->world_scene == scene && m_w->wp.none() ? '.' : '?';
@@ -25389,6 +25390,7 @@ struct Module: public interface::Module, public Interface
 				if(links.size()){
 					o += ",";
 					lua_lit(links, o);
+					tracks_used(links, used);
 				}
 				o += "},";
 				break;
@@ -25458,6 +25460,7 @@ struct Module: public interface::Module, public Interface
 			if(links.size()){
 				o += ",";
 				lua_lit(links, o);
+				tracks_used(links, used);
 			}
 			o += "},";
 		}
@@ -25488,7 +25491,7 @@ struct Module: public interface::Module, public Interface
 					}
 				o += "}}";
 			});
-		tracks_lit(o, scene_name);
+		tracks_lit(o, scene_name, &used);
 		if(!std::isnan(plane))
 			o += ",plane="+json::Value(plane).stringify()+(level ? ",horizontal=true" :
 					"");
@@ -25498,14 +25501,17 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_VEHICLE_MOVEMENTS] ",tracks={[id]={{t, x, y, z, yaw, pitch, roll}...}}": the
 	// keys of the steered ones in the scene, from TRACK_KEEP back (a stamp is a second
-	// back at most)
-	void tracks_lit(ss_ &o, const ss_ &scene_name)
+	// back at most). [KIT_CROWD_CHECK] used: only those a link sent names
+	// (tracks_used()): every steered one's in every step's request made 50
+	// driving bots' steps O(n^2), in the text and in the box's parse of it
+	void tracks_lit(ss_ &o, const ss_ &scene_name, const std::set<uint64_t> *used = nullptr)
 	{
 		o += ",tracks={";
 		const double from = (motion_t() - 1.5) * 1000;
 		char buf[48];
 		for(auto &d : m_drives){
-			if(d.second.scene != scene_name || d.second.keys.empty())
+			if(d.second.scene != scene_name || d.second.keys.empty() ||
+					(used && !used->count(d.first)))
 				continue;
 			o += "["+itos(d.first)+"]={";
 			const auto &k = d.second.keys;
@@ -25523,6 +25529,16 @@ struct Module: public interface::Module, public Interface
 			o += "},";
 		}
 		o += "}";
+	}
+
+	// The tracks links_of()'s motions name (move.lua's M.link_at reads them)
+	static void tracks_used(const json::Value &links, std::set<uint64_t> &used)
+	{
+		for(unsigned i = 0; i < links.size(); i++){
+			const json::Value &t = links.at(i).at(6u).get("track");
+			if(t.is_number())
+				used.insert((uint64_t)t.as_number());
+		}
 	}
 
 	// Whether e is id or under it
