@@ -17,8 +17,8 @@
 #      it away (2); edit_type's find-and-replace in the source and the
 #      client part, refused (nothing changed) for a find not there, there
 #      twice, a type not there and a result that does not load (1);
-#      [KIT_API_1] put_type refuses a field Kit does not know, players =
-#      true of before, a helper function in the table and a kit_ param; a param
+#      [KIT_API_1] put_type refuses a field Kit does not know, and a
+#      helper function in the table with a kit_ param; a param
 #      added to a type while play had removed its entity shows on it at its
 #      default once Stop puts it back (3);
 #   3. links by name (7): a root entity (local/hub) linked by to_name
@@ -553,13 +553,14 @@ elif phase == "types":
         {"name": "nohub", "edits": [{"find": "a", "replace": "b"}]})
     g = get_type("local/hub")
     assert "default = 2" in g["source"] and "hub client v2" in g["client"], g
-    # [KIT_API_1] (decision 4) a type table of Kit's names alone
+    # [KIT_API_1] (decision 4) a type table of Kit's names alone (two
+    # calls: the token's 120 a minute; the first fault named, the rest
+    # counted)
     for src, why in (
             ("return {version = 1, plyers = true}", "local/odd: plyers: not a type field Kit knows"),
-            ("return {version = 1, players = true}", "local/odd: players = true is reads_players = true now"),
-            ("return {version = 1, helper = function() end}", "local/odd: helper: a function, and no handler Kit knows"),
-            ("return {version = 1, params = {kit_x = {type = \"number\", default = 0}}}",
-             "local/odd: params kit_x: names starting kit_ are Kit's")):
+            ("return {version = 1, helper = function() end, "
+             "params = {kit_x = {type = \"number\", default = 0}}}",
+             "local/odd: helper: a function, and no handler Kit knows (a helper goes in a local) (and 1 more)")):
         r = refused("put_type", {"name": "odd", "source": src})
         assert r.startswith("Refused: ") and why in r, (why, r)
     # (3) a param added: on the placed entity at its default, one play
