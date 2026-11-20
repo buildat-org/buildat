@@ -7812,8 +7812,8 @@ struct Module: public interface::Module, public Interface
 	//   its row}, the builders' (a package's left out);
 	//   textures/<hash>.png: the uploads those rows wear;
 	//   edits.bin: zlib's of {"format": "kit_world_edits", "generator":
-	//   world::VERSION, "materials": heightmap::MAX_MATERIALS, "scenes": {"<scene>": {"names": [voxel...],
-	//   "cells": [x, y, z, its name's index, the rest of its word (param,
+	//   world::VERSION, "materials": heightmap::MAX_MATERIALS, "scenes":
+	//   {"<scene>": {"names": [voxel...], "cells": [x, y, z, its name's index, the rest of its word (param,
 	//   tint)...], "hm": [x, z, the height's float's bits, weights...],
 	//   "decor": [the builders' decorations, the row's]}}}: each World's
 	//   cells that differ from its generator's (in the sections written,
