@@ -555,10 +555,16 @@ void json::Value::stringify_to(std::string &out) const {
 			}
 			// (a stream's formatting, as it always was: the C locale's
 			// whatever setlocale() says; one stream per thread)
-			static thread_local std::ostringstream os(std::ios::binary);
-			os.str(std::string());
-			os<<f;
-			out += os.str();
+			// (a pointer: a thread_local with a destructor needs
+			// __cxa_thread_atexit, which the Windows package's
+			// libstdc++-6.dll lacks; simplified: a thread's stream is never
+			// freed, a few threads' worth)
+			static thread_local std::ostringstream *os = nullptr;
+			if(!os)
+				os = new std::ostringstream(std::ios::binary);
+			os->str(std::string());
+			*os<<f;
+			out += os->str();
 			return;
 		}
 	case T_STRING:
