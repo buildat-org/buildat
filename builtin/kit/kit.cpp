@@ -3960,6 +3960,28 @@ struct Module: public interface::Module, public Interface
 			}
 			bool on = false;
 			if(has_sym(row, &on)){
+				// [KIT_PARAM_AUDIT] slices or angle set with the slice as it
+				// was: the slice fitted to them (refused, the inspector could
+				// never go from halves to quadrants: each takes the other's)
+				json::Value cs2 = row.get("components").deepcopy();
+				for(unsigned k = 0; k < cs2.size(); k++){
+					if(full_type(jstr(cs2.at(k), "type")) != SYMMETRY_TYPE)
+						continue;
+					json::Value cj = cs2.at(k).deepcopy();
+					json::Value pj = cj.get("params").deepcopy();
+					const Instance *was = ei == m_entities.end() ? nullptr :
+							symmetry_in(ei->second);
+					const ss_ slice = jstr(pj, "slice");
+					const ss_ fit = symmetry::fit_slice(jstr(pj, "slices"),
+							jstr(pj, "angle"), slice);
+					if(was && fit != slice && jstr(was->params, "slice") == slice){
+						pj.set("slice", json::Value(fit));
+						cj.set("params", pj);
+						cs2.set_at(k, cj);
+						row.set("components", cs2);
+					}
+					break;
+				}
 				json::Value pos = json::array();
 				pos.append(0.0);
 				pos.append(pos_ok(row.get("pos")) ? row.get("pos").at(1u) :
