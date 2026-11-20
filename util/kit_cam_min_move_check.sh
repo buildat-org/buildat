@@ -15,7 +15,8 @@
 # plane game, the editor opening in 2D), its 3D view by F2: a middle drag of
 # 150 pixels pans the camera some 10 along the ground; five notches of the
 # wheel sent at once have all zoomed two frames after the last (0.7 a notch:
-# 30 or more toward the road 40 off), nothing after.
+# 30 or more toward the road 40 off), nothing after; the pointer's pick there
+# met a quarter of the looks or fewer (the rest far off its ray).
 # [KIT_WEB_WHEEL_TENTHS] With "web", in headless Chrome: one notch of the wheel,
 # 100 CSS pixels, which the web's SDL counts as 10, is one notch in the 2D plan
 # (span 50 to 40) and in the 3D view (1 to 3 cells along the look, not 10).
@@ -31,6 +32,19 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
+# [KIT_EDITOR_PAN_ZOOM] The pointer's pick in the Brimstone game's 3D view (the
+# hover's, each frame) meets a look's box only near its ray: 261 of its 305,
+# those under a parent, were each met (50-90 ms a pick on the web, the 3D view
+# and its wheel slow)
+pick_met() # <log>
+{
+	local m n
+	read -r m n <<<"$(grep -aoP 'the last pick met \K\d+ looks of \d+(?= \(brim start\))' "$1" |
+		tail -1 | sed 's/ looks of / /')"
+	[ -n "${n:-}" ] && [ "$n" -ge 100 ] && [ $((m * 4)) -le "$n" ] ||
+		fail "the pick in the Brimstone game met ${m:-?} looks of ${n:-?}, not a quarter or less ($1)"
+	echo "ok: the pick met $m looks of $n"
+}
 if [ "${1:-}" = web ]; then
 	check_tmp kit_cam_wheel_web; t=$CHECK_TMP
 	cat > "$t/steps.json" <<J
@@ -145,7 +159,8 @@ J
 		exit !(d >= 10 && d <= 14 && e < 0.01) }' ||
 		fail "a notch in ten wheel events in the Brimstone game: $x1,$y1,$z1 -> $x2,$y2,$z2 (two frames on) -> $x3,$y3,$z3 (20 on), not one notch at once ($c)"
 	echo "ok: a notch in ten events moved it $x1,$y1,$z1 -> $x2,$y2,$z2 at once, nothing after"
-	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch; a notch in ten small events steps the voxel in hand once; in a Brimstone game the middle drag pans and a notch in ten events zooms at once"
+	pick_met "$c"
+	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch; a notch in ten small events steps the voxel in hand once; in a Brimstone game the middle drag pans, a notch in ten events zooms at once and the pick meets only the looks near its ray"
 	exit 0
 fi
 check_tmp kit_cam_min_move; t=$CHECK_TMP
@@ -383,5 +398,6 @@ awk -v ax="$x1" -v ay="$y1" -v az="$z1" -v bx="$x2" -v by="$y2" -v bz="$z2" \
 	exit !(d >= 30 && e < 0.01) }' ||
 	fail "five wheel notches in the Brimstone game: $x1,$y1,$z1 -> $x2,$y2,$z2 (two frames on) -> $x3,$y3,$z3 (20 on), not 30 or more at once ($c)"
 echo "ok: five notches moved it $x1,$y1,$z1 -> $x2,$y2,$z2 at once, nothing after"
-echo "PASS: the 3D camera under the ground: the wheel moves it a cell a notch at least, a middle drag pans it at least as if 6 away; in a Brimstone game the middle drag pans and a burst of the wheel zooms at once"
+pick_met "$c"
+echo "PASS: the 3D camera under the ground: the wheel moves it a cell a notch at least, a middle drag pans it at least as if 6 away; in a Brimstone game the middle drag pans, a burst of the wheel zooms at once and the pointer's pick meets only the looks near its ray"
 # vim: set noet ts=4 sw=4:
