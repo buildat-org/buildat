@@ -566,10 +566,12 @@ def kit_surface():
             for k in ("min", "max", "choices"):
                 if k in pd:
                     v[k] = pd[k]
-            add("type %s param %s" % (name, p), json.dumps(v, sort_keys=True) + x)
+            k = "type %s param %s" % (name, p)
+            add(k, json.dumps(v, sort_keys=True) + (x or tag(k)))
         for io_ in ("input", "output"):
             for s, t in sorted(kit_signals(d.get(io_ + "s")).items()):
-                add("type %s %s %s" % (name, io_, s), t + x)
+                k = "type %s %s %s" % (name, io_, s)
+                add(k, t + (x or tag(k)))
         for s, sd in sorted((d.get("state") or {}).items()):
             fl = [k for k in ("shared", "per_player", "kept")
                     if isinstance(sd, dict) and sd.get(k) is True]

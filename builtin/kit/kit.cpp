@@ -9641,6 +9641,12 @@ struct Module: public interface::Module, public Interface
 			"c.move_lib", "c:generate",
 			// driving bots
 			"c:drive", "c.body", "c.path",
+			// kit/bot's driving and asking (api.h's "Kit API 1"): matched in
+			// the surface listing (util/api_names.py); a Lua file never names
+			// them so, so the publish scan finds none (simplified: a
+			// published game linking to ask is not warned; a driving bot is,
+			// by pub_experimental's own test)
+			"kit/bot param drive", "kit/bot param skill", "kit/bot input ask",
 			// a movement's touch bar
 			"touch_axes",
 			// outside the promise: the client's whole module, a movement's

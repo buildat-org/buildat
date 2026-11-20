@@ -568,7 +568,7 @@ type kit/bot | version 1
 type kit/bot handlers | on_input on_start on_timer on_ui
 type kit/bot param aim | {"default": 75, "kind": "number", "max": 100, "min": 0}
 type kit/bot param brake | {"default": 8, "kind": "number", "max": 40, "min": 1}
-type kit/bot param drive | {"default": false, "kind": "bool"}
+type kit/bot param drive | {"default": false, "kind": "bool"} [experimental]
 type kit/bot param grip | {"default": 12, "kind": "number", "max": 40, "min": 1}
 type kit/bot param name | {"default": "Bot", "kind": "string"}
 type kit/bot param own_look | {"default": true, "kind": "bool"}
@@ -576,9 +576,9 @@ type kit/bot param path | {"default": 0, "kind": "entity"}
 type kit/bot param patience | {"default": 10, "kind": "number", "max": 120, "min": 1}
 type kit/bot param reach | {"default": 2.5, "kind": "number", "max": 8, "min": 0.5}
 type kit/bot param reaction | {"default": 0.4, "kind": "number", "max": 3, "min": 0}
-type kit/bot param skill | {"default": 60, "kind": "number", "max": 100, "min": 0}
+type kit/bot param skill | {"default": 60, "kind": "number", "max": 100, "min": 0} [experimental]
 type kit/bot param speed | {"default": 90, "kind": "number", "max": 100, "min": 30}
-type kit/bot input ask | none
+type kit/bot input ask | none [experimental]
 type kit/bot input skill | number
 type kit/bot output stuck | string
 type kit/bot state aim | shared
