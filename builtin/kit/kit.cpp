@@ -39927,6 +39927,8 @@ struct Module: public interface::Module, public Interface
 			"of its range, is an error with its line number. # at a line's start or after a space "
 			"starts a comment (C#3 is a note). Order: settings, instruments, "
 			"tracks, then patterns, sections, play, loop, moods.\n"
+			"  jam 1              # optional, the first line: the format's "
+			"version (none: 1; a higher one is refused, a newer Buildat's)\n"
 			"  title Scrap Heat\n"
 			"  tempo 150          # beats a minute (20..400)\n"
 			"  steps 16           # steps a bar\n"

@@ -165,6 +165,9 @@ function J.read(text)
 		local w = words(s)
 		local w1 = w[1] and w[1][1]
 		if not w1 then
+		elseif w1 == "jam" then
+			-- [KIT_API_1] the format's line: what is added goes after it
+			m.head.jam = ln
 		elseif w1 == "title" then
 			m.title = s:match("^%s*title%s+(.-)%s*$") or ""
 			m.head.title = ln
@@ -435,7 +438,7 @@ function J.set_head(m, key, value)
 	if ln then
 		return rewrite(m, {[ln] = J.word_line(m.lines[ln], 2, value)})
 	end
-	return rewrite(m, nil, {[m.head.title or 0] = {key .. " " .. value}})
+	return rewrite(m, nil, {[m.head.title or m.head.jam or 0] = {key .. " " .. value}})
 end
 
 -- A bus's (reverb, delay, master) key, its line added after the settings'
@@ -448,7 +451,7 @@ function J.set_bus(m, bus, key, value)
 		return m.text
 	end
 	local after = m.head.swing or m.head.beat or m.head.steps or m.head.tempo or
-			m.head.title or 0
+			m.head.title or m.head.jam or 0
 	return rewrite(m, nil, {[after] = {bus .. " " .. key .. "=" .. value}})
 end
 

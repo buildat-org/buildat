@@ -28,6 +28,9 @@ local BAD = {
 	{"inst a osc\ntrack t inst=a\nmood m t=loud", 3, "a number expected"},
 	{"inst d kick\ntrack k inst=d\npattern p\nk: X..Q\nsection s: p\nplay s",
 		4, "bad hit Q"},
+	-- [KIT_API_1] the format's line: a newer one, one not first
+	{"# a song\njam 2\ntitle x", 2, "made with a newer Buildat"},
+	{"title x\njam 1", 2, "the first line, or none"},
 }
 local bad = 0
 for i, b in ipairs(BAD) do
@@ -52,6 +55,18 @@ for _, h in ipairs({{"scrap_heat"}, {"scrap_heat", "calm"}, {"yard_vamp"},
 	say(string.format("hash %s%s %s, %s ms per s, %s LUFS", h[1],
 			h[2] and ("/" .. h[2]) or "", a:match('"hash": "(%x+)"'),
 			a:match('"cpu_ms_per_s": ([%d.]+)'), a:match('"lufs": ([-%d.]+)')))
+end
+-- [KIT_API_1] "jam 1" on its first line: the same samples
+do
+	local a = assert(jam.song("jam 1\n" .. jam.songs.yard_vamp)):analyze(10)
+	local b = songs.yard_vamp:analyze(10)
+	-- the music editor's added settings line goes after it
+	local J = jam.editor()
+	local t = J.set_head(J.read("jam 1\ninst a osc\n"), "tempo", "100")
+	say(a:match('"hash": "(%x+)"') == b:match('"hash": "(%x+)"') and
+			t:find("^jam 1\ntempo 100\n") and jam.song(t .. "track t inst=a\n" ..
+			"pattern p\nt: C4" .. (" ."):rep(15) .. "\nsection s: p\nplay s\n") and
+			"jam 1 header ok" or "jam 1 header FAILED: " .. t)
 end
 
 -- **The player**, a step a frame: started mid-bar, a mood asked for, the

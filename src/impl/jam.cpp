@@ -486,6 +486,8 @@ struct Parser
 	sv_<ss_> play;
 	ss_ loop;
 	int loop_line = 0;
+	// a line other than comments read (a "jam" line is only before it)
+	bool begun = false;
 	explicit Parser(Song &s): song(s) {}
 
 	[[noreturn]] void err(const ss_ &m)
@@ -679,6 +681,19 @@ struct Parser
 		if(w.empty())
 			return;
 		const ss_ &w1 = w[0];
+		// [KIT_API_1] "jam 1", the format's version, on its first line (a
+		// song without one is jam1); a later one is a newer Buildat's
+		if(w1 == "jam"){
+			if(begun || w.size() != 2 || w[1].empty() || w[1][0] == '0' ||
+					w[1].find_first_not_of("0123456789") != ss_::npos)
+				err("jam: \"jam 1\", the first line, or none");
+			if(w[1] != "1")
+				err("this song is jam " + w[1].substr(0, 8) + ", made with a "
+						"newer Buildat; this one reads jam 1");
+			begun = true;
+			return;
+		}
+		begun = true;
 		if(w1 == "title"){
 			size_t at = s.find("title") + 5;
 			size_t a = s.find_first_not_of(" \t\r", at);

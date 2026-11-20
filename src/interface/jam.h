@@ -12,6 +12,9 @@
 // the position, on every platform and in every release of jam1 (own sine,
 // exp2 and log2 tables, seeded noise, impl/jam.cpp built without contracted
 // floating point). A change to how jam1 sounds is a jam2 beside it.
+// [KIT_API_1] A song's optional first line "jam 1" names its format; a
+// song without it is jam1, a higher number refused ("made with a newer
+// Buildat").
 #pragma once
 #include "core/types.h"
 #include <memory>
