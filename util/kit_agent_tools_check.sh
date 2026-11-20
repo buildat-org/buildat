@@ -4,11 +4,11 @@
 # cost: ~2.5 min (2026-11-18)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua
 # [KIT_AGENT_FEEDBACK_1117] An agent's tools as a claude.ai agent asked for
-# them on testbench, through MCP on Workbench. kitboss (the admin) makes two
+# them on testbench, through MCP on Workbench. kitboss (the admin) makes three
 # builder tokens and an admin token on a headless weston's Xwayland of the
 # check's own and stays, in edit mode; the server's camera on SDL's
-# offscreen driver. The phases split over the two builder tokens so that
-# neither meets a token's 120 calls a minute (met: a loud fail, no wait):
+# offscreen driver. The phases split over the three builder tokens so that
+# none meets a token's 120 calls a minute (met: a loud fail, no wait):
 #   0. [SERVER_VERSION_SHOWN] the pause menu's "Server <VERSION>" label;
 #   1. tools/list: the builder token's without the admin's tools (14), the
 #      admin token's with them; both instructions under 4096 characters,
@@ -173,25 +173,32 @@ step 10 "accounts: agents: a token made, builder" "frames 3" \
 step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
 tok=$(clip "")
 [[ $tok =~ ^bat_[0-9a-f]{64}$ ]] || fail "kitboss's builder token: $tok"
-# (a second builder's: the phases split over the two, each token under its
-# 120 calls a minute)
+# (a second and a third builder's: the phases split over the three, each
+# token under its 120 calls a minute)
 cmd "frames 3" 'click Button "Done"'
 step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
 step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
 tok2=$(clip "$tok")
 [[ $tok2 =~ ^bat_[0-9a-f]{64}$ ]] && [ "$tok2" != "$tok" ] || fail "kitboss's second builder token: $tok2"
+cmd "frames 3" 'click Button "Done"'
+step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+tok3=$(clip "$tok2")
+[[ $tok3 =~ ^bat_[0-9a-f]{64}$ ]] && [ "$tok3" != "$tok" ] && [ "$tok3" != "$tok2" ] ||
+	fail "kitboss's third builder token: $tok3"
 cmd "frames 3" 'click Button "Done"' "frames 3" 'click Button "Scope: Builder*"' \
 	"frames 3" 'click LineEdit "My agent"' "delay 300" "keydown ctrl" \
 	"keypress a" "keyup ctrl" "text admin agent" "frames 2"
 step 10 "accounts: agents: a token made, admin" 'click Button "Make a token"'
 step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
-adm=$(clip "$tok2")
-[[ $adm =~ ^bat_[0-9a-f]{64}$ ]] && [ "$adm" != "$tok" ] && [ "$adm" != "$tok2" ] || fail "kitboss's admin token: $adm"
+adm=$(clip "$tok3")
+[[ $adm =~ ^bat_[0-9a-f]{64}$ ]] && [ "$adm" != "$tok" ] && [ "$adm" != "$tok2" ] && [ "$adm" != "$tok3" ] ||
+	fail "kitboss's admin token: $adm"
 cmd "frames 3" 'click Button "Done"'
 step 10 "pause: the menu shown" "keypress Escape"
 step 10 "pause: the menu closed" "frames 3" "keypress Escape"
 step 10 "kit editor: edit mode on" "frames 3" 'event kit_edit {"op": "mode", "on": true}'
-echo "ok: kitboss's two builder tokens and an admin token; kitboss in edit mode"
+echo "ok: kitboss's three builder tokens and an admin token; kitboss in edit mode"
 
 cat > "$t/mcp.py" <<'PY'
 import json, re, sys, time, urllib.error, urllib.request
@@ -214,7 +221,7 @@ def rpc(method, params=None, tk=tok):
     m = {"jsonrpc": "2.0", "id": n, "method": method}
     if params is not None:
         m["params"] = params
-    # (a token's 120 calls a minute: never met, the phases over two builder
+    # (a token's 120 calls a minute: never met, the phases over three builder
     # tokens; a tools/call over it answers "Over 120 calls" as an error)
     s, b = post(m, tk)
     assert s != 429, ("over the token's 120 calls a minute: split the phases "
@@ -1114,10 +1121,11 @@ print("ok: %s (%d calls)" % (phase, n))
 PY
 mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 {
-	# (the builder's calls over two tokens, each under its 120 a minute; an
+	# (the builder's calls over three tokens, each under its 120 a minute; an
 	# agent's scene is its token's: heightmap's switch_scene after goals')
 	local k=$tok
 	case $1 in play|state|goals|history|top_down|heightmap|checkpoint) k=$tok2 ;;
+		types|links) k=$tok3 ;;
 		zones) k=$adm ;; esac
 	python3 -I "$t/mcp.py" "$1" "$url" "$k" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
@@ -1167,7 +1175,7 @@ cmd "sync 2000" quit
 exec 3>&-
 wait $CLIENT 2>/dev/null
 CLIENT=$SERVER_PID
-for k in "${tok#bat_}" "${tok2#bat_}" "${adm#bat_}"; do
+for k in "${tok#bat_}" "${tok2#bat_}" "${tok3#bat_}" "${adm#bat_}"; do
 	grep -rqaF "$k" "$t"/*.log && fail "a token in a log"
 done
 echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
