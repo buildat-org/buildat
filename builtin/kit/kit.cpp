@@ -1989,7 +1989,11 @@ struct Module: public interface::Module, public Interface
 		sv_<ss_> out;
 		for(json::Iterator it(decl); it; ++it){
 			const ss_ &k = it.key();
-			if(k == "handlers" || type_fields().count(k))
+			// (handlers and the signals' *_types and *_labels: Kit's own,
+			// signal_names()')
+			if(k == "handlers" || type_fields().count(k) || k == "inputs_types" ||
+					k == "outputs_types" || k == "inputs_labels" ||
+					k == "outputs_labels")
 				continue;
 			if(k == "players" || k == "teams" || k == "regions")
 				out.push_back(k+" = true is reads_"+k+" = true now");
