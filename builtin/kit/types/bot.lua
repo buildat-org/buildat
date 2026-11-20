@@ -457,8 +457,8 @@ return {
 	},
 	inputs = {ask = "none", skill = "number"},
 	outputs = {stuck = "string"},
-	-- (util/kit_racer_sim_check.lua drives with it offline)
-	follow = follow,
+	-- (util/kit_racer_sim_check.lua drives with follow offline, an upvalue
+	-- of on_timer's: the type table holds Kit's fields alone)
 	on_start = function(c)
 		c.state.goal, c.state.used, c.state.stuck = 0, false, false
 		c.state.cooling, c.state.ready, c.state.near = false, true, 0
