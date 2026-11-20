@@ -34,11 +34,11 @@ namespace json
 			//T_RAW,
 		};
 	private:
-		friend const Value object();
-		friend const Value array();
-		friend const Value null();
-		friend const Value load_sajson(const sajson::value &src);
-		friend const Value load_sajson_depth(const sajson::value &src,
+		friend Value object();
+		friend Value array();
+		friend Value null();
+		friend Value load_sajson(const sajson::value &src);
+		friend Value load_sajson_depth(const sajson::value &src,
 				int depth);
 		friend class Iterator;
 
@@ -51,6 +51,8 @@ namespace json
 		} value;
 	public:
 		Value(const Value &other);
+		// A move leaves other undefined: no copy of what it holds
+		Value(Value &&other) noexcept;
 		Value();
 		Value(bool b);
 		Value(int64_t i);
@@ -64,6 +66,7 @@ namespace json
 
 		// assignment operator
 		Value& operator=(const Value &value);
+		Value& operator=(Value &&value) noexcept;
 
 		// get type
 		Type get_type() const {return type;}
@@ -119,11 +122,16 @@ namespace json
 		Value& set_key(const std::string &key, const Value &value);
 		Value& set(const char *key, const Value &value);
 		Value& set(const std::string &key, const Value &value);
+		// (a temporary or std::move()d value moved in, not copied)
+		Value& set(const char *key, Value &&value);
+		Value& set(const std::string &key, Value &&value);
 
 		// set an array index
 		Value& set_at(unsigned int index, const Value &value);
+		Value& set_at(unsigned int index, Value &&value);
 
 		Value& append(const Value &value);
+		Value& append(Value &&value);
 
 		// delete an object key
 		Value& del_key(const char *key);
@@ -141,8 +149,11 @@ namespace json
 
 		// serialize stuff like JSON.stringify()
 		std::string stringify(int flags = 0) const;
+	private:
+		void stringify_to(std::string &out) const;
+	public:
 
-		// serialize stuff using stringfy() and then compare
+		// whether both stringify() the same (compared without it)
 		bool operator==(const Value &value) const;
 
 		const Value deepcopy() const;
@@ -221,16 +232,16 @@ namespace json
 	};
 
 	// create a new empty object
-	const Value object();
+	Value object();
 
 	// create a new empty array
-	const Value array();
+	Value array();
 
 	// create a new null value
-	const Value null();
+	Value null();
 
-	const Value load_sajson(const sajson::value &src);
-	const Value load_sajson_depth(const sajson::value &src, int depth);
+	Value load_sajson(const sajson::value &src);
+	Value load_sajson_depth(const sajson::value &src, int depth);
 
 	struct json_error_t {
 		int line;
@@ -239,10 +250,10 @@ namespace json
 	};
 
 	// load a file as a JSON value
-	const Value load_file(const char *path, json_error_t *error = 0);
+	Value load_file(const char *path, json_error_t *error = 0);
 
 	// load a string as a JSON value
-	const Value load_string(const char *string, json_error_t *error = 0);
+	Value load_string(const char *string, json_error_t *error = 0);
 
 	template<typename T>
 	struct JsonTraits

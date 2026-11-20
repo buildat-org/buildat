@@ -98,6 +98,11 @@ struct ValuePrivate
 json::Value::Value(const Value &other): p(NULL), type(T_UNDEFINED){
 	*this = other;
 }
+json::Value::Value(Value &&other) noexcept: p(other.p), type(other.type),
+		value(other.value){
+	other.p = NULL;
+	other.type = T_UNDEFINED;
+}
 json::Value::Value(): p(NULL), type(T_UNDEFINED){
 }
 json::Value::Value(bool b): p(NULL), type(T_BOOL){
@@ -173,6 +178,20 @@ Value& json::Value::operator=(const Value &other)
 		p->o = other.p->o;
 		break;
 	}
+	return *this;
+}
+
+// (other may be inside this: its p is taken before this one's goes)
+Value& json::Value::operator=(Value &&other) noexcept
+{
+	if(this == &other) return *this;
+	ValuePrivate *old = p;
+	p = other.p;
+	type = other.type;
+	value = other.value;
+	other.p = NULL;
+	other.type = T_UNDEFINED;
+	delete old;
 	return *this;
 }
 
@@ -396,6 +415,18 @@ Value& json::Value::set(const std::string &key, const Value &value){
 	return set_key(key, value);
 }
 
+Value& json::Value::set(const char *key, Value &&value){
+	if(value.type != T_UNDEFINED && type == T_OBJECT)
+		p->o[key] = std::move(value);
+	return *this;
+}
+
+Value& json::Value::set(const std::string &key, Value &&value){
+	if(value.type != T_UNDEFINED && type == T_OBJECT)
+		p->o[key] = std::move(value);
+	return *this;
+}
+
 Value& json::Value::set_at(unsigned int index, const Value &value){
 	if(value.type == T_UNDEFINED)
 		return *this;
@@ -412,6 +443,25 @@ Value& json::Value::append(const Value &value){
 		return *this;
 	if(type == T_ARRAY)
 		p->a.push_back(value);
+	return *this;
+}
+
+Value& json::Value::set_at(unsigned int index, Value &&value){
+	if(value.type == T_UNDEFINED)
+		return *this;
+	if(type == T_ARRAY){
+		if(p->a.size() < index + 1)
+			p->a.resize(index + 1);
+		p->a[index] = std::move(value);
+	}
+	return *this;
+}
+
+Value& json::Value::append(Value &&value){
+	if(value.type == T_UNDEFINED)
+		return *this;
+	if(type == T_ARRAY)
+		p->a.push_back(std::move(value));
 	return *this;
 }
 
@@ -455,19 +505,40 @@ int json::Value::save_file(const char *path, int flags) const {
 	return 0;
 }
 
+// Appended into one string: a stream and a string per value made a large
+// document's stringify mostly allocation (a stream's operator per value)
+static void appendJsonString(std::string &out, const std::string &plain)
+{
+	for(char c : plain)
+		if(c < 32 || c > 126 || c == '"' || c == '\\'){
+			out += serializeJsonString(plain);
+			return;
+		}
+	out += '"';
+	out += plain;
+	out += '"';
+}
+
 std::string json::Value::stringify(int flags) const {
+	std::string out;
+	stringify_to(out);
+	return out;
+}
+
+void json::Value::stringify_to(std::string &out) const {
 	switch(type){
 	case T_UNDEFINED:
-		return "undefined";
+		out += "undefined";
+		return;
 	case T_NULL:
-		return "null";
+		out += "null";
+		return;
 	case T_BOOL:
-		return value.b ? "true" : "false";
-	case T_INT: {
-			std::ostringstream os(std::ios::binary);
-			os<<value.i;
-			return os.str();
-		}
+		out += value.b ? "true" : "false";
+		return;
+	case T_INT:
+		out += std::to_string((long long)value.i);
+		return;
 	case T_FLOAT: {
 			// Silently convert NaN and infinity to valid JSON numbers
 			double f = value.f;
@@ -478,45 +549,86 @@ std::string json::Value::stringify(int flags) const {
 			// Convert to string. A whole number (a time in ms, which the
 			// parser reads as a double past int32) exactly: six digits
 			// would round Aitta's page time up past the next page's
-			std::ostringstream os(std::ios::binary);
-			if(f == std::floor(f) && std::fabs(f) < 9007199254740992.0)
-				os<<(int64_t)f;
-			else
-				os<<f;
-			return os.str();
+			if(f == std::floor(f) && std::fabs(f) < 9007199254740992.0){
+				out += std::to_string((long long)f);
+				return;
+			}
+			// (a stream's formatting, as it always was: the C locale's
+			// whatever setlocale() says; one stream per thread)
+			static thread_local std::ostringstream os(std::ios::binary);
+			os.str(std::string());
+			os<<f;
+			out += os.str();
+			return;
 		}
 	case T_STRING:
-		return serializeJsonString(p->s);
+		appendJsonString(out, p->s);
+		return;
 	case T_ARRAY: {
-			std::ostringstream os(std::ios::binary);
-			os<<"[";
+			out += '[';
 			bool first = true;
 			for(const auto &v : p->a){
-				if(!first) os<<",";
+				if(!first) out += ',';
 				first = false;
-				os<<v.stringify();
+				v.stringify_to(out);
 			}
-			os<<"]";
-			return os.str();
+			out += ']';
+			return;
 		}
 	case T_OBJECT: {
-			std::ostringstream os(std::ios::binary);
-			os<<"{";
+			out += '{';
 			bool first = true;
 			for(const auto &it : p->o){
-				if(!first) os<<",";
+				if(!first) out += ',';
 				first = false;
-				os<<serializeJsonString(it.first)<<":"<<it.second.stringify();
+				appendJsonString(out, it.first);
+				out += ':';
+				it.second.stringify_to(out);
 			}
-			os<<"}";
-			return os.str();
+			out += '}';
+			return;
 		}
 	}
-	return "<invalid value>";
+	out += "<invalid value>";
 }
 
-bool json::Value::operator==(const Value &value) const {
-	return (stringify() == value.stringify());
+// Whether the two stringify() the same, without stringifying all of them:
+// a number as written (1 and 1.0, two doubles the same to six digits)
+bool json::Value::operator==(const Value &other) const {
+	const bool num = type == T_INT || type == T_FLOAT;
+	if(num && (other.type == T_INT || other.type == T_FLOAT)){
+		if(type == T_INT && other.type == T_INT)
+			return value.i == other.value.i;
+		if(type == T_FLOAT && other.type == T_FLOAT && value.f == other.value.f)
+			return true;
+		return stringify() == other.stringify();
+	}
+	if(type != other.type)
+		return false;
+	switch(type){
+	case T_BOOL:
+		return value.b == other.value.b;
+	case T_STRING:
+		return p->s == other.p->s;
+	case T_ARRAY:
+		if(p->a.size() != other.p->a.size())
+			return false;
+		for(size_t i = 0; i < p->a.size(); i++)
+			if(!(p->a[i] == other.p->a[i]))
+				return false;
+		return true;
+	case T_OBJECT: {
+			if(p->o.size() != other.p->o.size())
+				return false;
+			auto b = other.p->o.begin();
+			for(auto a = p->o.begin(); a != p->o.end(); ++a, ++b)
+				if(a->first != b->first || !(a->second == b->second))
+					return false;
+			return true;
+		}
+	default: // undefined, null
+		return true;
+	}
 }
 
 const Value json::Value::deepcopy() const {
@@ -630,19 +742,19 @@ const Value& json::Iterator::operator*() const {
 
 /* json */
 
-const Value json::object(){
+Value json::object(){
 	Value v;
 	v.type = Value::T_OBJECT;
 	v.p = new ValuePrivate();
 	return v;
 }
-const Value json::array(){
+Value json::array(){
 	Value v;
 	v.type = Value::T_ARRAY;
 	v.p = new ValuePrivate();
 	return v;
 }
-const Value json::null(){
+Value json::null(){
 	Value v;
 	v.type = Value::T_NULL;
 	return v;
@@ -654,7 +766,7 @@ const Value json::null(){
 static const int MAX_DEPTH = 256;
 struct TooDeep {};
 
-const Value json::load_sajson(const sajson::value &src)
+Value json::load_sajson(const sajson::value &src)
 {
 	try {
 		return load_sajson_depth(src, 0);
@@ -663,7 +775,7 @@ const Value json::load_sajson(const sajson::value &src)
 	}
 }
 
-const Value json::load_sajson_depth(const sajson::value &src, int depth)
+Value json::load_sajson_depth(const sajson::value &src, int depth)
 {
 	if(depth > MAX_DEPTH)
 		throw TooDeep();
@@ -701,7 +813,7 @@ const Value json::load_sajson_depth(const sajson::value &src, int depth)
 	return Value();
 }
 
-const Value json::load_string(const char *string, json_error_t *error){
+Value json::load_string(const char *string, json_error_t *error){
 	//printf("load_string(%s)\n", string);
 	if(error){
 		error->line = -1;
@@ -746,7 +858,7 @@ const Value json::load_string(const char *string, json_error_t *error){
 	}
 }
 
-const Value json::load_file(const char *path, json_error_t *error){
+Value json::load_file(const char *path, json_error_t *error){
 	if(error){
 		error->line = -1;
 		error->column = -1;
