@@ -1053,6 +1053,8 @@ local function pick(mx, my, skip, nearest)
 		end
 	end
 	local free_id, ft_at
+	-- (the looks met, of how many: a check's, kit_cam_where)
+	local met = 0
 	for _, e in ipairs(all) do
 		if e.pos and not (skip and skip[e.id]) then
 			local n = P.nodes[e.id]
@@ -1060,14 +1062,16 @@ local function pick(mx, my, skip, nearest)
 			-- before the node has come)
 			local t
 			-- (the plan: its cell, the box drawn round it there. A look
-			-- far off the ray by its box's reach round its node not met:
-			-- entity_t is a dozen sandbox calls)
+			-- far off the ray by its box's reach round where it is drawn not
+			-- met: entity_t is a dozen sandbox calls. [KIT_EDITOR_PAN_ZOOM]
+			-- One under a parent too (a Brimstone game's 261 of 305 were
+			-- each met, 50-90 ms a pick on the web: the hover's each frame,
+			-- the wheel's again))
 			if S.view ~= "2d" and n and not P.preview[e.id] and n.box and
 					n.look then
-				local r, b = n.raw, n.box
+				local r, b = n.at_xyz, n.box
 				local far = false
-				if r and not P.pose[e.id] and not n.slide_to and
-						not (n.pid and n.pid ~= 0) then
+				if r and not P.pose[e.id] and not n.slide_to then
 					local wx, wy, wz = r[1] - oo[1], r[2] - oo[2], r[3] - oo[3]
 					local tt = wx * dd[1] + wy * dd[2] + wz * dd[3]
 					local qx, qy, qz = wx - dd[1] * tt, wy - dd[2] * tt, wz - dd[3] * tt
@@ -1078,6 +1082,7 @@ local function pick(mx, my, skip, nearest)
 				end
 				if not far then
 					t = K.entity_t(n, o, v)
+					met = met + 1
 				end
 			else
 				t = cell_t(drawn_xyz(e))
@@ -1098,6 +1103,7 @@ local function pick(mx, my, skip, nearest)
 			id, et = free_id, ft_at
 		end
 	end
+	S.pick_met = {met, #all}
 	local hit, front, vt
 	if O.solid then
 		hit, front, vt = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z}, O.solid,
@@ -5070,6 +5076,9 @@ magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 			.. "(%s)", p.x, p.y, p.z, data:GetString("Param")))
 	log:info(string.format("kit editor: the plan %.2f across (%s)", S.span or 0,
 			data:GetString("Param")))
+	local pm = S.pick_met or {0, 0}
+	log:info(string.format("kit editor: the last pick met %d looks of %d (%s)",
+			pm[1], pm[2], data:GetString("Param")))
 	-- [KIT_WALK_HERE] and the walker's
 	local w, d = O.camera.worldPosition, O.camera.worldDirection
 	log:info(string.format("kit editor: the walk camera at %.2f %.2f %.2f looking "

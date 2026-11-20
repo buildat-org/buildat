@@ -1411,6 +1411,8 @@ local function update_play(_, data)
 			if not n.at or (n.at - p):Length() > 1e-4 or
 					not same_q(q, n.at_q) then
 				n.at, n.at_q = magic.Vector3(p.x, p.y, p.z), q
+				-- (as numbers, for the editor's pick: no sandbox reads)
+				n.at_xyz = {p.x, p.y, p.z}
 				n.look.position = n.at
 				n.look.rotation = q * n.look_rot
 				calm = false
