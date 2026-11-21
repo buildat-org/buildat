@@ -137,9 +137,10 @@ return {
 		-- (4z37i: Brake, Gas, Handbrake, each brake beside Gas)
 		touch_buttons = {{"Handbrake", "jump", "low"}},
 		touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}},
-		help = {{"[forward]/[back]", "gas, brake", "f"},
-			{"[left]/[right]", "steer", "r"}, {"[jump]", "handbrake", "jump"},
-			{"[fire]/Left click", "fire"}},
+		help = {{"{key:forward}/{key:back}", "gas, brake", "f"},
+			{"{key:left}/{key:right}", "steer", "r"},
+			{"{key:jump}", "handbrake", "jump"},
+			{"{key:fire}/Left click", "fire"}},
 		touch_help = {{"Gas/Brake", "drive", "f"}, {"Stick", "steer", "r"},
 			{"Handbrake", "slide", "jump"}}},
 	params = {

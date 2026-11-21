@@ -490,12 +490,12 @@ magic.SubscribeToEvent("Update", function(_, d)
 	local hint = editing and "" or kit.movement_help() or TOUCH and (seated and
 			"Stick: move  Exit: leave the seat" or
 			"Stick: walk  drag: look  tap: use/dig  hold: place") or
-			kit.key_text(seated and "[forward][left][back][right] [jump]: " ..
-			"move  [exit]: leave the seat  Esc: menu" or
-			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
-			"dig  right: place  " .. (kit.building() == "inventory" and
-			"[inventory]: inventory  " or "[voxel1]-[voxel10]: voxel  ") ..
-			"[edit]: edit  Esc: menu")
+			kit.key_text(seated and "{key:forward}{key:left}{key:back}" ..
+			"{key:right} {key:jump}: move  {key:exit}: leave the seat  Esc: " ..
+			"menu" or "{key:forward}{key:left}{key:back}{key:right} " ..
+			"{key:jump}: walk, jump  left: use or dig  right: place  " ..
+			(kit.building() == "inventory" and "{key:inventory}: inventory  " or
+			"{key:voxel1}-{key:voxel10}: voxel  ") .. "{key:edit}: edit  Esc: menu")
 	if hint ~= help_text.text then
 		help_text:SetText(hint)
 		log:info('workbench: the hint "' .. hint .. '"')

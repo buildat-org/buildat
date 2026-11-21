@@ -1464,7 +1464,7 @@ local function update_play(_, data)
 		end
 		n.calm = calm and (n.calm or 0) + 1 or 0
 		if n.text then
-			-- [KIT_INPUT_ACTIONS] "[use]": this player's key for it
+			-- [KIT_INPUT_ACTIONS] {key:use}: this player's key for it
 			local v = shown(parse(n.node:GetVar("kit:" ..
 					tostring(show.look.text))))
 			-- [KIT_TEMPLATES] look.text_idle: drawn while the state has nothing,

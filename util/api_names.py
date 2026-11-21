@@ -474,6 +474,9 @@ def kit_surface():
     srv["reserved text {<word>:...}"] = ""
     for w in cpp_strings(kc, "TEXT_PLACEHOLDERS[] =", "};"):
         srv["reserved text {%s:...}" % w] = ""
+    # [KIT_DEPRECATE] the old key hint, while input.lua's key_text reads it
+    if 's:gsub("%[([%w_]+)%]"' in kit_read(KIT + "/client_lua/input.lua"):
+        srv["reserved text [<action>]"] = ""
     injected = {}
     for p in re.findall(r'\\"(\w+)\\" is Kit\'s parameter', kc):
         at = kc.index('ps.set("%s", ' % p)

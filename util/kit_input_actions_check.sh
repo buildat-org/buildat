@@ -14,7 +14,9 @@
 #      click] ... [R] ... [I] ... Space ... (unbound) {key:nosuch}
 #      {foo:bar}" (use: no key by default, the left click;
 #      [KIT_TEXT_PLACEHOLDER] {key:<action>} bare, an unknown action and
-#      word as written, the server warning kitboss of {foo:...} after the edit);
+#      word as written, the server warning kitboss of {foo:...} after the edit
+#      and at Play; [KIT_DEPRECATE] of the old [use] and [fire] too, naming
+#      {key:use} and {key:fire});
 #      R held: the server's "Action fire pressed", counter 4 counts once,
 #      counter 6 at least once; the key store has Kit's actions and the
 #      world's (the keys page); there Jump rebound to J: the sign shows
@@ -264,6 +266,7 @@ echo "ok: M muted and unmuted in the editor, not in a field nor over the world's
 want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, Space to jump, (unbound) {key:nosuch} {foo:bar}"' \
 	'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, J to jump, (unbound) {key:nosuch} {foo:bar}"' \
 	"kit: warning: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's" \
+	"kit: warning: entity 5's kit/sign text: [use] is the old key hint (deprecated, removable at Kit API level 2): {key:use} instead" \
 	"kit: the gamepad read"
 k=$t/cu_kitboss/keys.txt
 grep -aqP '^action\t[^\t]+\tforward\tW\tmove.forward\t' "$k" &&
@@ -271,10 +274,11 @@ grep -aqP '^action\t[^\t]+\tforward\tW\tmove.forward\t' "$k" &&
 	grep -aqP '^action\t[^\t]+\tvoxel1\t1\t' "$k" &&
 	grep -aqP '^shared\tmove.forward\tI$' "$k" ||
 	fail "the key store lacks Kit's, Workbench's or the world's actions ($k)"
-want "$s" "kitboss's edit: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's"
+want "$s" "kitboss's edit: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's" \
+	"kitboss's edit: entity 5's kit/sign text: [fire] is the old key hint (deprecated, removable at Kit API level 2): {key:fire} instead"
 grep -a "edit: entity 5's" "$s" | grep -aq "nosuch" &&
 	fail "{key:nosuch} warned of, though key is Kit's word ($s)"
-echo "ok: the sign shows kitboss's keys, {key:jump} J after the rebind, {key:item_next} (unbound), {key:nosuch} and {foo:bar} as written, {foo:...} warned of; the store has Kit's, Workbench's and the world's actions"
+echo "ok: the sign shows kitboss's keys, {key:jump} J after the rebind, {key:item_next} (unbound), {key:nosuch} and {foo:bar} as written, {foo:...} and [KIT_DEPRECATE] the old [use] warned of; the store has Kit's, Workbench's and the world's actions"
 # 4. The touch bar
 want "$t/kitbob.log" "kit: the touch bar: Jump, Menu; the world's: Fire"
 echo "ok: a touch client: the Fire button, pressed, reached the counter"

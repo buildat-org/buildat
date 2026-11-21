@@ -101,8 +101,9 @@ return {
 		touch_buttons = {{"Turn", "jump"}},
 		touch_axes = {{"Lean left", "r", -1}, {"Lean right", "r", 1}},
 		-- The help line in play, each item gone once its input is used
-		help = {{"[forward]/[back]", "gas, brake", "f"},
-			{"[left]/[right]", "lean", "r"}, {"[jump]", "turn round", "jump"}},
+		help = {{"{key:forward}/{key:back}", "gas, brake", "f"},
+			{"{key:left}/{key:right}", "lean", "r"},
+			{"{key:jump}", "turn round", "jump"}},
 		touch_help = {{"Gas/Brake", "ride", "f"}, {"Stick", "lean", "r"},
 			{"Turn", "turn round", "jump"}}},
 	params = {
