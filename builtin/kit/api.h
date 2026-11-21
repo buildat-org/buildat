@@ -1438,6 +1438,9 @@ namespace interface
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
+// [KIT_SINGLE] A place (a client's, not an agent's) refused for a single
+// type its holder has is answered with "kit:single" {"id": the one there,
+// "text": "place: why"} instead: the editor selects that one.
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
 // outputs, gizmo, usable, root}}, "authored": the row (positions and
