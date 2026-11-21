@@ -8,7 +8,7 @@
 # scene "world" (kit/game_rules with hand_level 0, a spawner, a region to
 # dig in, a giver of kit/pickaxe, kit/stone and kit/dirt to dig, a timer
 # of 3 repeats whose "left" a ui text shows, a kit/arena placed away from
-# the spawn: 1 player, no countdown, a 120 s round, time_up "most", map
+# the spawn: 1 player, no countdown, a 120 s round, time_up "most", maps
 # "map") and a scene "map" (its own kit/terrain, teams Red and Blue, a text
 # the arena's status links into). Then,
 # Running:
@@ -105,7 +105,7 @@ EOF
 	set_ 10 duration 120
 	set_ 10 results 24
 	set_ 10 time_up '"most"'
-	set_ 10 map '"map"'
+	set_ 10 maps '"map"'
 	for v in '2, 1, 2] kit/stone' '3, 1, 2] kit/stone' '4, 1, 2] kit/dirt'; do
 		edit "{\"op\": \"set_voxel\", \"pos\": [${v% *}, \"voxel\": \"${v##* }\"}"
 	done

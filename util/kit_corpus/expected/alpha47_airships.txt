@@ -11,7 +11,7 @@ W kit: World: entity N's kit/ui_text text: [use] is the old key hint (deprecated
 [composition]
 entities 53 (kit 1, api 1)
 2 1 scene
-3 2 kit/terrain@2#4aa9ea1d/97d170e1
+3 2 kit/terrain@2#beaf3abc/97d170e1
 4 1 kit/game_rules@2#9e7ed0d3/97d170e1 kit/environment@1#85a68886/97d170e1
 5 2 kit/region@1#33801648/97d170e1
 6 2 kit/trigger_zone@1#d30a4cf8/97d170e1
@@ -22,7 +22,7 @@ entities 53 (kit 1, api 1)
 11 2 kit/sign@1#daba76db/97d170e1
 12 2 kit/sign@1#4256b842/97d170e1
 13 2 kit/ui_text@2#a33ef5a1/97d170e1
-14 2 kit/arena@3#224ee1b1/ff3e0101
+14 2 kit/arena@3#c51a38c7/ff3e0101
 15 2 kit/symmetry@2#a40ef902/97d170e1
 16 2 kit/terrain_region@1#e4685470/97d170e1
 17 2 kit/supply@1#159b88ab/97d170e1
@@ -94,7 +94,7 @@ kit: Entity 55's kit/creature_walker steps in play
 kit: Entity 56's kit/creature_walker steps in play
 [keys]
 kit/airship ceiling climb drag floor mass rate substeps thrust top_speed turn_rate
-kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map_pick maps max_players max_rounds own_look players ready results score_to_win size status_line time_up
 kit/button color color_down hold own_look sound_press use
 kit/environment ambient cloud_cover cloud_height cloud_wind_dir cloud_wind_speed day_minutes fog_end fog_start gravity intensity latitude lighting moon north season sky stars sun time weather weather_fade
 kit/explosive armed blink_color blink_fast blink_slow color friendly_fire fuse hurt kill own_look power radius share size sound sound_every
@@ -113,7 +113,7 @@ kit/spawner copy every max own_look players prefab spread
 kit/supply color every money own_look repair size
 kit/symmetry angle enabled mode slice slices
 kit/team color friendly_fire name own_look win_score
-kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/terrain biome border caves decorations depth dig flatten generator height level materials place sea_level seed size sky_light soil_depth spread surface width
 kit/terrain_region biome decorations generator height level seed shape size soil_depth spread
 kit/trigger_zone deadly size
 kit/turret cooldown pitch_max pitch_min pitch_rate rate shot_damage shot_gravity shot_speed turn_rate

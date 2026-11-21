@@ -510,7 +510,6 @@ type kit/arena param hud_y | {"default": 6.5, "kind": "number", "max": 400, "min
 type kit/arena param join_team | {"choices": ["fewest", "lowest_score", "backfill"], "default": "fewest", "kind": "string"}
 type kit/arena param join_window | {"default": 0, "kind": "number", "max": 86400, "min": 0}
 type kit/arena param late_join | {"choices": ["queue", "join", "parallel", "join_or_parallel"], "default": "queue", "kind": "string"}
-type kit/arena param map | {"default": "", "kind": "string"}
 type kit/arena param map_pick | {"choices": ["round_robin", "random", "signal"], "default": "round_robin", "kind": "string"}
 type kit/arena param maps | {"default": "", "kind": "string"}
 type kit/arena param max_players | {"default": 8, "kind": "number", "max": 64, "min": 1}
@@ -541,6 +540,7 @@ type kit/arena state fresh
 type kit/arena state last
 type kit/arena state left
 type kit/arena state map_at
+type kit/arena state next_map
 type kit/arena state outcome
 type kit/arena state overtime
 type kit/arena state own | per_player

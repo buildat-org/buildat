@@ -32,9 +32,10 @@
 -- "keep" (the round's), "clear" (nothing) or "living" (the round's for
 -- one who did not die in it, else nothing). Health starts full in a
 -- round (its player entity is the round's own).
--- [KIT_CTF] `map`: the scene the round is played in ("": the arena's
--- own): the session's players go into its copy, its teams the round's,
--- and back to the arena's scene at the end. `time_up`: "draw" (the
+-- [KIT_CTF] A round on a map (`maps`, below; none: the arena's own
+-- scene): the session's players go into its copy, its teams the round's
+-- (the next map's outside a round), and back to the arena's scene at the
+-- end. `time_up`: "draw" (the
 -- default) or "most" (the team with the most points wins; a tie is
 -- overtime, shown, until the scores differ; [KIT_API_1] with no teams the
 -- player with the most kit/score points). Its UI is drawn in its own
@@ -70,7 +71,7 @@
 -- most). The players a round starts with are split by the fewest, the
 -- first on a tie.
 -- [KIT_MAP_ROTATION] `maps`: scenes of the composition to play the rounds
--- in, by name, comma separated, `map` used only without them. A round takes
+-- in, by name, comma separated (one: every round on it). A round takes
 -- the next map, shown in the lobby's status; `map_pick` says what is next
 -- after a round starts: "round_robin" (the list's next, then its first
 -- again), "random" (any of the list, the same one again too) or "signal"
@@ -206,6 +207,7 @@ local function lobby_status(c)
 		s = "Waiting for players: " .. q .. " of " .. p
 	end
 	local _, nx = maps_of(c)
+	c.state.next_map = nx or ""
 	if nx then
 		s = s .. "|Next map: " .. nx
 	end
@@ -451,7 +453,6 @@ return {
 			choices = {"kit", "clear", "keep"}},
 		at_end = {type = "string", default = "before",
 			choices = {"before", "keep", "clear", "living"}},
-		map = {type = "string", default = "", choices_from = "scenes"},
 		maps = {type = "string", default = "", choices_from = "scene_list"},
 		map_pick = {type = "string", default = "round_robin",
 			choices = {"round_robin", "random", "signal"}},
@@ -482,6 +483,8 @@ return {
 		rounds = {default = {}},
 		-- [KIT_MAP_ROTATION] The next round's place in `maps`
 		map_at = {default = 1},
+		-- Its scene's name, whose teams Kit gives it outside a round
+		next_map = {default = ""},
 		-- [KIT_READY_UP] {["player:<id>"] = true}
 		ready = {default = {}},
 		-- The players sent into each round ({[id] = {was, n}}: n since its

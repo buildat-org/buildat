@@ -1507,7 +1507,7 @@ namespace interface
 // id), id 0 the default) and ends one it made (c:session_end(id));
 // on_session_start(c, id) and on_session_end(c, id) are its own.
 // [KIT_MAP_ROTATION] c:session_start(players, map, others): `map` the scene
-// its players go into (else the maker's `map` parameter), `others` scenes
+// its players go into (nil: the maker's own), `others` scenes
 // whose entities run nothing in this session, less `map` and the maker's own
 // scene. c.scenes, for a `reads_teams = true` type, the composition's scenes. In a
 // session c.session is its id (0 in the default) and c:session_end() ends
@@ -1580,10 +1580,11 @@ namespace interface
 // round as it starts, so the round's copies of what it links to hear it
 // (kit/pause_menu_action's "hide": "To the lobby" out of a round only);
 // "started" and "ended" stay the default round's.
-// [KIT_CTF] kit/arena's `map` (a scene's name; "" none: the round in the
+// [KIT_CTF] kit/arena's map (of its `maps`; none: the round in the
 // arena's own scene): the session's players go into that scene's copy
 // (its spawn, then their team's pad), its teams the round's (c.teams, a
-// `reads_teams = true` type's with a `map`), and at the session's end back to
+// `reads_teams = true` type's; outside a round its `next_map` state's
+// scene's), and at the session's end back to
 // the arena's scene (its spawn). `time_up`: "draw" (the default) or
 // "most": the team with the most points wins at the timer's end
 // ([KIT_API_1] with no teams the player with the most kit/score points,
@@ -1591,7 +1592,7 @@ namespace interface
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.
-// [KIT_MAP_ROTATION] `maps` (scene names, comma separated; over `map`) and
+// [KIT_MAP_ROTATION] `maps` (scene names, comma separated) and
 // `map_pick` ("round_robin", "random", "signal"), inputs "next_map" and
 // "prev_map" in the default round: each round's map, shown as "Next map:" in
 // the lobby's status; a round's own c.teams are its map's, and a map of the
