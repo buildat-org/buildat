@@ -296,7 +296,8 @@ namespace interface
 //           extent = "<position param>", depth = n, solid = true,
 //           voxel = "<voxel material>",
 //           state = "<shared state key>", when = {color, solid, scale =
-//           {x, y, z}, swing = true, mirror = true}}  -- drawn where it
+//           {x, y, z}, swing = true, mirror = true, vanish = "fly"}}
+//                            -- drawn where it
 //                               is on every client, in both modes (Stopped: the
 //                               start's state), the state `text` over
 //                               it. extent: a box over those cells from
@@ -316,7 +317,13 @@ namespace interface
 //                               kept), swing it a quarter round its -x
 //                               edge (a door; towards +z, or with
 //                               mirror towards -z [KIT_DOOR_MIRROR]:
-//                               "param:mirror", kit/door's). kit/door,
+//                               "param:mirror", kit/door's);
+//                               [KIT_COLLECTIBLE] vanish "fly": as the
+//                               state turns on (not on a look drawn
+//                               anew), its body first shrinks, turns
+//                               half round and rises 0.8 over 0.35 s
+//                               (module.lua's VANISH_TIME), else
+//                               ("none") at once. kit/door,
 //                               gate, button, lever and key_door are
 //                               such objects
 //                               ([KIT] stage 4c; before, voxels they
@@ -1898,6 +1905,17 @@ namespace interface
 // player); kit/part's shape "sphere"; the prefabs kit/hut (voxels) and
 // kit/bomb_look; the sound kit/hiss. util/kit_ctf_check.sh composes a
 // capture the flag of them.
+// [KIT_COLLECTIBLE] kit/collectible (its file says how): a gem, coin or
+// crate each player takes for themselves by walking into its zone (`size`;
+// a per_player state, taken for one and still there for the others); a
+// take sends "pickup" (its `value`, by the player), Kit's world event
+// "pickup" and its `sound`; it is back for that player after `again`
+// seconds (0: never by itself) and by its "reset" input (set off by a
+// player or a bot: theirs; by anything else: everyone's). Its client part
+// hides it at once (e:predict), its look's when.vanish (`vanish`: "fly"
+// or "none") drawing the going. A run counts a player's takes by linking
+// pickup to an input of its own and resets the ones linked to it there
+// (c.linked_in, c:send(id, "reset", nil, by): Crag Trial's crag_run).
 //
 // **The World** ([KIT] stage 4e; terrain.h says how it is made): one
 // game-wide kit/terrain on the app root, its parameters the choices -- the

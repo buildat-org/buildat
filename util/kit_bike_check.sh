@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~30 s (2026-11-15)
-# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
+# covers: apps/workbench/templates/crag_trial/** builtin/kit/types/collectible.lua builtin/kit/types/collectible.client.lua builtin/kit/box/box.c builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
 # [KIT_PLANE] stage 4: a movement of a project's own, the Crag Trial template
 # (local/crag_bike, its gems and run) on Workbench; one server, kitboss (the
 # admin) and kitbob on a headless weston's Xwayland of the check's own:
@@ -60,9 +60,9 @@
 #      sign, Undo brings it back; the lobby, The Crags (sign.png);
 #      (4z37h) the pause menu (Escape): no Retry or To lobby in the lobby,
 #      both in the run; Retry starts the run over, To lobby the lobby;
-#      [KIT_STILL_LOOKS] a gem version whose on_enter takes nothing: gem 11
-#      moved onto the bike drawn taken by its prediction, back after its
-#      second.
+#      [KIT_STILL_LOOKS] a gem type whose on_enter takes nothing (with
+#      kit/collectible's client part): one moved onto the bike drawn taken
+#      by its prediction, back after its second.
 # And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
 # (movement.help), W's and A's gone once used, Space's last after the gem:
 # the line gone, kept in Kit's storage (kit_hints).
@@ -88,7 +88,7 @@ zip=$("$here/util/pack_templates.sh" "$t/key" "$t/out" crag_trial 2> "$t/pack.er
 	fail "the pack ($t/pack.err)"
 "$b" aitta install "$zip" "$t/user" > "$t/install.txt" 2>&1 || fail "the install ($t/install.txt)"
 fp=$(aitta_fp "$t/pub")
-for f in crag_bike.lua crag_bike.client.lua crag_gem.lua crag_gem.client.lua crag_run.lua; do
+for f in crag_bike.lua crag_bike.client.lua crag_run.lua; do
 	[ -f "$t/user/installed/$fp/crag_trial/1.0.0/types/$f" ] ||
 		fail "no types/$f installed ($t/install.txt)"
 done
@@ -241,7 +241,7 @@ step 5 "kit: body at" "frames 30" "event kit_body"
 seen "$CL" "$m" "kit editor: selected " && fail "7 not kept selected in Walk: $(tail -c +$((m + 1)) "$CL" | grep -a "kit editor: selected" | head -1) ($CL)"
 step 5 "kit editor: the view is 2D \(front\)" "keypress F1"
 echo "ok: Walk: the view clicked, then 7 picked in the list: 7 kept"
-for re in "The template's type local/crag_bike \([0-9]+ bytes\)" "The template's type local/crag_gem " \
+for re in "The template's type local/crag_bike \([0-9]+ bytes\)" \
 		"The template's type local/crag_run "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
@@ -249,7 +249,7 @@ step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: controls: camera side, pointer [a-z]+, movement local/crag_bike, plane z 1"
 await "$CL" 0 10 "crag_bike: the draw hook draws a bike"
 # ([KIT_PLAY_HINTS] the movement's hints, none of the walker's)
-await "$CL" 0 10 'workbench: the hint "\[W\]/\[S\]: gas, brake  \[A\]/\[D\]: lean  \[Space\]: turn round"'
+await "$CL" 0 10 'workbench: the hint "W/S: gas, brake  A/D: lean  Space: turn round"'
 await "$CL" 0 10 "kit: player [0-9]+'s body drawn by its movement"
 # [KIT_LOBBY] In the lobby (a full screen: its chat, its view, the tracks),
 # the run's clock still; [KIT_SCENE_PACKAGES] the root's track list, The
@@ -315,7 +315,7 @@ for i in $(seq 20); do
 	cmd "delay 200"
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the bike not back at the start after the crash: $bx ($CL)"
-seen "$CL" 0 'workbench: the hint "\[Space\]: turn round"' || fail "the used hints not gone ($CL)"
+seen "$CL" 0 'workbench: the hint "Space: turn round"' || fail "the used hints not gone ($CL)"
 echo "ok: throttle up the ramp's polygon, the crash an output (the run's line), back at the start; W and A's hints gone"
 # 3. A heavy step: refused, the old version kept
 python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_bike.lua" > "$t/heavy.cmd" <<'PY'
@@ -484,7 +484,7 @@ hazard_back() # try_ hazard, the bike back at the start
 # screen: his own taken is kit:mine's, not its node's
 mg=$(mark "$CL")
 cmd 'event kit_edit {"op": "move", "id": 11, "pos": [-61, 0, 1]}'
-await "$SL" "$m" 5 "local/crag_gem 11: kitboss took the gem"
+await "$SL" "$m" 5 "kit/collectible 11: kitboss took it"
 cmd 'event kit_edit {"op": "move", "id": 11, "pos": [-30, 8, 1]}'
 await "$SL" "$m" 5 "An edit by kitboss: moved 11 to \[-30"
 await "$CL" "$mg" 5 "kit: entity 11's look: taken on"
@@ -514,13 +514,15 @@ seen "$SL" "$m" "kitboss's body var finish_open" && fail "finish_open set withou
 echo "ok: over the finish line without every gem: refused, the bike rode on to x $bx"
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
 hazard_back
-cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
-await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 95 "
-step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 95, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
+cmd 'event kit_edit {"op": "place", "type": "kit/collectible", "pos": [-45, 8, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: placed kit/collectible 95 "
+cmd 'event kit_edit {"op": "set", "id": 95, "comp": 0, "param": "size", "value": [2, 2, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: set 95's kit/collectible size"
+step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 95, "comp": 0, "output": "pickup", "to": 7, "input": "gem"}'
 # (onto the bike at the start: its zone entered)
 cmd 'event kit_edit {"op": "move", "id": 95, "pos": [-61, 0, 1]}'
 await "$SL" "$m" 5 "local/crag_run 7: kitboss has 1 of 4 gems"
-seen "$SL" "$m" "local/crag_gem 95: kitboss took the gem" || fail "not gem 95's take ($SL)"
+seen "$SL" "$m" "kit/collectible 95: kitboss took it" || fail "not gem 95's take ($SL)"
 try_ gem
 try_ gem
 await "$SL" "$m" 5 "kitboss has 3 of 4 gems"
@@ -573,7 +575,7 @@ await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
 # ([KIT_BODY_VARS] the run over: the finish closed again)
 await "$SL" "$m" 5 "kitboss's body var finish_open = nil"
-await "$SL" "$m" 5 "local/crag_gem 95: back"
+await "$SL" "$m" 5 "kit/collectible 95: back"
 echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
 # [KIT_LOBBY] The finish kitboss's result card (an over screen): the time,
 # the best; the clock held till Again or the lobby's Play
@@ -718,32 +720,42 @@ step 10 "kit: ui full screen 45 up" "frames 3" 'click Button "To lobby"'
 pause_items "Continue" "Retry|To lobby"
 echo "ok: the pause menu: Retry and To lobby in the run, not in the lobby; Retry started it over, To lobby the lobby"
 echo "ok: over a server restart (Ended) still listed, the HUD's best $best; kitboss's Clear kept state emptied the sign, Undo brought it back"
-# [KIT_STILL_LOOKS] A prediction the server never confirms (a gem version
-# whose on_enter takes nothing): gem 11 moved onto the bike drawn taken,
-# then back after the prediction's second (read till then, though still)
+# [KIT_STILL_LOOKS] A prediction the server never confirms (a gem type
+# whose on_enter takes nothing, with kit/collectible's client part): one
+# placed, moved onto the bike, drawn taken, then back after the
+# prediction's second (read till then, though still)
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
 await "$SL" "$m" 10 "local/crag_run 7: kitboss: off you go"
-python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_gem.lua" \
-		"$here/apps/workbench/templates/crag_trial/types/crag_gem.client.lua" > "$t/gem.cmd" <<'PY'
+python3 -I - "$here/builtin/kit/types/collectible.client.lua" > "$t/gem.cmd" <<'PY'
 import json, sys
-s = open(sys.argv[1]).read()
-head = "on_enter = function(c, by)\n"
-assert head in s and "version = 1," in s
-s = s.replace("version = 1,", "version = 2,", 1).replace(head, head + "\t\tdo return end\n", 1)
-print("event kit_type " + json.dumps({"op": "put", "name": "crag_gem", "source": s,
-	"client": open(sys.argv[2]).read()}))
+s = """return {
+	version = 1,
+	zone = "size",
+	look = {shape = "box", size = 0.24, color = "#4cc9f0", offset = {0.5, 0.5, 0},
+		state = "taken", when = {scale = {0.01, 0.01, 0.01}}},
+	params = {size = {cat = "look", type = "position", default = {2, 2, 1}}},
+	state = {taken = {default = {}, per_player = true}},
+	on_enter = function(c, by) end,
+}
+"""
+print("event kit_type " + json.dumps({"op": "put", "name": "nogem", "source": s,
+	"client": open(sys.argv[1]).read()}))
 PY
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
 cmd "$(cat "$t/gem.cmd")"
-await "$SL" "$m" 10 "A type put \((local/)?crag_gem\) by peer [0-9]+ done"
+await "$SL" "$m" 10 "A type put \((local/)?nogem\) by peer [0-9]+ done"
+mp=$(mark "$CL")
+cmd 'event kit_edit {"op": "place", "type": "local/nogem", "pos": [-30, 8, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: placed local/nogem [0-9]+ "
+ng=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'An edit by kitboss: placed local/nogem \K[0-9]+' | head -1)
+await "$CL" "$mp" 5 "kit: entity $ng's look: taken off"
 mc=$(mark "$CL")
-cmd 'event kit_edit {"op": "move", "id": 11, "pos": [-61, 0, 1]}'
-await "$CL" "$mc" 5 "kit: entity 11's look: taken on"
-seen "$CL" "$mc" "kit: entity 11 predicted taken = true" || fail "gem 11 drawn taken without its prediction ($CL)"
-await "$CL" "$mc" 5 "kit: entity 11's look: taken off"
-seen "$SL" "$m" "local/crag_gem 11: kitboss took the gem" && fail "the gem version that takes nothing took it ($SL)"
-echo "ok: a prediction never confirmed: gem 11 drawn taken, back after its second"
+cmd "event kit_edit {\"op\": \"move\", \"id\": $ng, \"pos\": [-61, 0, 1]}"
+await "$CL" "$mc" 5 "kit: entity $ng's look: taken on"
+seen "$CL" "$mc" "kit: entity $ng predicted taken = true" || fail "gem $ng drawn taken without its prediction ($CL)"
+await "$CL" "$mc" 5 "kit: entity $ng's look: taken off"
+echo "ok: a prediction never confirmed: gem $ng drawn taken, back after its second"
 cmd "sync 2000" quit
 exec 3>&-
 wait $BOSS 2>/dev/null

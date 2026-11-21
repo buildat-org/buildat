@@ -661,6 +661,20 @@ type kit/click_to_move param speed | {"default": 5, "kind": "number", "max": 50,
 type kit/click_to_move param step_height | {"default": 0.6, "kind": "number", "max": 2, "min": 0}
 type kit/click_to_move param stop_distance | {"default": 0.3, "kind": "number", "max": 10, "min": 0.05}
 type kit/click_to_move param substeps | {"default": 1, "kind": "number", "max": 8, "min": 1}
+type kit/collectible | version 1
+type kit/collectible handlers | on_enter on_input on_timer
+type kit/collectible param again | {"default": 0, "kind": "number", "max": 3600, "min": 0}
+type kit/collectible param color | {"default": "#4cc9f0", "kind": "string"}
+type kit/collectible param look_size | {"default": 0.25, "kind": "number", "max": 8, "min": 0.02}
+type kit/collectible param offset | {"default": [0, 0, 0], "kind": "position"}
+type kit/collectible param own_look | {"default": true, "kind": "bool"}
+type kit/collectible param size | {"default": [1, 1, 1], "kind": "position"}
+type kit/collectible param sound | {"default": "kit/pickup", "kind": "sound"}
+type kit/collectible param value | {"default": "", "kind": "string"}
+type kit/collectible param vanish | {"choices": ["fly", "none"], "default": "fly", "kind": "string"}
+type kit/collectible input reset | none
+type kit/collectible output pickup | string
+type kit/collectible state taken | per_player
 type kit/controls | version 1
 type kit/controls handlers | on_input
 type kit/controls param angle | {"default": 60, "kind": "number", "max": 90, "min": 10}

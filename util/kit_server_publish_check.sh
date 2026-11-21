@@ -31,10 +31,10 @@
 #      token's publish_log: kitbob's 1.0.0 and kitboss's 1.0.1; each release
 #      on the Aitta crags', published_by its builder, buildat_version in its
 #      meta.json, its LICENSE naming the builder.
-#   5. Stopped: the project's local/crag_gem changed (a clash to come);
+#   5. Stopped: the project's local/crag_run changed (a clash to come);
 #      Remove the scene loop, its undo (back), removed again. Running,
 #      kitbob riding The Crags: install_from_aitta adds it (unlisted, the
-#      differing crag_gem the project's, logged); the track list without it
+#      differing crag_run the project's, logged); the track list without it
 #      until list_scene, then with The Loop; kitbob's run unbroken. His
 #      finish, the Lobby, The Loop picked: its run entered, the root's
 #      bike's crash by name to its run, its finish the root's lobby's
@@ -440,17 +440,17 @@ as boss
 if grep -a "kit editor: the server is" "$CL" | tail -1 | grep -q Running; then
 	step 10 "kit editor: the server is Ended" 'event kit_edit {"op": "stop"}'
 fi
-python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_gem.lua" > "$t/gem.cmd" <<'PY'
+python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_run.lua" > "$t/gem.cmd" <<'PY'
 import json, sys
 s = open(sys.argv[1]).read()
 assert "version = 1," in s
 s = s.replace("version = 1,", "version = 2,", 1) + "-- the project's own\n"
-print("event kit_type " + json.dumps({"op": "put", "name": "crag_gem", "source": s}))
+print("event kit_type " + json.dumps({"op": "put", "name": "crag_run", "source": s}))
 PY
 m=$(mark "$SL")
 cmd "$(cat "$t/gem.cmd")"
-await "$SL" "$m" 10 "A type put \(local/crag_gem\) by peer [0-9]+ (done|refused)"
-seen "$SL" "$m" "A type put \(local/crag_gem\) by peer [0-9]+ done" || fail "crag_gem not put ($SL)"
+await "$SL" "$m" 10 "A type put \(local/crag_run\) by peer [0-9]+ (done|refused)"
+seen "$SL" "$m" "A type put \(local/crag_run\) by peer [0-9]+ done" || fail "crag_run not put ($SL)"
 edit 5 "An edit by kitboss: removed the scene loop \([0-9]+ entities changed\)" \
 	'{"op": "remove_scene", "name": "loop"}'
 edit 5 "An undo by kitboss: [0-9]+ entities put back" '{"op": "undo"}'
@@ -464,13 +464,13 @@ step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 await "$CL" 0 20 "kit: ui full screen 45 up"
 step 10 "kit: ui full screen none" "frames 5" 'click Button "The Crags*"'
 await "$SL" "$m" 10 "local/crag_run 7: kitbob: off you go, the run starts over"
-echo "ok: Stopped, crag_gem changed, Remove the scene loop: undone, removed again; the World's own refused; Running, kitbob riding The Crags"
+echo "ok: Stopped, crag_run changed, Remove the scene loop: undone, removed again; the World's own refused; Running, kitbob riding The Crags"
 madd=$(mark "$SL")
 mcp add "$key" "$t/added"
 # (loop_2: the removed scene's World and rows stay, its name with them)
 sc=$(cat "$t/added")
 await "$SL" "$madd" 5 "adds the scene $sc \(crags/loop 1\.0\.1 from [^)]*\): .* \(Running: unlisted\)"
-await "$SL" "$madd" 5 "The scene $sc's local/crag_gem differs from the project's"
+await "$SL" "$madd" 5 "The scene $sc's local/crag_run differs from the project's"
 as boss
 mlist=$(mark "$SL")
 for i in $(seq 10); do
@@ -487,7 +487,7 @@ tail -c +$((madd + 1)) "$SL" | head -c $((mlist - madd)) | grep -aq "scenes: .*$
 await "$SL" "$mlist" 5 "kit/ui_scene_list 47: scenes: world=The Crags/buildat, $sc=The Loop/celeron55"
 seen "$SL" "$madd" "kitbob: off you go|kit/lobby 44: kitbob: playing ->" &&
 	fail "kitbob's run broken by the add ($SL)"
-echo "ok: The Loop added unlisted (the clashing crag_gem the project's), listed: in the track list; kitbob's run on The Crags unbroken"
+echo "ok: The Loop added unlisted (the clashing crag_run the project's), listed: in the track list; kitbob's run on The Crags unbroken"
 # kitbob's finish, the lobby, The Loop: entered, the root's links by name
 as bob
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
