@@ -796,9 +796,10 @@ local function game_close(silent)
 	local g = game
 	game = nil
 	magic.UnsubscribeFromEvent("KeyDown", g.key_sub)
-	-- A leave with the window open took them already: forget_game_ui()
+	magic.UnsubscribeFromEvent("MouseButtonDown", g.press_sub)
+	magic.UnsubscribeFromEvent("MouseButtonUp", g.release_sub)
+	-- A leave with the window open took it already: forget_game_ui()
 	-- runs before the sandbox reset that closes it ([VIEW_SETTINGS_LOCAL])
-	pcall(function() g.backdrop:Remove() end)
 	pcall(function() g.win:Remove() end)
 	if not silent and g.o.on_close then
 		g.o.on_close()
@@ -812,19 +813,17 @@ function M.show_game(o, app_key, extra)
 	local root = magic.ui.root
 	local g = {o = o}
 	game = g
-	-- **Black behind it, over the game's windows**, as builtin/accounts'
-	-- Server window a game opens
-	g.backdrop = root:CreateChild("BorderImage")
-	g.backdrop.color = magic.Color(0, 0, 0, 1)
-	g.backdrop.priority = 101
-	g.backdrop:SetFixedSize(root.width, root.height)
 	local win = root:CreateChild("Window")
 	g.win = win
 	-- Its own style, for a game whose root has none
 	win.defaultStyle = magic.cache:GetResource("XMLFile",
 			"own:ui_utils/res/style.xml")
 	win:SetStyleAuto()
+	-- Over the game's windows (100), the game shaded under it
+	-- ([UI_MODAL_DIM]; a solid black backdrop before), as builtin/accounts'
+	-- Server window a game opens
 	win.priority = 102
+	ui_utils.dim_behind(win, "game settings")
 	win:SetLayout(LM_VERTICAL, 8, magic.IntRect(12, 12, 12, 12))
 	win:SetAlignment(HA_CENTER, magic.VA_CENTER)
 	local width = math.min(620, root.width - 16)
@@ -1104,6 +1103,28 @@ function M.show_game(o, app_key, extra)
 		if key == KEY_ESCAPE and not ui_utils.dropdown_open() then
 			game_close()
 		end
+	end)
+	-- [UI_MODAL_DIM] **A click off it is Close**, as Escape (it was eaten):
+	-- pressed and let go off it, not off a dropdown's popup (which closes
+	-- alone) nor while the keys' page is up (a key being bound)
+	local function off()
+		local sc = magic.ui.scale or 1
+		local m = magic.input:GetMousePosition()
+		local p, sz = win.screenPosition, win.size
+		local x, y = m.x / sc, m.y / sc
+		return not g.keys and (x < p.x or y < p.y or x >= p.x + sz.x or
+				y >= p.y + sz.y)
+	end
+	local pressed_off = false
+	g.press_sub = magic.SubscribeToEvent("MouseButtonDown", function()
+		pressed_off = not ui_utils.dropdown_open() and off()
+	end)
+	g.release_sub = magic.SubscribeToEvent("MouseButtonUp", function()
+		if pressed_off and off() and game == g then
+			log:info("Game settings: a click off it")
+			game_close()
+		end
+		pressed_off = false
 	end)
 	if o.keys_only then
 		g.open_keys()

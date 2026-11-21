@@ -827,6 +827,7 @@ local function open_window(desc, width, on_escape, opts)
 	w:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(12, 12, 12, 12))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	require("buildat/extension/ui_utils").safe.dim_behind(w, desc)
 	-- Over whatever a server draws (its join window is at 100): this
 	-- side's dialogs are the ones the player has to be able to trust
 	root.priority = 1000

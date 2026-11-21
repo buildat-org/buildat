@@ -172,6 +172,7 @@ open = function()
 	close()
 	local w = accounts.page_window(360)
 	window = w
+	ui_utils.dim_behind(w, "pause menu")
 	-- **On the web Escape does not close it** (user, 2026-09-30): the
 	-- world takes the mouse back as it closes, and a browser grants no
 	-- pointer lock for an Escape -- Firefox took it and let it go, and

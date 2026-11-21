@@ -424,14 +424,16 @@ local function button_menu_nav(root, options)
 
 	-- The item that is the way back, by its label: "< back", "Back",
 	-- "Cancel", "< back to the launcher" and the like -- what Escape
-	-- presses. nil for a screen with none.
+	-- presses, and a tap beside the screen ([TAP_BACK]). nil for a screen
+	-- with none. ([UI_MODAL_DIM] "Keep": world_menu's delete question's
+	-- cancel, a tap beside it eaten before)
 	function nav:back_item()
 		for _, item in ipairs(items) do
 			local text = item.button:GetChild("ButtonText")
 			local label = text and text.text or ""
 			label = label:lower()
 			if label:sub(1, 1) == "<" or label == "back" or label == "cancel" or
-					label == "ok" or label == "close" then
+					label == "ok" or label == "close" or label == "keep" then
 				return item
 			end
 		end

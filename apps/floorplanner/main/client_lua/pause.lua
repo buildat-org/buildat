@@ -30,6 +30,7 @@ do
 		end
 		E.pause_win = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 		E.pause_win.priority = 95
+		require("buildat/extension/ui_utils").dim_behind(E.pause_win, "pause menu")
 		view = E.pause_win:CreateChild("ScrollView")
 		view:SetStyleAuto()
 		view.scrollBarsAutoVisible = false
