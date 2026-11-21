@@ -1930,7 +1930,10 @@ end
 
 local OVERLAY_W, OVERLAY_BOTTOM = 384, 49
 local has_overlay = buildat.get_env("BUILDAT_PAGE_HTTPS") == nil
-function M.safe.close_glyph(parent, window, on_close)
+-- close_button(parent, window, on_close): the same × where `parent`'s
+-- layout puts it, as in a window's own header row ([UI_SERVER_NARROW]):
+-- nothing keeps it at a corner
+function M.safe.close_button(parent, window, on_close)
 	local b = parent:CreateChild("Button")
 	b:SetName("close_glyph")
 	b.color = magic.Color(0, 0, 0, 0)
@@ -1958,6 +1961,11 @@ function M.safe.close_glyph(parent, window, on_close)
 		log:info("close_glyph: closing")
 		if on_close then on_close() else uistack.press_back() end
 	end)
+	return b
+end
+
+function M.safe.close_glyph(parent, window, on_close)
+	local b = M.safe.close_button(parent, window, on_close)
 	local sub
 	-- [REWORK_1019_PERF] client 5: read each frame in one guarded call,
 	-- written only where it differs; the position against the glyph's
