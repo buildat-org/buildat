@@ -12,6 +12,8 @@
 #      one answered took the other down with it, which was declined and
 #      stored so, or failed on its removed field (play.buildat.org,
 #      2026-10-29).
+#   3. (0a84) A tap beside the dialog: "not now", the request fails, nothing
+#      stored (it overwrote the yes with a Decline), and the tap is eaten.
 #   util/dialog_once_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -79,4 +81,33 @@ n=$(said "Asking the user about $F" | wc -l)
 [ "$n" = 2 ] || fail "$n asks, not the two Aittas' ($t/cl.log)"
 grep -q "\"true\",\"$F\"" "$t/cl/network_addresses.csv" ||
 	fail "not stored as accepted ($t/cl/network_addresses.csv)"
-echo "PASS: no dialog on Home for a week-old yes; two asks for one address, one dialog, one Accept for both"
+
+# 3. A tap beside the dialog is "not now": nothing stored (the old yes
+# stays), the window under it stays up
+printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","%s","stand-in","%s","%s","","",""\n' \
+	"$F" $old $old > "$t/cl/network_addresses.csv"
+cp "$t/cl/network_addresses.csv" "$t/before.csv"
+cat > "$t/cmds" <<C
+wait_log_any 30000 rows in
+text apps from aitta
+wait_log 10000 rows for "apps from aitta" in
+keypress Return
+wait_log 10000 Asking the user about $F
+frames 3
+mouse_pos 20 650
+mouse_click left
+wait_log 5000 The user put off $F
+frames 3
+event scan off
+frames 3
+quit
+C
+run_client 30 "$t/cl2.log" env BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9 \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -C "$t/cl.cache" \
+	-w 1000x700 -l 3 -o sound_mute=1 -c @"$t/cmds" ||
+	fail "the tap off: $(grep -a "Command sequence failed\|The user" "$t/cl2.log" | tail -1) ($t/cl2.log)"
+cmp -s "$t/before.csv" "$t/cl/network_addresses.csv" ||
+	fail "a tap off stored an answer: $(cat "$t/cl/network_addresses.csv")"
+grep -aq 'scan off: menu ".*: aitta"' "$t/cl2.log" ||
+	fail "the tap went on to the window under the dialog: $(grep -a "scan off: menu" "$t/cl2.log") ($t/cl2.log)"
+echo "PASS: no dialog on Home for a week-old yes; two asks for one address, one dialog, one Accept for both; a tap off it stored nothing and was eaten"

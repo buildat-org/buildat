@@ -322,7 +322,9 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	if (suggested or "") == "" then
 		log:warning("no description from the caller for "..uri)
 	end
-	local root = uistack.main:push({desc="network permission dialog"})
+	-- Its tap off is its own (below), not TAP_BACK's Escape, a Decline
+	local root = uistack.main:push({desc="network permission dialog",
+			tap_outside = false})
 	require("buildat/extension/ui_utils").client_screen(root)
 	dialogs_up = dialogs_up + 1
 	root.defaultStyle = magic.cache:GetResource(
@@ -400,7 +402,9 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		answer(false)
 	end)
 
-	function answer(accepted)
+	-- not_now: closed by a tap off it, an answer for this request only;
+	-- nothing stored, the next one asks again
+	function answer(accepted, not_now)
 		if answered then
 			return
 		end
@@ -417,10 +421,11 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		local waiting = asking[k]
 		asking[k] = nil
 		for _, f in ipairs(waiting) do
-			f(accepted, description)
+			f(accepted, description, not_now)
 		end
 		-- What a check waits for
-		log:info("The user " .. (accepted and "accepted " or "declined ") .. uri)
+		log:info("The user " .. (not_now and "put off " or accepted and
+				"accepted " or "declined ") .. uri)
 	end
 
 	local accept = menu:add("Accept", function() answer(true) end)
@@ -439,6 +444,13 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		if key == KEY_ESCAPE then
 			answer(false)
 			return true -- taken; the menu's own Escape = Back stands down
+		end
+	end)
+	-- [UI_MODAL_DIM] A tap on nothing beside it (TAP_BACK's test) closes it
+	-- as "not now": a stray tap is no answer to keep
+	root:SubscribeToStackEvent("UIMouseClick", function(_, d)
+		if ui:GetElementAt(IntVector2(d:GetInt("X"), d:GetInt("Y")), true) == nil then
+			answer(false, true)
 		end
 	end)
 end
@@ -926,8 +938,10 @@ local function connect(server, is_udp, host, port, cb, options)
 		return
 	end
 	log:info("Asking the user about "..uri.." for \""..server.."\"")
-	ask_user(server, uri, entry, function(accepted, description)
-		store_answer(server, uri, accepted, description, entry)
+	ask_user(server, uri, entry, function(accepted, description, not_now)
+		if not not_now then
+			store_answer(server, uri, accepted, description, entry)
+		end
 		if not accepted then
 			cb(nil, "Declined by user: "..uri)
 			return
@@ -1060,8 +1074,10 @@ local function gated_http(server, url, cb, options, body, hops, trusted)
 		return
 	end
 	log:info("Asking the user about "..uri.." for \""..server.."\"")
-	ask_user(server, uri, entry, function(accepted, description)
-		store_answer(server, uri, accepted, description, entry)
+	ask_user(server, uri, entry, function(accepted, description, not_now)
+		if not not_now then
+			store_answer(server, uri, accepted, description, entry)
+		end
 		if not accepted then
 			cb(nil, "Declined by user: "..uri)
 			return
