@@ -686,12 +686,24 @@ local function right_click(rc)
 	end
 end
 
+-- [UI_MODAL_DIM] A screen pushed over the game (a ui_utils dialog, shaded
+-- round, or the music editor): its own Escape and presses, not the
+-- editor's, nor the pause menu's to open over it
+function NT.screen_over()
+	local us = require("buildat/extension/uistack")
+	local top = (us.safe or us).main:top()
+	return top ~= nil and not top:GetName():find("game is running", 1, true)
+end
+
 -- Escape's, the tools' first ([FP_ESC]: down one level): a dialog or the
 -- menu, a drag, placing, a pending link, the crosshair. True when taken
 function M.escape()
 	-- ([JAM_EDITOR] the music editor closed)
 	if NT.mu.on() then
 		NT.mu.close()
+		return true
+	end
+	if NT.screen_over() then
 		return true
 	end
 	if S.view == "hud" then
@@ -1453,6 +1465,11 @@ end
 
 local function mouse_down(button_)
 	if not E.editing or S.touch then
+		return
+	end
+	-- A press off a dialog over the game closed it (TAP_BACK) and acted here
+	if NT.screen_over() then
+		S.swallow_up = button_
 		return
 	end
 	local mx, my = S.mx, S.my

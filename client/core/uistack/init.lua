@@ -339,6 +339,13 @@ magic.SubscribeToEvent("Update", function()
 	__buildat_take_key(nil)
 end)
 
+-- For a check ([UI_MODAL_DIM]): `event message_dialog <text>`, a plain
+-- ui_utils message dialog over whatever is up (a game's editor)
+magic.SubscribeToEvent("command_seq:message_dialog", function(_, d)
+	require("buildat/extension/ui_utils").safe.show_message_dialog(
+			d:GetString("Param"))
+end)
+
 M.world_scan = false
 -- An element outside the stack that a scan should walk too: a client that
 -- draws its world UI on the UI root rather than on its screen (the Luanti
