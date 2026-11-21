@@ -238,12 +238,12 @@ if phase == "main":
         "remove_component", "set_parent", "duplicate", "place_prefab",
         "scatter_prefab", "save_prefab", "set_voxels", "edit_voxels",
         "edit_terrain", "put_texture", "list_textures", "put_sound", "put_type", "edit_type",
-        "delete_type", "new_scene", "delete_scene", "switch_scene", "undo",
+        "delete_type", "new_scene", "duplicate_scene", "delete_scene", "switch_scene", "undo",
         "batch", "draft",
         "publish", "leave_draft",
         "checkpoint", "list_checkpoints", "restore_checkpoint", "diff",
         "playtest", "playtest_report", "start", "stop", "try_input",
-        "watch", "clear_kept", "keep", "export_template",
+        "watch", "clear_kept", "clear_old_params", "keep", "export_template",
         "export_scene", "import_scene",
         "publish_game", "publish_scene", "publish_kit_package", "list_aitta",
         "install_from_aitta"], names
@@ -259,6 +259,10 @@ if phase == "main":
     assert types["kit/counter"]["group"] == "Logic" and types["kit/counter"]["what"], types.get("kit/counter")
     d = json.loads(call(tok, "list_types", {"type": "kit/timer"}))
     assert d["params"]["interval"]["type"] == "number" and "tick" in d["outputs"], d
+    # [KIT_PARAM_ABOUT] a parameter's line, in list_types and get_type's source
+    tip = d["about"]["params"]["interval"]
+    assert tip.startswith("Seconds") and tip in json.loads(call(tok, "get_type",
+        {"type": "kit/timer"}))["source"], d["about"]
     call(tok, "list_types", {"type": "kit/nope"}, error=True)
     T = int(re.search(r"placed kit/timer (\d+)", call(tok, "place",
         {"type": "kit/timer", "pos": [0, 1, 0]}))[1])

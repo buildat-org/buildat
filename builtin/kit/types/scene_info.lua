@@ -17,5 +17,10 @@ return {
 		group = "Game",
 		what = "A scene's title and author, and whether players can pick it.",
 		keywords = "track level map arena list",
+		params = {
+			title = "The scene's title (empty: its name).",
+			author = "Who made the scene.",
+			listed = "Puts the scene in the list players pick scenes from.",
+		},
 	},
 }

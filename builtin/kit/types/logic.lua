@@ -63,6 +63,10 @@ return {
 			on = "The result went on.",
 			off = "The result went off.",
 		},
+		params = {
+			mode = "And, or, xor of a and b; not of a; latch: on by a, off by b; pulse: on by a for its time.",
+			time = "A pulse's length in seconds.",
+		},
 	},
 	inputs = {a = "any", b = "any", a_off = "none", b_off = "none"},
 	outputs = {out = "bool", on = "none", off = "none"},

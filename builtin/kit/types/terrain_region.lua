@@ -39,5 +39,17 @@ return {
 	about = {
 		group = "World",
 		what = "Generates the world's ground in a box or a ball of cells; in the air, a floating island.",
+		params = {
+			shape = "box, or sphere: the ball inside the box.",
+			size = "The box's size in cells (x, y, z), from its own cell on; 128 a side at most.",
+			generator = "flat, noise (hills) or valleys.",
+			seed = "The noise and valleys generators' seed.",
+			biome = "The World's material set's biome: which voxels the ground is.",
+			level = "The ground's top in cells over the box's bottom (-1: its middle).",
+			height = "How far noise's hills rise and fall from level, in cells.",
+			spread = "Cells between noise's hills.",
+			soil_depth = "Filler layers under the top (-1: the biome's, 0: stone right under it).",
+			decorations = "The biome's trees, bushes, flowers and the like on it.",
+		},
 	},
 }

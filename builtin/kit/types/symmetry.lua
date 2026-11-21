@@ -16,6 +16,13 @@ return {
 	about = {
 		group = "World",
 		what = "Copies what is under it, and the voxels, into the map's other slices.",
+		params = {
+			enabled = "Copies into the other slices; off, the copies go.",
+			slices = "The map split in two halves or four quadrants.",
+			angle = "The seams along x and z, or at 45 degrees.",
+			mode = "mirrored: flipped across the seams; rotational: turned round the middle.",
+			slice = "The slice builders edit; the others are its copies.",
+		},
 	},
 	params = {
 		enabled = {type = "bool", default = false},

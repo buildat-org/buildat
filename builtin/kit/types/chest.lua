@@ -31,6 +31,10 @@ return {
 		outputs = {
 			opened = "A player used it.",
 		},
+		params = {
+			size = "How many slots it has.",
+			items = "What it holds at the round's start, as \"kit/stone 20, kit/sword\".",
+		},
 	},
 	outputs = {opened = "none"},
 	on_start = function(c)

@@ -20,6 +20,11 @@ return {
 			given = "A player got its items.",
 			refused = "The items did not fit in the inventory.",
 		},
+		params = {
+			item = "The item it gives.",
+			count = "How many it gives at a use.",
+			once = "Each player gets theirs only once.",
+		},
 	},
 	outputs = {given = "none", refused = "none"},
 	on_use = function(c, by)

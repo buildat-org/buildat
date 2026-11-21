@@ -227,7 +227,8 @@ namespace interface
 //              parameter says (1 to 54; 27 without it), its state `slots`
 //              as kit/inventory's
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
-//   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
+//   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."},
+//               params = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
 //                               optional: what the type is, and for each
 //                               signal what sets an output off or what an
@@ -236,6 +237,12 @@ namespace interface
 //                               text (a line or two; at most 200 bytes shown)
 //                               its hover. One with a value says it in a
 //                               sentence "Value: ..."
+//                               [KIT_PARAM_ABOUT] params = {name = "..."}:
+//                               what each parameter is, a line; the
+//                               inspector's tooltip on its row (a tap on
+//                               its name on a touchscreen), list_types'.
+//                               (Kit adds its own parameters' lines: use,
+//                               own_look)
 //                               [KIT_PALETTE_SECTIONS] group = "World" (or
 //                               Building, Logic, Game, Players, Creatures,
 //                               Vehicles, Items, UI): its section in the

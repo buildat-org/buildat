@@ -14,6 +14,9 @@ return {
 		group = "Game",
 		what = "A line for bots to drive along, such as a race's racing line: a loop through its points in order.",
 		keywords = "racing line route waypoints bot",
+		params = {
+			points = "The loop's points in driving order, on its frame's x and z (edited in the plan view).",
+		},
 	},
 	params = {
 		points = {type = "points", level = true, default = {{-8, -8}, {8, -8},

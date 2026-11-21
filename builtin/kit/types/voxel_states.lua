@@ -94,6 +94,12 @@ return {
 		outputs = {
 			changed = "It switched. Value: true B, false A.",
 		},
+		params = {
+			size = "The box's size in cells (x, y, z), from its own cell on; 16 a side at most.",
+			enabled = "Starts the round in pattern B; off: in A.",
+			a = "Pattern A (off): the box's voxels as captured.",
+			b = "Pattern B (on): the box's voxels as captured.",
+		},
 	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},

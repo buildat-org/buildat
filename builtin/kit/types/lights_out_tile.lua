@@ -19,6 +19,9 @@ return {
 			pressed = "A player used it; it flips only through its links.",
 			changed = "It flipped. Value: 1 lit, -1 dark.",
 		},
+		params = {
+			lit = "Whether it is lit at the round's start.",
+		},
 	},
 	inputs = {toggle = "none"},
 	outputs = {pressed = "none", changed = "number"},

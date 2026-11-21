@@ -92,6 +92,16 @@ return {
 		group = "Players",
 		what = "Crag Trial's bike: W is the gas, S the brake, A and D lean and Space turns around; the rider's head on the ground is a crash.",
 		outputs = {crash = "The rider's head hit something; the rider goes back to the start a second later."},
+		params = {
+			gravity = "Gravity on the frame and the wheels, m/s^2.",
+			speed = "The back wheel's top speed under gas, m/s.",
+			power = "How fast the motor brings the back wheel up to speed, m/s^2.",
+			lean = "How fast A and D turn the bike, radians/s^2.",
+			stiffness = "The wheels' springs' stiffness.",
+			damping = "The wheels' springs' damping.",
+			rate = "Inputs a second; Kit draws the bike between them.",
+			substeps = "Physics steps an input.",
+		},
 	},
 	root = true,
 	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)

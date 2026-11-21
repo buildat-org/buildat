@@ -26,6 +26,13 @@ return {
 	about = {
 		group = "Players",
 		what = "What players keep from one round to the next.",
+		params = {
+			keep_inventory = "What a player had at Stop is theirs again at Play.",
+			keep_position = "Play leaves the players where they are instead of at a spawn.",
+			keep_builds = "What players build while playing goes into the start; Stop discards only the game's changes.",
+			carry = "State keys of the players' components whose numbers carry over, as \"score money\".",
+			remember = "A player who leaves while Running comes back where they were, not at a spawn.",
+		},
 	},
 	root = true,
 	-- [KIT_SINGLE] simplified: game-wide, the first anywhere is used; one

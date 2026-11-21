@@ -44,6 +44,13 @@ return {
 			closed = "It shut.",
 			refused = "A player without the key tried it.",
 		},
+		params = {
+			size = "Its width, height and depth in cells.",
+			mirror = "Swings to its back (-z) instead of its front; two mirrored doors make a double door.",
+			material = "The voxel material it wears (empty: its own colour).",
+			key = "The item a player needs in their inventory to open it.",
+			take = "Opening it takes one key from the player.",
+		},
 	},
 	inputs = {close = "none"},
 	outputs = {opened = "none", closed = "none", refused = "none"},

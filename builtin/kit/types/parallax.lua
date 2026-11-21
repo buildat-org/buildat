@@ -32,5 +32,10 @@ return {
 		group = "Building",
 		what = "A backdrop layer for side views. What is under it (polygons, parts) moves with the camera by 1 - follow (0: as far as the sky, 1: like the world; follow_y does the same up and down, or along z in a top-down game with kit/controls' plane horizontal, 1 by default). It repeats every `repeat` m along x (0: once), and nothing collides with it. Place it where it looks right with the camera at the layer's x. E.g. {\"follow\": 0.2, \"repeat\": 128} with a far skyline polygon under it.",
 		keywords = "backdrop background skyline scenery scroll depth layer",
+		params = {
+			follow = "How much it moves like the world along x (0: stays with the camera, as the sky; 1: the world).",
+			follow_y = "The same up and down, or along z in a top-down game.",
+			["repeat"] = "Copies it every this many metres along x (0: once).",
+		},
 	},
 }

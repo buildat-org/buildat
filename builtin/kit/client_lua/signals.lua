@@ -512,11 +512,21 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 end)
 -- The fingers down, for the one held on a signal (the editor's are the world's)
 SG.fingers = {}
+local win_tip_at
 magic.SubscribeToEvent("TouchBegin", function(_, data)
 	local x, y = data:GetInt("X"), data:GetInt("Y")
 	SG.pressed(x, y, false)
+	-- [KIT_PARAM_ABOUT] any touch takes a tapped tip away; one on a tap
+	-- element puts its tip up at its end, if it did not move
+	if SG.stuck then
+		log:info("kit editor: the tapped tip hidden: " .. SG.stuck.name)
+		SG.stuck = nil
+		SG.tip_hide()
+	end
+	local sc = magic.ui.scale
 	SG.fingers[data:GetInt("TouchID")] = {x = x, y = y, x0 = x, y0 = y,
-		t0 = buildat.get_time_us()}
+		t0 = buildat.get_time_us(), tip = E.editing and not W.ctx and
+		win_tip_at(x / sc, y / sc, true) or nil}
 end)
 magic.SubscribeToEvent("TouchMove", function(_, data)
 	local f = SG.fingers[data:GetInt("TouchID")]
@@ -527,6 +537,11 @@ magic.SubscribeToEvent("TouchMove", function(_, data)
 	end
 end)
 magic.SubscribeToEvent("TouchEnd", function(_, data)
+	local f = SG.fingers[data:GetInt("TouchID")]
+	if f and f.tip and not f.moved then
+		SG.stuck = f.tip
+		log:info("kit editor: tapped " .. f.tip.name)
+	end
 	SG.fingers[data:GetInt("TouchID")] = nil
 end)
 
@@ -1225,18 +1240,22 @@ end
 
 -- ---- A signal's whole text, on a pointer's rest or a finger held
 -- ([KIT_SCENES_REMOVE_TIP] win: the key in W of another window, the Scenes
--- dialog's dimmed Remove: a list of that window's, gone with it)
-function SG.tip(b, name, about, win)
+-- dialog's dimmed Remove: a list of that window's, gone with it; a list a
+-- window, each drawn anew when its content is). [KIT_PARAM_ABOUT] tap: an
+-- element in b a finger's tap on shows the text until the next touch (the
+-- inspector's parameter's name)
+function SG.tip(b, name, about, win, tap)
 	if not about then
 		return
 	elseif win then
-		local wt = SG.win_tips
+		SG.win_tips = SG.win_tips or {}
+		local wt = SG.win_tips[win]
 		if not (wt and wt.w == W[win]) then
 			wt = {key = win, w = W[win], list = {}}
-			SG.win_tips = wt
+			SG.win_tips[win] = wt
 		end
 		wt.list[#wt.list + 1] = {b = b, s = about, name = name,
-			say = "kit editor: the tip of " .. name}
+			tap = tap, key = win, w = W[win], say = "kit editor: the tip of " .. name}
 	else
 		SG.tips[#SG.tips + 1] = {b = b, s = about, name = name}
 	end
@@ -1261,7 +1280,9 @@ local function tip_show(c)
 	local root = magic.ui.root
 	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	SG.tip_win, SG.tip_on = w, c.name
-	w.priority = 20
+	-- ([KIT_PARAM_ABOUT] over the tool's hint, editor_input.lua's guide_hud:
+	-- it covered a tapped parameter's text)
+	w.priority = 95
 	w.opacity = 1
 	w:SetVar("FollowsRoot", "1")
 	local t = text(w, c.s)
@@ -1282,8 +1303,42 @@ local function tip_show(c)
 			root.width .. "x" .. root.height .. ": " .. c.s)
 end
 
+-- A window's tip at x, y (UI units; tap: its tap element there), not under a
+-- dialog of another window
+win_tip_at = function(x, y, tap)
+	for key, wt in pairs(SG.win_tips or {}) do
+		if W[key] ~= wt.w then
+			SG.win_tips[key] = nil
+		elseif wt.w.visible and at(wt.w, x, y) and (key == "dialog" or
+				not (W.dialog and at(W.dialog, x, y))) then
+			for _, k in ipairs(wt.list) do
+				local b = tap and k.tap or not tap and k.b
+				if b and b.visible and at(b, x, y) then
+					return k
+				end
+			end
+		end
+	end
+end
+
+-- [KIT_PARAM_ABOUT] A tap on a tip's tap element: its text up until the next
+-- touch
+local function stuck_tick()
+	local k = SG.stuck
+	if k and W[k.key] == k.w and k.w.visible and k.b.visible then
+		if SG.tip_on ~= k.name then
+			tip_show(k)
+		end
+		return true
+	end
+	SG.stuck = nil
+end
+
 -- Each frame: which signal the pointer rests on, or the one finger holds still
 function SG.hover_tick()
+	if stuck_tick() then
+		return
+	end
 	local x, y, need, t0
 	local f, n = nil, 0
 	for _, g in pairs(SG.fingers) do
@@ -1308,18 +1363,7 @@ function SG.hover_tick()
 				end
 			end
 		end
-		local wt = SG.win_tips
-		if wt and W[wt.key] ~= wt.w then
-			SG.win_tips = nil
-		elseif wt and not c and wt.w.visible and at(wt.w, x, y) then
-			for _, k in ipairs(wt.list) do
-				if k.b.visible and at(k.b, x, y) then
-					c = k
-					break
-				end
-			end
-		end
-		c = c or name_at(x, y)
+		c = c or win_tip_at(x, y) or name_at(x, y)
 	end
 	if not c then
 		SG.tip_at, SG.tip_since = nil, nil

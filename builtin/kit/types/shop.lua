@@ -70,6 +70,16 @@ return {
 		inputs = {
 			lost = "Sent by Kit: a ship it sold was lost. Value: the ship's id.",
 		},
+		params = {
+			prefab = "The prefab it sells a copy of.",
+			price = "What a copy costs from the buyer's wallet.",
+			pad = "Where a copy is made, from the shop's place, in cells.",
+			start_money = "Each player's money at their round's start (0: unchanged).",
+			mount = "Sells a ship's part, held by the buyer until they put it on a ship's face.",
+			free_outside_rounds = "Outside a round its price and the buyer's voxels are free; in a round paid.",
+			title = "Its name on the counter and in its notes.",
+			color = "The counter's colour, as #rrggbb.",
+		},
 	},
 	outputs = {bought = "entity", refused = "none", lost = "none"},
 	inputs = {lost = "entity"},

@@ -2208,6 +2208,19 @@ struct Module: public interface::Module, public Interface
 		t.params_of = src.find("params_of") != ss_::npos;
 		t.listed = t.decl.get("listed").is_true();
 		t.usable = t.decl.get("usable").is_true();
+		// [KIT_PARAM_ABOUT] Kit's own parameters' line in about.params (the
+		// inspector's tooltip)
+		auto kit_param_about = [&](const char *k, const char *s){
+			json::Value about = t.decl.get("about");
+			if(!about.is_object())
+				about = json::object();
+			json::Value ps = about.get("params");
+			if(!ps.is_object())
+				ps = json::object();
+			ps.set(k, s);
+			about.set("params", ps);
+			t.decl.set("about", about);
+		};
 		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
 		// (on_use() asks it): all, owners (of the region holding it) or
 		// nobody (used through its links only)
@@ -2228,6 +2241,8 @@ struct Module: public interface::Module, public Interface
 			u.set("choices", ch);
 			ps.set("use", u);
 			t.decl.set("params", ps);
+			kit_param_about("use", "Who may use it: everyone, the owners of the "
+					"region holding it, or nobody (its links only).");
 		}
 		// [KIT_OWN_LOOK] Whether its own look shows in play, the engine's on
 		// every type with a look (show_of() marks it hidden; the clients
@@ -2249,6 +2264,8 @@ struct Module: public interface::Module, public Interface
 			o.set("cat", "look");
 			ps.set("own_look", o);
 			t.decl.set("params", ps);
+			kit_param_about("own_look", "Off: its look is not drawn in play "
+					"(faded in edit mode); its collision stays.");
 		}
 		// [KIT_PARAM_CATEGORIES] Which of the inspector's categories a
 		// parameter is under. Another value does not stop the type: warned
@@ -34530,8 +34547,8 @@ struct Module: public interface::Module, public Interface
 			{"list_types", "=types", "The types an entity can be placed as: "
 				"each one's name, group and what it is. With type: its "
 				"declaration, its params (each one's type, default, min, max, "
-				"choices), its inputs and outputs (their values' types) and what "
-				"each does.",
+				"choices; about.params what each is), its inputs and outputs "
+				"(their values' types) and what each does.",
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "A type, as \"kit/counter\""}}})J", ""},
 			// [KIT_CUSTOM_TYPES]
@@ -35111,7 +35128,8 @@ struct Module: public interface::Module, public Interface
 				"version = n (raise it to migrate placed ones: migrate(params, "
 				"from)); about = {what, group = \"Logic\" (or World, Building, "
 				"Game, Players, Vehicles, Items, UI), inputs = {name = \"what it "
-				"does\"}, outputs = {...}}; params = {name = {type = "
+				"does\"}, outputs = {...}, params = {name = \"what it is, one "
+				"line\"} (the inspector's tooltip)}; params = {name = {type = "
 				"\"number\"|\"string\"|\"bool\"|\"voxel\"|\"entity\"|\"position\", "
 				"default, min, max, choices = {...}}}; state = {name = {default, "
 				"shared = true (sent to the clients), kept = true (play never "

@@ -222,6 +222,14 @@ return {
 	about = {
 		group = "Game",
 		what = "Brimstone Speedway's track generator: it builds the road, walls, run-off, mud, finish line, checkpoints and junk along a list of corners; Run rebuilds them.",
+		params = {
+			corners = "The centre line's corners (x, z): each one's radius r, its runoff in metres of gravel and checkpoint (1: one before it).",
+			width = "The road's width, metres.",
+			seed = "The seed of the mud's shapes and the junk's places.",
+			junk = "How much junk off the road: 0 none, 1 the usual, 2 double.",
+			mud = "Mud patches: metres along the centre line, space-separated.",
+			oil = "Oil slicks: metres along the centre line, space-separated.",
+		},
 	},
 	params = {
 		corners = {type = "points", level = true, values = {

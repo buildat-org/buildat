@@ -10,6 +10,9 @@ return {
 	about = {
 		group = "Building",
 		what = "A placed prefab's root: where the copy is and how it is turned.",
+		params = {
+			mode = "Stamped: its voxels written into the world; free: a free object turned any way.",
+		},
 	},
 	params = {
 		mode = {type = "string", default = "stamped",

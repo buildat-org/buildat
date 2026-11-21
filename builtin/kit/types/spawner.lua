@@ -83,6 +83,14 @@ return {
 		outputs = {
 			spawned = "A copy was made or a player was put here. Value: the copy's id; none for a player.",
 		},
+		params = {
+			players = "Players starting a round in its scene are put here, facing its way.",
+			copy = "An entity a spawn makes a copy of.",
+			prefab = "A prefab a spawn makes a copy of (over copy).",
+			max = "The most of its copies at once.",
+			every = "Seconds between copies made by themselves (0: only on spawn).",
+			spread = "Metres apart the players it puts in a round stand, round it (0: all on it).",
+		},
 	},
 	inputs = {spawn = "none", clear = "none"},
 	outputs = {spawned = "any"},

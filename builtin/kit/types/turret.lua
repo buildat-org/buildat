@@ -18,6 +18,17 @@ return {
 			steer = "Turns it while nobody is in its seat. Value: 1 right to -1 left.",
 			throttle = "Raises it while nobody is in its seat. Value: 1 raise to -1 lower.",
 		},
+		params = {
+			turn_rate = "Degrees a second it turns (A and D).",
+			pitch_rate = "Degrees a second it raises and lowers (W and S).",
+			pitch_min = "Its highest aim in degrees (up is negative).",
+			pitch_max = "Its lowest aim in degrees (down is positive).",
+			cooldown = "Seconds between shots (0: no gun).",
+			shot_speed = "A shot's speed in m/s.",
+			shot_gravity = "How fast a shot falls, in m/s^2.",
+			shot_damage = "A shot's damage to what it hits.",
+			rate = "Movement steps a second.",
+		},
 	},
 	component = true,
 	-- [KIT_SHIP_VIEW] the view close behind the gun, over it

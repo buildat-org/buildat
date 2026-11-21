@@ -9,6 +9,10 @@ return {
 	component = true,
 	about = {
 		what = "An engine on a ship: it adds thrust and lift to the ship's airship movement.",
+		params = {
+			thrust = "Added to the ship's thrust, in m/s each second; its top speed goes up in step.",
+			lift = "Added to the ship's climb, in m/s.",
+		},
 	},
 	params = {
 		thrust = {cat = "physics", type = "number", default = 3, min = 0, max = 100},

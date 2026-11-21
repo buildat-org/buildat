@@ -10,6 +10,15 @@ return {
 	about = {
 		group = "Building",
 		what = "Plain geometry off the voxel grid: a box, a wedge or a sphere.",
+		params = {
+			shape = "A box, a wedge (rising along +z to its back) or a sphere.",
+			size = "Its width, height and depth in cells (fractions too).",
+			rotation = "Its turn, in degrees round x, y and z.",
+			color = "Its colour, as #rrggbb.",
+			material = "Its surface: plain, metal, glass or glow.",
+			collision = "Players' bodies meet it.",
+			voxel = "A voxel material it wears (empty: its colour).",
+		},
 	},
 	params = {
 		shape = {cat = "look", type = "string", default = "box",

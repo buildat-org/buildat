@@ -32,6 +32,11 @@ return {
 		outputs = {
 			given = "A player got the items.",
 		},
+		params = {
+			items = "The items given, each with a count, as \"kit/sword, kit/stone 20\".",
+			when = "round: at a round's start; spawn: at each spawn, the round's and every respawn.",
+			clear = "Empties the player's inventory before giving.",
+		},
 	},
 	outputs = {given = "none"},
 	-- Kit's call, by the player (an inventory emptied first with clear)

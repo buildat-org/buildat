@@ -7,6 +7,10 @@ return {
 	version = 1,
 	about = {
 		what = "Moves a free object along a course and back, timed by the round's clock.",
+		params = {
+			course = "Where it goes, in cells from its place along its own axes.",
+			course_time = "Seconds each way (0: it stays).",
+		},
 	},
 	component = true,
 	movement = {timed = true, body = {r = 0.5, h = 1}},

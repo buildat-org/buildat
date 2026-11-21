@@ -3548,13 +3548,34 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 		-- [KIT_PHONE_EDITING] The touch mode's: choices as a list and number
 		-- steppers, each field reached by the field entry mode (field_entry.lua)
+		-- [KIT_PARAM_ABOUT] A parameter's about.params line: the tip of its row
+		-- (a pointer's rest), and of its name (a finger's tap or hold)
+		local wd = NT.sh.on() and NT.fe.widgets(e, ci, c, decl, fields, WIDGETS) or
+				WIDGETS
+		-- (the window's key in W: the inspector's while build_inspector draws
+		-- it; the sandbox shows no parent to find it by. simplified: none in
+		-- the HUD view's panel)
+		local win = NT.tip_win
+		local at, tipped = 0, {}
+		for k, f in pairs(wd) do
+			tipped[k] = f
+		end
+		tipped.label = function(r, s, width)
+			at = at + 1
+			local l = wd.label(r, s, width)
+			local k = fields[at] and fields[at].name
+			if win and k then
+				NT.sg.tip(r, "param " .. key .. " " .. k,
+						NT.sg.about_of(t, "params", k), win, l)
+			end
+			return l
+		end
 		ui_utils.settings_form(w, fields, values, function(k, v)
 			E.pending[key] = E.pending[key] or {}
 			E.pending[key][k] = v
 			log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
 			mark()
-		end, NT.sh.on() and NT.fe.widgets(e, ci, c, decl, fields, WIDGETS) or
-				WIDGETS)
+		end, tipped)
 		-- [KIT_WAVE_PIVOT_CENTER] a parameter's `button = "center"`: the object's
 		-- centre set again (the server's, one edit)
 		for _, k in ipairs(names) do
@@ -5402,7 +5423,9 @@ build_inspector = function()
 	if item then
 		IT.sheet(body)
 	else
+		NT.tip_win = "inspector"
 		inspector(body, e, is_made)
+		NT.tip_win = nil
 	end
 	-- ([KIT_PHONE_EDITING] the touch mode's log of it, show_log)
 	local lines = NT.sh.on() and not item and not sig and E.logs[S.primary] or {}

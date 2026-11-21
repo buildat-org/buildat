@@ -25,6 +25,13 @@ return {
 		outputs = {
 			taken = "A player took it.",
 		},
+		params = {
+			money = "Money given to the player's kit/wallet.",
+			repair = "Puts back the destroyed voxels of the ships the player owns.",
+			every = "Seconds until it is back after being taken (0: once a round).",
+			size = "Its zone's size in cells (x, y, z).",
+			color = "The crate's colour, as #rrggbb.",
+		},
 	},
 	outputs = {taken = "none"},
 	on_start = function(c)

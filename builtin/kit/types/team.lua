@@ -43,6 +43,12 @@ return {
 			reached = "The score first reached win_score. Value: this team's id, for an arena's win.",
 			joined = "A player joined, as the one who set it off: for a goal of their own or a greeting.",
 		},
+		params = {
+			name = "The team's name, shown with its score.",
+			color = "The team's colour, as #rrggbb.",
+			win_score = "The score that sends reached (0: never).",
+			friendly_fire = "Whether its members' hits hurt each other.",
+		},
 	},
 	inputs = {join = "none", add = "any", set = "number"},
 	outputs = {scored = "number", reached = "entity", joined = "none"},

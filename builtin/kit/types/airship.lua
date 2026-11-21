@@ -25,6 +25,18 @@ return {
 			steer = "Steers while nobody is in its seat. Value: 1 right to -1 left.",
 			climb = "Climbs while nobody is in its seat. Value: 1 up to -1 down.",
 		},
+		params = {
+			thrust = "Push along its heading, in m/s each second.",
+			mass = "The ship mass its numbers are for; heavier ships go slower (0: its parts' mass not reckoned).",
+			top_speed = "Top speed forward in m/s (half that backwards).",
+			turn_rate = "Degrees a second it turns at.",
+			climb = "Metres a second it rises or sinks at.",
+			drag = "How fast it slows down when not pushed.",
+			floor = "The least height in metres it keeps over whatever is below it.",
+			ceiling = "The highest it climbs to, in world metres.",
+			rate = "Steps a second of its movement.",
+			substeps = "Smaller steps in each step: finer collisions, more work.",
+		},
 	},
 	component = true,
 	-- [KIT_GUIDE_STATIONS] a helm: a bot at its seat steers it into its goal's box

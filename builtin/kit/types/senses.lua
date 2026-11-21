@@ -57,6 +57,12 @@ return {
 			spotted = "A player became its target. Value: their entity.",
 			lost = "It lost its target: out of range or sight, or dead.",
 		},
+		params = {
+			range = "How far it sees players, in metres.",
+			angle = "Its view's width in degrees, about the way it faces.",
+			enabled = "Whether it senses at all at the start.",
+			every = "Seconds between its looks.",
+		},
 	},
 	component = true,
 	senses = true,

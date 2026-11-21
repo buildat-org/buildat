@@ -27,6 +27,10 @@ return {
 			opened = "It opened.",
 			closed = "It shut.",
 		},
+		params = {
+			size = "Its width, height and depth in cells.",
+			material = "The voxel material it wears (empty: its own colour).",
+		},
 	},
 	inputs = {open = "none", close = "none", toggle = "none"},
 	outputs = {opened = "none", closed = "none"},

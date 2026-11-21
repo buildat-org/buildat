@@ -41,6 +41,13 @@ return {
 		outputs = {
 			teleported = "A player was moved.",
 		},
+		params = {
+			to = "The cell the player is moved to.",
+			pad = "The pad's size in cells (x, y, z), its zone.",
+			scene = "Another scene to move the player into; none: this one.",
+			target = "An entity to move the player onto, in any scene, in place of to.",
+			two_way = "The editor places a teleporter back at the target.",
+		},
 	},
 	inputs = {teleport = "none"},
 	outputs = {teleported = "none"},

@@ -34,6 +34,12 @@ return {
 			stop = "Stops it: for the player who sent it, or for everyone.",
 			mood = "Sets the mood from the next bar. Value: one of the song's moods (track levels); \"\" for every track.",
 		},
+		params = {
+			song = "The song, in jam's text format.",
+			autoplay = "Plays to everyone from the round's start.",
+			mood = "The mood it starts in: one of the song's moods (empty: every track).",
+			priority = "Of the music on for a player, the highest priority plays.",
+		},
 	},
 	inputs = {play = "none", stop = "none", mood = "string"},
 	on_input = function(c, input, value, by)

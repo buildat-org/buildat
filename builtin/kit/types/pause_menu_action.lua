@@ -35,6 +35,12 @@ return {
 		outputs = {
 			pressed = "A player pressed it (they set it off).",
 		},
+		params = {
+			label = "The button's text.",
+			order = "Its place in the menu (Continue 0, Edit 10, Chat 20, Settings 80, Leave 100).",
+			shown = "Whether it is in the menu at the start.",
+			to = "Who show and hide act on: everyone, or the player who set them off.",
+		},
 	},
 	inputs = {show = "none", hide = "none"},
 	outputs = {pressed = "none"},

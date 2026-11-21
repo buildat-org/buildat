@@ -13,6 +13,17 @@ return {
 	about = {
 		group = "Vehicles",
 		what = "A seat that rolls: a player who uses it pushes it with the keys.",
+		params = {
+			mass = "Its mass in kg: heavier is slower to push and to jump.",
+			push = "The force in newtons the keys push it with.",
+			rolling_friction = "How much rolling slows it, as a share of gravity times the ground's friction.",
+			top_speed = "The fastest the keys push it, in m/s.",
+			jump_impulse = "The jump's impulse in N s (0: no jump).",
+			bounce = "The share of its speed kept off walls and landings.",
+			gravity = "Its fall's acceleration in m/s^2.",
+			rate = "Steps a second of its movement.",
+			substeps = "Smaller steps in each step: finer collisions, more work.",
+		},
 	},
 	usable = true,
 	seat = true,
