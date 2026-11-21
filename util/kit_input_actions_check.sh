@@ -8,15 +8,14 @@
 #   1. play: W walks nowhere, I walks forward;
 #   2. the editor's 3D view: I flies the camera forward;
 #   3. a kit/action "fire" (key R, 3) linked pressed -> a kit/counter's
-#      count (4) and held -> another's (6); a kit/sign (5) "Press [use] to
-#      use, [fire] to fire, [forward] to walk, {key:jump} to jump,
-#      {key:item_next} {key:nosuch} {foo:bar}" shows kitboss "[Left
-#      click] ... [R] ... [I] ... Space ... (unbound) {key:nosuch}
-#      {foo:bar}" (use: no key by default, the left click;
-#      [KIT_TEXT_PLACEHOLDER] {key:<action>} bare, an unknown action and
-#      word as written, the server warning kitboss of {foo:...} after the edit
-#      and at Play; [KIT_DEPRECATE] of the old [use] and [fire] too, naming
-#      {key:use} and {key:fire});
+#      count (4) and held -> another's (6); a kit/sign (5) "Press
+#      [{key:use}] to use, [{key:fire}] to fire, [{key:forward}] to walk,
+#      {key:jump} to jump, {key:item_next} {key:nosuch} {foo:bar} [use]"
+#      shows kitboss "[Left click] ... [R] ... [I] ... Space ... (unbound)
+#      {key:nosuch} {foo:bar} [use]" (use: no key by default, the left
+#      click; [KIT_TEXT_PLACEHOLDER] {key:<action>} bare, an unknown action
+#      and word as written, a [<word>] too, the server warning kitboss of
+#      {foo:...} after the edit and at Play);
 #      R held: the server's "Action fire pressed", counter 4 counts once,
 #      counter 6 at least once; the key store has Kit's actions and the
 #      world's (the keys page); there Jump rebound to J: the sign shows
@@ -29,7 +28,7 @@
 #      on M (b1 is pressed);
 #   4. kitbob on a touchscreen (BUILDAT_TOUCH=1): a Fire button over
 #      the touch bar; pressed, the counter counts again; the sign shows him
-#      "[Tap] ... [Fire] ... [the stick] ... Jump ..." (on a touchscreen: a
+#      "[Tap] ... [Fire] ... [the stick] ... Jump ... [use]" (on a touchscreen: a
 #      tap, the on-screen controls' labels).
 # Screenshots kept with KEEP_TMP=1: $t/keys.png (the pause menu's
 # Settings, Key bindings), $t/sign.png, $t/touch.png; look at them.
@@ -130,7 +129,7 @@ EOF
 	edit '{"op": "place", "type": "kit/counter", "pos": [3, 1, 4]}'
 	edit '{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 4, "input": "count"}'
 	edit '{"op": "place", "type": "kit/sign", "pos": [0, 2, 10]}'
-	set_p 5 text '"Press [use] to use, [fire] to fire, [forward] to walk, {key:jump} to jump, {key:item_next} {key:nosuch} {foo:bar}"'
+	set_p 5 text '"Press [{key:use}] to use, [{key:fire}] to fire, [{key:forward}] to walk, {key:jump} to jump, {key:item_next} {key:nosuch} {foo:bar} [use]"'
 	# (M typed in a field: no mute; a click on the world takes the focus)
 	cat <<'EOF'
 event kit_select 5
@@ -151,7 +150,7 @@ EOF
 keypress F6
 wait_log 10000 kit editor: edit mode off
 wait_log_any 10000 kit: the world's actions: 1
-wait_log_any 10000 kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, Space to jump, (unbound) {key:nosuch} {foo:bar}"
+wait_log_any 10000 kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, Space to jump, (unbound) {key:nosuch} {foo:bar} [use]"
 look 0 0
 frames 10
 screenshot @T@/sign.png
@@ -196,7 +195,7 @@ cat > "$t/kitbob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit: the touch bar: Jump, Menu; the world's: Fire
-wait_log_any 10000 kit: entity 5 shows "Press [Tap] to use, [Fire] to fire, [the stick] to walk, Jump to jump, (unbound) {key:nosuch} {foo:bar}"
+wait_log_any 10000 kit: entity 5 shows "Press [Tap] to use, [Fire] to fire, [the stick] to walk, Jump to jump, (unbound) {key:nosuch} {foo:bar} [use]"
 frames 10
 screenshot @T@/touch.png
 click Button "Fire"
@@ -263,10 +262,9 @@ m=$(grep -aoP "workbench: the mute key: sound \K\S+" "$c" | tr '\n' ' ')
 grep -aqP '^action\t[^\t]+\tmute\tM\t' "$t/cu_kitboss/keys.txt" ||
 	fail "the key store lacks Workbench's mute key"
 echo "ok: M muted and unmuted in the editor, not in a field nor over the world's b1 in play; the store has it"
-want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, Space to jump, (unbound) {key:nosuch} {foo:bar}"' \
-	'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, J to jump, (unbound) {key:nosuch} {foo:bar}"' \
+want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, Space to jump, (unbound) {key:nosuch} {foo:bar} [use]"' \
+	'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk, J to jump, (unbound) {key:nosuch} {foo:bar} [use]"' \
 	"kit: warning: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's" \
-	"kit: warning: entity 5's kit/sign text: [use] is the old key hint (deprecated, removable at Kit API level 2): {key:use} instead" \
 	"kit: the gamepad read"
 k=$t/cu_kitboss/keys.txt
 grep -aqP '^action\t[^\t]+\tforward\tW\tmove.forward\t' "$k" &&
@@ -274,15 +272,14 @@ grep -aqP '^action\t[^\t]+\tforward\tW\tmove.forward\t' "$k" &&
 	grep -aqP '^action\t[^\t]+\tvoxel1\t1\t' "$k" &&
 	grep -aqP '^shared\tmove.forward\tI$' "$k" ||
 	fail "the key store lacks Kit's, Workbench's or the world's actions ($k)"
-want "$s" "kitboss's edit: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's" \
-	"kitboss's edit: entity 5's kit/sign text: [fire] is the old key hint (deprecated, removable at Kit API level 2): {key:fire} instead"
+want "$s" "kitboss's edit: entity 5's kit/sign text: {foo:...} is no text placeholder of Kit's"
 grep -a "edit: entity 5's" "$s" | grep -aq "nosuch" &&
 	fail "{key:nosuch} warned of, though key is Kit's word ($s)"
-echo "ok: the sign shows kitboss's keys, {key:jump} J after the rebind, {key:item_next} (unbound), {key:nosuch} and {foo:bar} as written, {foo:...} and [KIT_DEPRECATE] the old [use] warned of; the store has Kit's, Workbench's and the world's actions"
+echo "ok: the sign shows kitboss's keys, {key:jump} J after the rebind, {key:item_next} (unbound), {key:nosuch}, {foo:bar} and [use] as written, {foo:...} warned of; the store has Kit's, Workbench's and the world's actions"
 # 4. The touch bar
 want "$t/kitbob.log" "kit: the touch bar: Jump, Menu; the world's: Fire"
 echo "ok: a touch client: the Fire button, pressed, reached the counter"
 for p in keys sign touch; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: Kit's input actions: a rebound key walks and flies the editor; an action's signal linked; [use] in a sign; a touch button; Workbench's mute key; screenshots $t/keys.png $t/sign.png $t/touch.png"
+echo "PASS: Kit's input actions: a rebound key walks and flies the editor; an action's signal linked; {key:use} in a sign; a touch button; Workbench's mute key; screenshots $t/keys.png $t/sign.png $t/touch.png"

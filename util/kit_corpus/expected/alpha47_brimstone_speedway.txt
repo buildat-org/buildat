@@ -1,6 +1,5 @@
 # util/kit_corpus_check.sh's record of alpha47/brimstone_speedway (RECORD=1 writes it)
 [warnings]
-W kit: Component type local/brim_race: players = true is reads_players = true now
 [composition]
 entities 580 (kit 1, api 1)
 2 1 scene

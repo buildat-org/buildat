@@ -1,6 +1,5 @@
 # util/kit_corpus_check.sh's record of saves/alpha47_crag (RECORD=1 writes it)
 [warnings]
-W kit: Component type local/crag_run: players = true is reads_players = true now
 [composition]
 entities 87 (kit 1, api 1)
 2 1 scene

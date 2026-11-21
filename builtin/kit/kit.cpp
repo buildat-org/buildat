@@ -1281,28 +1281,6 @@ static sv_<ss_> unknown_placeholders(const ss_ &s)
 	return out;
 }
 
-// [KIT_DEPRECATE] The <action>s of the old key hints "[<action>]" in s
-// (input.lua's key_text; deprecated, removable at Kit API level 2), each
-// once. simplified: every [<lowercase word>], an action or not (the
-// server does not know the client's and the app's actions)
-static sv_<ss_> old_key_hints(const ss_ &s)
-{
-	sv_<ss_> out;
-	for(size_t i = s.find('['); i != ss_::npos; i = s.find('[', i + 1)){
-		size_t j = i + 1;
-		if(j >= s.size() || !islower((unsigned char)s[j]))
-			continue;
-		while(j < s.size() && (islower((unsigned char)s[j]) ||
-				isdigit((unsigned char)s[j]) || s[j] == '_'))
-			j++;
-		const ss_ w = s.substr(i + 1, j - i - 1);
-		if(j < s.size() && s[j] == ']' &&
-				std::find(out.begin(), out.end(), w) == out.end())
-			out.push_back(w);
-	}
-	return out;
-}
-
 // A type's inputs or outputs as its file gives them, {"a", b = "number"}
 // (an array, or an object whose number keys are names of type "any"):
 // the names, each one's type; the declaration's key made the array of the
@@ -2086,8 +2064,7 @@ struct Module: public interface::Module, public Interface
 		return H;
 	}
 	// Why its table is not one Kit knows, each ("": it is): a field or a
-	// function not Kit's, a field of before (read as its new name: renamed,
-	// {old, new}), a parameter or state key in Kit's kit_ prefix
+	// function not Kit's, a parameter or state key in Kit's kit_ prefix
 	static sv_<ss_> type_table_faults(const json::Value &decl,
 			const std::set<ss_> &handlers)
 	{
@@ -2100,11 +2077,8 @@ struct Module: public interface::Module, public Interface
 					k == "outputs_types" || k == "inputs_labels" ||
 					k == "outputs_labels")
 				continue;
-			if(k == "players" || k == "teams" || k == "regions")
-				out.push_back(k+" = true is reads_"+k+" = true now");
-			else
-				out.push_back(k.substr(0, 64)+": not a type field Kit knows (a "
-						"helper goes in a local)");
+			out.push_back(k.substr(0, 64)+": not a type field Kit knows (a "
+					"helper goes in a local)");
 		}
 		for(const ss_ &h : handlers)
 			if(!handler_names().count(h))
@@ -2186,20 +2160,14 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &f : faults)
 				log_w(MODULE, "Component type %s: %s", cs(name), cs(f));
 		}
-		// [KIT_API_1] (decision 5) players, teams and regions of before read
-		// as reads_*
-		auto reads = [&](const char *k){
-			return t.decl.get(ss_("reads_")+k).is_true() ||
-					t.decl.get(k).is_true();
-		};
-		t.players = reads("players");
+		t.players = t.decl.get("reads_players").is_true();
 		t.player = t.decl.get("player").is_true();
 		t.placeable = t.decl.get("placeable").is_true();
 		t.health = t.decl.get("health").is_true();
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
-		t.teams = reads("teams");
-		t.regions = reads("regions");
+		t.teams = t.decl.get("reads_teams").is_true();
+		t.regions = t.decl.get("reads_regions").is_true();
 		t.events = jstr(t.decl, "events");
 		// Its client part, beside it
 		const ss_ client = local ? jstr(lt->second, "client") : pkg ?
@@ -39748,9 +39716,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_TEXT_PLACEHOLDER] The authored texts' {<word>:...} of a word Kit
-	// has no meaning for: drawn as written, the word Kit's to give one later;
-	// and ([KIT_DEPRECATE]) their old key hints "[<action>]". At Play, in
-	// get_goal_warnings and (only: those) after an edit.
+	// has no meaning for: drawn as written, the word Kit's to give one later.
+	// At Play, in get_goal_warnings and (only: those) after an edit.
 	// simplified: every string parameter read as a text, drawn or not
 	sv_<ss_> placeholder_warnings(const std::set<uint64_t> *only = nullptr)
 	{
@@ -39763,20 +39730,13 @@ struct Module: public interface::Module, public Interface
 				continue;
 			for(const Instance &in : x.second.comps)
 				for(json::Iterator it(in.params); it; ++it)
-					if((*it).is_string()){
-						const ss_ at = "entity "+itos(x.first)+"'s "+in.type+
-								" "+it.key()+": ";
+					if((*it).is_string())
 						for(const ss_ &w : unknown_placeholders(
 								(*it).as_string()))
-							out.push_back(at+"{"+w+":...} is no text "
+							out.push_back("entity "+itos(x.first)+"'s "+in.type+
+									" "+it.key()+": {"+w+":...} is no text "
 									"placeholder of Kit's, shown as written ("
 									"{<word>:...} is reserved; Kit has "+known+")");
-						// [KIT_DEPRECATE] the old key hint
-						for(const ss_ &w : old_key_hints((*it).as_string()))
-							out.push_back(at+"["+w+"] is the old key hint "
-									"(deprecated, removable at Kit API level 2): "
-									"{key:"+w+"} instead");
-					}
 		}
 		return out;
 	}

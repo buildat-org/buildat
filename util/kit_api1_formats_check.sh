@@ -24,9 +24,9 @@
 #      kit/spawn_rule's `on`, kit/voxel_replace's and kit/voxel_states'
 #      `start_on` at version 1 in "kit" 1, and unversioned from before, are
 #      written back at version 2 under the new names. A check type with
-#      players = true and a field Kit does not know loads, both warned of,
-#      and reads the players; its c:add with ext.player and c:list with
-#      ext.kit_x are refused.
+#      players = true (no longer reads_players' alias) loads, warned of as
+#      a field Kit does not know, and reads no players; its c:add with
+#      ext.player and c:list with ext.kit_x are refused.
 #   util/kit_api1_formats_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -64,12 +64,11 @@ return {
 	end,
 }
 EOF
-# (5) a table of before: players = true and a field Kit does not know
+# (5) a table of before: players = true, a field Kit does not know now
 cat > "$BUILDAT_WORKBENCH_TYPES/reader.lua" <<'EOF'
 return {
 	version = 1,
 	players = true,
-	plyers = true,
 	look = {shape = "box", size = {0.3, 0.3, 0.3}, color = "#2020a0"},
 	on_timer = function(c, name)
 		if name == "a" then
@@ -248,14 +247,13 @@ db.commit()
 ' || fail "the rows"
 server 7 world "ext.kit_x is reserved"
 grep -aq "Hosted: " "$t/srv7.log" || fail "not hosted ($t/srv7.log)"
-for w in "Component type workbench/reader: players = true is reads_players = true now" \
-		"Component type workbench/reader: plyers: not a type field Kit knows" \
-		"reader players table" "ext.player is reserved" "ext.kit_x is reserved"; do
+for w in "Component type workbench/reader: players: not a type field Kit knows" \
+		"reader players nil" "ext.player is reserved" "ext.kit_x is reserved"; do
 	grep -aqF "$w" "$t/srv7.log" || fail "no \"$w\" ($t/srv7.log)"
 done
 rows world "$SET""WHAT = 'kit 1'$CHECK_RENAMED" ||
 	fail "kit 1's renamed params ($t/srv7.log)"
-echo "ok: kit 1: effect's on, symmetry's on, spawn_rule's on, voxel_replace's and voxel_states' start_on migrated to v2's names; a type of players = true and an unknown field loads warned of, reads players; ext.player and ext.kit_ refused"
+echo "ok: kit 1: effect's on, symmetry's on, spawn_rule's on, voxel_replace's and voxel_states' start_on migrated to v2's names; a type of players = true loads warned of an unknown field, reads no players; ext.player and ext.kit_ refused"
 rows world "$SET"'
 put("authored", {"next_id": 8, "entities": [
 	{"id": 2, "parent": 1, "name": "world", "kind": "scene"}] + '"${RENAMED//VER/}"'})
