@@ -573,6 +573,8 @@ Publishing page (an admin's):
     asks each Aitta's GET /api/v1/aitta/info?key=.
   - The Aittas, 8 at most, taken as typed (http, a LAN or loopback
     address): the server publishes to and fetches from these and no other.
+    Each has a Remove button; the Add field offers the official Aitta
+    while the list lacks it.
   - Who may publish as the server: the account privilege "publisher", per
     builder, off by default; an admin always may. Any of them may put out
     the next version of any of the server's packages.

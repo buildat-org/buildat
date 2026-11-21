@@ -6677,6 +6677,9 @@ local LICENCES = {"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "MIT",
 local function publishing(t)
 	local s = network.write_json(t)
 	log:info("kit editor: publishing " .. s)
+	-- (a refusal stays on the page until the next ask: the server's
+	-- answer to a refused op comes after it and draws the page again)
+	PB.message = nil
 	buildat.send_packet("kit:publishing", s)
 end
 M.publishing = publishing
@@ -6701,7 +6704,6 @@ function M.publishing_page(accounts)
 	local w = acc.server_open("Publishing as the server")
 	if PB.message then
 		acc.page_text(w, PB.message, WARN)
-		PB.message = nil
 	end
 	if not I then
 		return acc.page_text(w, "Asking the server...", DIM)
@@ -6725,24 +6727,18 @@ function M.publishing_page(accounts)
 				"publishing key")
 	end
 	acc.page_text(w, "The Aittas the server publishes to and installs from " ..
-			"(no others), comma-separated:", DIM)
-	local urls = {}
+			"(no others):", DIM)
+	-- The whole list goes with each Add and Remove (the server's urls are
+	-- origins, default_aitta too: compared as they are)
+	local urls, has_default = {}, false
 	for _, a in ipairs(I.aittas or {}) do
 		urls[#urls + 1] = a.url
+		has_default = has_default or a.url == I.default_aitta
 	end
-	local f = acc.page_field(w, "Aittas", false, nil, table.concat(urls, ", "))
-	f:SetName("publishing aittas")
-	acc.page_button(w, "Save the list", function()
-		local list = {}
-		for s in f:GetText():gmatch("[^,%s]+") do
-			list[#list + 1] = s
-		end
-		publishing({op = "aittas", list = list})
-	end):SetName("publishing save aittas")
 	-- simplified: "Bind on <Aitta>..." is said, not a button: a server's
 	-- code may not move the user to another server (api.lua refuses it
 	-- join_server); the user joins the Aitta from the launcher
-	for _, a in ipairs(I.aittas or {}) do
+	for i, a in ipairs(I.aittas or {}) do
 		acc.page_text(w, a.url .. ": " .. (I.key == "" and "no key yet" or
 				a.bound == "" and "the key is bound to " .. I.author or
 				"Bind on " .. a.url .. "...: join it, log in, and bind the " ..
@@ -6750,7 +6746,25 @@ function M.publishing_page(accounts)
 				a.bound .. ")"), (I.key == "" or a.bound ~= "") and WARN or
 				nil):SetName(
 				"publishing aitta " .. a.url)
+		acc.page_button(w, "Remove " .. a.url, function()
+			local list = {}
+			for k, u in ipairs(urls) do
+				list[#list + 1] = k ~= i and u or nil
+			end
+			publishing({op = "aittas", list = list})
+		end):SetName("publishing remove " .. a.url)
 	end
+	local add_default = not has_default and I.default_aitta or "https://"
+	local f = acc.page_field(w, "Add an Aitta", false, nil, add_default)
+	f:SetName("publishing add aitta")
+	acc.page_button(w, "Add", function()
+		local list = {}
+		for _, u in ipairs(urls) do
+			list[#list + 1] = u
+		end
+		list[#list + 1] = f:GetText():match("^%s*(.-)%s*$")
+		publishing({op = "aittas", list = list})
+	end):SetName("publishing add aitta button")
 	if I.key ~= "" and #(I.aittas or {}) > 0 then
 		acc.page_button(w, "Check again", function()
 			publishing({op = "check"})
@@ -6795,7 +6809,7 @@ function M.publishing_page(accounts)
 	end
 	log:info("kit editor: the Publishing page, key " .. (I.key ~= "" and
 			"made" or "none") .. ", " .. #(I.aittas or {}) .. " Aittas, " ..
-			#log_rows .. " published")
+			#log_rows .. " published, add " .. tostring(add_default))
 end
 
 -- The form: what "scene" (scene its name), "project" or "prefabs"
