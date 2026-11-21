@@ -827,7 +827,10 @@ function M.show_game(o, app_key, extra)
 	win:SetLayout(LM_VERTICAL, 8, magic.IntRect(12, 12, 12, 12))
 	win:SetAlignment(HA_CENTER, magic.VA_CENTER)
 	local width = math.min(620, root.width - 16)
-	win:SetFixedSize(width, math.min(720, root.height - 16))
+	-- [UI_SERVER_NARROW] 90 % of a tall screen (was at most 720, which
+	-- scrolled Video and Keys on a 1080 one)
+	win:SetFixedSize(width, math.min(math.max(720,
+			math.floor(root.height * 0.9)), root.height - 16))
 	local top = win:CreateChild("UIElement")
 	top:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
 	top:SetFixedHeight(28)

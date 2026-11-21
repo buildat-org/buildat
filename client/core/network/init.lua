@@ -331,13 +331,18 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	-- to see what they are asked
 	root.priority = 1000
 
-	local menu = ui_utils.vertical_menu(root, {min_width = 400})
+	-- No wider than a phone's screen, its lines wrapped to it
+	-- ([UI_SERVER_NARROW])
+	local width = math.min(400, magic.ui.root.width - 40)
+	local menu = ui_utils.vertical_menu(root, {min_width = width})
 	local window = menu.window
 	ui_utils.dim_behind(window, "network permission dialog")
 
 	local function add_text(text)
 		local t = window:CreateChild("Text")
 		t:SetStyleAuto()
+		t:SetWordwrap(true)
+		t:SetFixedWidth(width)
 		t.text = text
 		t:SetTextAlignment(HA_LEFT)
 		return t
@@ -370,7 +375,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	edit.textCopyable = true
 	edit.textSelectable = true
 	edit.minHeight = 24
-	edit.minWidth = 380
+	edit.minWidth = math.min(380, magic.ui.root.width - 60)
 	edit:SetText((entry and entry.description ~= "" and entry.description) or
 			suggested or "")
 

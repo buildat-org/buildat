@@ -779,7 +779,9 @@ function M.show_credits(menu)
 	W.dialog = w
 	w.priority = 10
 	ui_utils.dim_behind(w, "kit dialog credits")
-	w:SetFixedWidth(math.min(560, magic.ui.root.width - 16))
+	-- In the text scale's units, as dialog()'s ([UI_SERVER_NARROW]: past
+	-- 105 % it ran off a phone)
+	w:SetFixedWidth(math.min(560, magic.ui.root.width / (S.font or 1) - 16))
 	text(w, "Credits: what this world is made of")
 	for _, c in ipairs(E.credits or {}) do
 		local who = c.package and tostring(c.package) .. " " ..

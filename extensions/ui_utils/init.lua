@@ -2371,6 +2371,13 @@ function M.safe.show_message_dialog(message, on_close, copy)
 	-- its own and a message longer than that is otherwise cut off. A Text
 	-- knows how wide it turned out once it has text and a font.
 	local function fit_window()
+		-- No wider than the screen ([UI_SERVER_NARROW]: a log's line ran
+		-- off a phone's): a longer line wraps
+		local most = magic.ui.root.width - 60
+		if message_text.width > most then
+			message_text:SetWordwrap(true)
+			message_text:SetFixedWidth(most)
+		end
 		-- The text's own width plus the window's layout border and the frame
 		-- its style draws
 		local wanted = message_text.width + 40
@@ -2466,6 +2473,11 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 	local message_text = window:CreateChild("Text")
 	message_text:SetStyleAuto()
 	message_text.text = message
+	-- No wider than the screen ([UI_SERVER_NARROW]): a longer line wraps
+	if message_text.width > magic.ui.root.width - 60 then
+		message_text:SetWordwrap(true)
+		message_text:SetFixedWidth(magic.ui.root.width - 60)
+	end
 
 	local function finish(yes)
 		uistack.main:pop(root)
