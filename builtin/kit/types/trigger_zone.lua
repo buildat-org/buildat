@@ -25,6 +25,10 @@ return {
 			left = "A player walked out. Value: how many are in it now.",
 			empty = "The last player left.",
 		},
+		params = {
+			size = "The box's size in cells (x, y, z), from its own cell on.",
+			deadly = "Kills a player walking in, and loses a ship touching it.",
+		},
 	},
 	outputs = {entered = "number", left = "number", empty = "none"},
 	on_enter = function(c, by)

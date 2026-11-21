@@ -45,6 +45,9 @@ return {
 		outputs = {
 			changed = "The scores changed. Value: the board's text, for a kit/ui_text.",
 		},
+		params = {
+			title = "The text before the scores.",
+		},
 	},
 	inputs = {add = "none", reset = "none"},
 	outputs = {changed = "string:text"},

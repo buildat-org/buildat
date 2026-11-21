@@ -24,6 +24,13 @@ return {
 		outputs = {
 			placed = "A player placed a copy. Value: the copy's id.",
 		},
+		params = {
+			item = "The item whose use places a copy.",
+			prefab = "The prefab a copy of which is placed.",
+			distance = "How far ahead of the player the copy goes, in metres.",
+			signal = "An input sent to the copy as it is placed, as by the player (empty: none).",
+			consume = "A placing takes one of the item.",
+		},
 	},
 	outputs = {placed = "entity"},
 	on_item = function(c, item, action, target, by)

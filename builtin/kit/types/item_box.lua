@@ -16,6 +16,9 @@ return {
 			put = "A player put one in.",
 			taken = "A player took it out.",
 		},
+		params = {
+			item = "The item it holds, as kit/sword.",
+		},
 	},
 	outputs = {put = "none", taken = "none"},
 	on_use = function(c, by)

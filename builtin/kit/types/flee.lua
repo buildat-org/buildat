@@ -47,6 +47,13 @@ return {
 			fleeing = "It began to flee.",
 			calm = "It stopped fleeing.",
 		},
+		params = {
+			health_below = "Flees while its health is under this share of its max (0 to 1).",
+			player_within = "Flees while a player is this close, in metres (0: never for that).",
+			distance = "How far away it runs from the threat, in metres.",
+			speed = "Its speed while fleeing, as a factor of its walking speed.",
+			enabled = "Whether it flees at all at the start.",
+		},
 	},
 	component = true,
 	creature = true,

@@ -73,6 +73,12 @@ return {
 			left = "A player's run ended: over, or back to the lobby.",
 			in_lobby = "A player came into the lobby, or back to it. Link it to a lobby song's play.",
 		},
+		params = {
+			lobby_screen = "A kit/ui_panel shown to a player while they are in the lobby.",
+			over_screen = "A kit/ui_panel shown to a player with their run's result.",
+			out_of_play = "In the lobby and the result a player is out of play and hidden from the others.",
+			keep_own_body = "Out of play, a player's own body stays drawn for them with the camera on it.",
+		},
 	},
 	params = {
 		lobby_screen = {type = "entity", default = 0},

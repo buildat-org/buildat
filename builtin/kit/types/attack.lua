@@ -41,6 +41,12 @@ return {
 		outputs = {
 			hit = "It hit its target. Value: the target's entity.",
 		},
+		params = {
+			damage = "Health taken by each hit.",
+			reach = "How near in metres the target must be to be hit.",
+			cooldown = "The least seconds between hits.",
+			enabled = "Whether it attacks from the start (enable and disable change it).",
+		},
 	},
 	component = true,
 	creature = true,

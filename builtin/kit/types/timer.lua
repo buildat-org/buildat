@@ -78,6 +78,12 @@ return {
 			left = "Sent at the start and at each tick, with repeats only. Value: the seconds left.",
 			progress = "Sent at the start and at each tick, with repeats only. Value: 0 rising to 1.",
 		},
+		params = {
+			interval = "Seconds of game time between ticks.",
+			repeats = "How many ticks before done (0: until stopped).",
+			autostart = "Starts it at Play, with no start signal.",
+			scope = "shared: one timer for all; per_player: each player who starts it their own.",
+		},
 	},
 	inputs = {start = "none", stop = "none"},
 	outputs = {tick = "number", done = "none", left = "number",

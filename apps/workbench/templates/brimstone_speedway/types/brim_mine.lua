@@ -12,6 +12,10 @@ return {
 		what = "A mine in Brimstone Speedway's race: dropped behind a car and armed, it goes off when a car drives onto it (the race's mine).",
 		inputs = {arm = "Arms it after a moment."},
 		outputs = {touched = "A car drove onto it while it was armed. Value: the mine."},
+		params = {
+			size = "Its zone, cells from its own.",
+			delay = "Seconds from arm until it is armed.",
+		},
 	},
 	look = {shape = "sphere", size = 0.7, color = "#3a0d0d", offset = {0.5, 0.25, 0.5},
 		state = "armed", when = {color = "#e01818"}},

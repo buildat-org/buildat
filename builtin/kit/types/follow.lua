@@ -23,6 +23,10 @@ return {
 			enable = "Follows again.",
 			disable = "Stops following.",
 		},
+		params = {
+			distance = "How close it goes to its target, in metres.",
+			enabled = "Whether it follows at all at the start.",
+		},
 	},
 	component = true,
 	creature = true,

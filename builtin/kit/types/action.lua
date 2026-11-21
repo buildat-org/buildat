@@ -24,6 +24,11 @@ return {
 			released = "The key came up.",
 			held = "Repeats every 0.1 s while the key is down. Value: the seconds held.",
 		},
+		params = {
+			action = "The action's name: letters, digits and _; {key:<name>} in a text shows its key.",
+			key = "Its default key; each player may bind their own.",
+			label = "What the key bindings page and a touchscreen's button call it.",
+		},
 	},
 	outputs = {pressed = "none", released = "none", held = "number"},
 	on_action = function(c, name, phase, value, by)

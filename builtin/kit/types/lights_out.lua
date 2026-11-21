@@ -39,6 +39,10 @@ return {
 		outputs = {
 			solved = "A press left no tile lit.",
 		},
+		params = {
+			size = "Tiles on a side of the board.",
+			seed = "The start's pattern, always solvable (0: the middle tile pressed).",
+		},
 	},
 	inputs = {add = "number"},
 	outputs = {solved = "none"},

@@ -29,6 +29,9 @@ return {
 			damaged = "A hit landed. Value: the amount.",
 			died = "A hit took its last hit points.",
 		},
+		params = {
+			max = "The hit points it starts with and can be healed up to.",
+		},
 	},
 	inputs = {heal = "any", set = "number"},
 	outputs = {damaged = "number", died = "none"},

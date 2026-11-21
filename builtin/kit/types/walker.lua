@@ -31,6 +31,22 @@ return {
 	about = {
 		group = "Players",
 		what = "A movement: players walk with the keys and jump.",
+		params = {
+			speed = "Walking speed in m/s.",
+			acceleration = "How fast it reaches its speed, in m/s^2, times the ground's friction.",
+			gravity = "How fast a body falls, in m/s^2.",
+			jump_height = "How high a jump goes, in metres (0: no jump).",
+			air_control = "The share of the acceleration a body has in the air (0 to 1).",
+			coyote_time = "Seconds after walking off an edge a jump still counts.",
+			jump_buffer = "Seconds before landing a jump pressed still counts.",
+			step_height = "Metres climbed by walking, with no jump.",
+			slope_limit = "Steepest slope walked up, in degrees.",
+			rate = "Movement steps a second.",
+			substeps = "Substeps of each step.",
+			auto_jump = "Walking into a one-voxel step jumps up it: off, on touchscreens, or for all.",
+			fall_damage = "Hit points lost a metre fallen past fall_safe (0: none).",
+			fall_safe = "Metres a body falls without harm.",
+		},
 	},
 	root = true,
 	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)

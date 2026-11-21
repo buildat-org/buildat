@@ -40,6 +40,10 @@ return {
 		outputs = {
 			said = "It said a line. Value: the line's number.",
 		},
+		params = {
+			name = "Its name, shown before each line.",
+			lines = "What it says, the lines separated by |.",
+		},
 	},
 	inputs = {say = "none"},
 	outputs = {said = "number"},

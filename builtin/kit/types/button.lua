@@ -23,6 +23,12 @@ return {
 			pressed = "A player pressed it.",
 			released = "It came back up after its hold time.",
 		},
+		params = {
+			hold = "Seconds it stays down after a press.",
+			color = "Its colour while up, #rrggbb.",
+			color_down = "Its colour while down, #rrggbb.",
+			sound_press = "The sound played at it as it is pressed.",
+		},
 	},
 	outputs = {pressed = "none", released = "none"},
 	on_use = function(c, by)

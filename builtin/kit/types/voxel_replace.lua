@@ -78,6 +78,12 @@ return {
 		outputs = {
 			changed = "It switched. Value: true on, false off.",
 		},
+		params = {
+			size = "The box's size in cells (x, y, z), from its own cell on; 16 a side at most.",
+			find = "The voxel replaced (may be air).",
+			replace = "The voxel put in its place (may be air).",
+			enabled = "Turns it on at the start.",
+		},
 	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},

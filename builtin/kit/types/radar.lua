@@ -10,6 +10,9 @@ return {
 	component = true,
 	about = {
 		what = "A radar on a ship: the other ships' bearings and distances on the HUD of those aboard.",
+		params = {
+			range = "How far it sees other ships, in metres.",
+		},
 	},
 	params = {
 		range = {type = "number", default = 150, min = 1, max = 1000},

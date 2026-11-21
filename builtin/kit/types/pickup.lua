@@ -34,6 +34,12 @@ return {
 		outputs = {
 			taken = "A player walked in and took some. Value: how many.",
 		},
+		params = {
+			item = "The item lying here.",
+			count = "How many of it.",
+			size = "The box a player walks into to take it, in cells.",
+			sound = "The sound played as some is taken.",
+		},
 	},
 	outputs = {taken = "number"},
 	on_start = function(c)

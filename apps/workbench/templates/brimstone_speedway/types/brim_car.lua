@@ -128,6 +128,15 @@ return {
 			smash = "It hit a wall hard. Value: its speed at impact.",
 			ram = "It hit another car while boosted. Value: the other's by.",
 		},
+		params = {
+			speed = "The top speed on dirt, m/s; the air drag is made to match it.",
+			accel = "The engine's push, m/s^2; half again in first gear.",
+			steer = "The front tyres' widest steering angle, degrees.",
+			grip = "Each tyre's grip on asphalt, m/s^2 (EDGM's impulse_base).",
+			boost = "The top speed's factor while the ram boost is on.",
+			rate = "Inputs a second; Kit draws the car between them.",
+			substeps = "Physics steps an input; 120 a second as at 60 and 2.",
+		},
 	},
 	root = true,
 	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
@@ -144,23 +153,18 @@ return {
 		touch_help = {{"Gas/Brake", "drive", "f"}, {"Stick", "steer", "r"},
 			{"Handbrake", "slide", "jump"}}},
 	params = {
-		-- (the top speed on dirt, m/s: the air drag is made to match it)
 		speed = {cat = "physics", type = "number", default = 28, min = 1,
 			max = 80},
-		-- (the engine's push, m/s^2; half again in first gear)
 		accel = {cat = "physics", type = "number", default = 7, min = 1,
 			max = 100},
-		-- (the steering's widest angle, degrees)
 		steer = {cat = "physics", type = "number", default = 54, min = 5,
 			max = 80},
-		-- (each tyre's grip on asphalt, m/s^2: EDGM's impulse_base)
 		grip = {cat = "physics", type = "number", default = 7, min = 0.1,
 			max = 40},
 		boost = {cat = "physics", type = "number", default = 1.45, min = 1,
 			max = 3},
-		-- (the inputs a second; Kit draws the car between them. Each step
-		-- `substeps` of the physics: 120 a second as at 60 and 2, the tyres'
-		-- grip being a share of the speed across them each)
+		-- (substeps: the tyres' grip is a share of the speed across them
+		-- each)
 		rate = {cat = "advanced", type = "number", default = 30, min = 10,
 			max = 120},
 		substeps = {cat = "advanced", type = "number", default = 4, min = 1,

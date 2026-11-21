@@ -247,7 +247,7 @@ db.commit()
 ' || fail "the rows"
 server 7 world "ext.kit_x is reserved"
 grep -aq "Hosted: " "$t/srv7.log" || fail "not hosted ($t/srv7.log)"
-for w in "Component type workbench/reader: players: not a type field Kit knows" \
+for w in "Component type workbench/reader: players: not a type field Kit knows; reads_players = true is the one" \
 		"reader players nil" "ext.player is reserved" "ext.kit_x is reserved"; do
 	grep -aqF "$w" "$t/srv7.log" || fail "no \"$w\" ($t/srv7.log)"
 done

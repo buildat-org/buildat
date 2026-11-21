@@ -20,6 +20,21 @@ return {
 	about = {
 		group = "Players",
 		what = "A movement: players walk to where they click.",
+		params = {
+			speed = "Walking speed in m/s.",
+			stop_distance = "How near in metres to the clicked place it stops.",
+			path = "straight: walks right toward it; simple: finds a way round walls.",
+			acceleration = "How fast it gets up to speed, in m/s^2.",
+			gravity = "The fall's acceleration in m/s^2.",
+			jump_height = "How high a jump goes, in metres.",
+			air_control = "The share of the keys' control kept in the air.",
+			coyote_time = "Seconds after walking off a ledge that a jump still works.",
+			jump_buffer = "Seconds a jump pressed just before landing is kept.",
+			step_height = "The tallest step in metres it walks up without a jump.",
+			slope_limit = "The steepest slope in degrees it walks up.",
+			rate = "Steps a second of its movement.",
+			substeps = "Smaller steps in each step: finer collisions, more work.",
+		},
 	},
 	root = true,
 	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)

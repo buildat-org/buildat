@@ -52,6 +52,17 @@ return {
 			value = "Fills {value} in its text. Value: what to show; none empties it.",
 			clear = "Empties {value}.",
 		},
+		params = {
+			text = "Its text: | a new line, {value} the last value signalled, {key:<action>} the player's key.",
+			facing = "Flat on the board's front, or turned to face the camera.",
+			both_sides = "Flat text on the back too.",
+			size = "The letters' height in cells.",
+			color = "The letters' colour, as #rrggbb.",
+			background = "The board's colour, as #rrggbb (\"none\": no board, the letters alone).",
+			material = "A voxel material the board wears (empty: its background's colour).",
+			board = "The board's width, height and depth in cells.",
+			solid = "Players' bodies meet the board.",
+		},
 	},
 	inputs = {value = "any", clear = "none"},
 	on_start = function(c)

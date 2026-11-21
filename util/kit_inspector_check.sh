@@ -26,6 +26,10 @@
 #     mark ("◆ 3 controls"), a click goes to it; the title's name: its type
 #     on the pointer's rest, its menu (the type, Go to) by a right click
 #     (link.png, name_tip.png, name_menu.png).
+#   - [KIT_PARAM_ABOUT] the camera's row: its about.params line on the
+#     pointer's rest (param_tip.png); then a touch client (BUILDAT_TOUCH=1):
+#     a tap on the angle's name shows its line, a tap elsewhere hides it
+#     (param_tip_touch.png, param_tip_gone.png); both on the screen whole.
 #   - web: [KIT_PHONE_EDITING] in headless Chrome as a phone in portrait
 #     (412x915, touch), a New game's World's (3, [KIT_NO_WORLD]: its
 #     kit/terrain) inspector scrolled to its end and its
@@ -140,6 +144,12 @@ frames 3
 click Button "select 3"
 wait_log 5000 kit editor: selected 3
 frames 5
+mouse_pos Text "camera" 800 238
+wait_log 5000 kit editor: the tip of param 3/1 camera at
+frames 3
+screenshot @T@/param_tip.png
+mouse_pos 400 400
+frames 3
 click DropDownList "▼" 965 178
 delay 500
 keypress Down
@@ -240,6 +250,31 @@ keypress F6
 wait_log_any 10000 kit: controls: camera
 EOF
 sed -i "s|@T@|$t|g" "$t/boss.cmds"
+# [KIT_PARAM_ABOUT] On a touchscreen: a tap on the parameter's name shows its
+# text, a tap elsewhere hides it
+cat > "$t/touch.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+event kit_select 3
+wait_log_any 5000 kit editor: selected 3
+frames 8
+tap Button "Inspector"
+frames 8
+tap Text "angle"
+wait_log 5000 kit editor: tapped param 3/1 angle
+wait_log_any 5000 kit editor: the tip of param 3/1 angle at
+frames 3
+screenshot @T@/param_tip_touch.png
+tap 150 600
+wait_log 5000 kit editor: the tapped tip hidden: param 3/1 angle
+frames 3
+screenshot @T@/param_tip_gone.png
+EOF
+sed -i "s|@T@|$t|g" "$t/touch.cmds"
 start_server "$t/srv.log" "Listening at" 300 auto \
 	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
 	fail "the server did not come up ($t/srv.log)"
@@ -251,6 +286,10 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	run_client 60 "$t/boss.log" timeout 120 bin/buildat -C "$t/client_cache" \
 	-D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 	-c @"$t/boss.cmds" || fail "the client failed ($t/boss.log, $t/srv.log)"
+BUILDAT_TOUCH=1 run_client 60 "$t/touch.log" timeout 120 bin/buildat \
+	-C "$t/client_cache" -D "$t/cu_touch" -s localhost:$SERVER_PORT -w 1024x700 \
+	-l 3 -c @"$t/touch.cmds" ||
+	fail "the touch client failed ($t/touch.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 [ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
@@ -279,7 +318,27 @@ fields=$(grep -aoP 'the field position \w shows .*' "$t/boss.log")
 [ "$(grep -cP '"-?\d+(\.\d{1,3})?" scrolled 0$' <<<"$fields")" = 3 ] &&
 	grep -qP '\.\d' <<<"$fields" ||
 	fail "the position fields: $(tr '\n' ' ' <<<"$fields") ($t/long.png)"
+# [KIT_PARAM_ABOUT] The camera's and the angle's about.params lines, on the
+# screen whole (about's params, two tabs in)
+about() # <param>
+{
+	awk '/^\t\tparams = \{/ { p = 1 } p && /^\t\t\t'"$1"' = "/' \
+		"$here/builtin/kit/types/controls.lua" | grep -oP "$1"' = "\K[^"]+'
+}
+python3 -I - "$t/boss.log" camera "$(about camera)" "$t/touch.log" angle \
+	"$(about angle)" <<'PY' ||
+import re, sys
+for f, k, want in (sys.argv[1:4], sys.argv[4:7]):
+    m = re.search(r"the tip of param 3/1 " + k + r" at (-?\d+) (-?\d+) (\d+) (\d+) in (\d+)x(\d+): (.*)",
+            open(f, errors="replace").read())
+    assert m, f"no tip of {k} in {f}"
+    x, y, w, h, rw, rh = map(int, m.groups()[:6])
+    assert want and m[7] == want, f"{f}: the tip says {m[7]!r}, not {want!r}"
+    assert x >= 0 and y >= 0 and x + w <= rw and y + h <= rh, f"{f}: the tip past the screen: {m[0]}"
+    print(f"ok: {f}: {m[0]}")
+PY
+	fail "a parameter's tip ($t/param_tip.png, $t/param_tip_touch.png)"
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"
-echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection; an unrelated edit keeps the inspector, one of the selected draws it again; a link's other entity marked, its name goes to it; a name's type and menu"
+echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection; an unrelated edit keeps the inspector, one of the selected draws it again; a link's other entity marked, its name goes to it; a name's type and menu; a parameter's line on hover and on a tap"

@@ -22,6 +22,10 @@ return {
 		inputs = {
 			own = "Makes the player who sent it the owner.",
 		},
+		params = {
+			build = "Who may build on it: its owner, the owner's team too, anyone or nobody.",
+			cost = "What a placed voxel takes from the placer's wallet (0: free; a dig gives nothing back).",
+		},
 	},
 	inputs = {own = "none"},
 	on_input = function(c, input, value, by)

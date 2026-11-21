@@ -12,6 +12,11 @@ return {
 			enable = "Wanders again.",
 			disable = "Stops wandering.",
 		},
+		params = {
+			radius = "Metres from where it started it wanders within.",
+			pause = "Seconds between walks, give or take a half.",
+			enabled = "Whether it wanders from the start.",
+		},
 	},
 	component = true,
 	creature = true,

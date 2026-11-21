@@ -23,6 +23,11 @@ return {
 		outputs = {
 			passed = "A car passed it. Value: its order.",
 		},
+		params = {
+			order = "Its place in the lap: 1 first, then 2...",
+			size = "Its zone across the track, cells from its own along the world's axes.",
+			heading = "The way a respawned car faces, degrees (0 +z, 90 +x).",
+		},
 	},
 	params = {
 		order = {type = "number", default = 1, min = 1, max = 64},

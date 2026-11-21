@@ -14,6 +14,10 @@ return {
 		inputs = {
 			play = "Plays it.",
 		},
+		params = {
+			sound = "The game's sound it plays.",
+			everywhere = "As loud for every player in its scene, not louder nearer.",
+		},
 	},
 	inputs = {play = "none"},
 	on_input = function(c, input, value, by)

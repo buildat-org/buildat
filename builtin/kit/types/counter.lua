@@ -18,6 +18,9 @@ return {
 			reached = "The count reached its target. Value: the count.",
 			changed = "An input came. Value: the count.",
 		},
+		params = {
+			target = "The count that sends reached (0: never).",
+		},
 	},
 	inputs = {count = "none", add = "number", reset = "none"},
 	outputs = {reached = "number", changed = "number"},

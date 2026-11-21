@@ -10,6 +10,17 @@ return {
 	version = 1,
 	about = {
 		what = "Rolls, pitches and heaves a free object by the round's time.",
+		params = {
+			wave_roll = "How far it rolls each way, in degrees.",
+			wave_roll_period = "Seconds of one roll back and forth.",
+			wave_pitch = "How far it pitches each way, in degrees.",
+			wave_pitch_period = "Seconds of one pitch back and forth.",
+			wave_yaw = "How far it turns each way, in degrees.",
+			wave_yaw_period = "Seconds of one turn back and forth.",
+			wave_heave = "How far it rises and sinks along its own up, in cells.",
+			wave_heave_period = "Seconds of one heave up and down.",
+			pivot = "The point it turns round, from its place in its own frame.",
+		},
 	},
 	component = true,
 	params = {

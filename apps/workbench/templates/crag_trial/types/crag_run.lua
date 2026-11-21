@@ -115,6 +115,9 @@ return {
 			result = "A run finished. Value: \"Time 12.3|Best 11.0\", for the rider's result card.",
 			board = "The five best times as they change. Value: \"1. name 12.3|2. ...\".",
 		},
+		params = {
+			start = "The entity a rider is put back at after a hazard or the finish.",
+		},
 	},
 	params = {
 		start = {type = "entity", default = 0},

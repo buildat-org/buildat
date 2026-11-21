@@ -34,6 +34,18 @@ return {
 	about = {
 		group = "Building",
 		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. Lying flat (pitch 90: its x and y are the world's x and z; depth up), it makes a top-down view's walls, or, with floor on and collision off, a floor patch whose surface and friction a body meets under its feet. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), with no crossing edges. voxel: a voxel type's textures, tiled across pieces, with a band of its top texture edge_depth cells deep along the edges that face up. surface (a tag) and friction: what a movement's step meets on it (info.surface, info.friction; \"spikes\" is a hazard the step itself reacts to). E.g. {\"points\": [[-20, -4], [20, -4], [20, 1], [0, 3], [-20, 2]], \"voxel\": \"kit/grass\", \"edge_depth\": 0.25}: a dirt hill edged with grass.",
+		params = {
+			points = "Its outline's points in its own x and y from its place (3 to 128, no crossing edges).",
+			depth = "How far it is extruded along its own z, in metres.",
+			color = "Its colour, as #rrggbb (unused with a voxel).",
+			material = "Its surface: plain, metal, glass or glow.",
+			collision = "Bodies meet it.",
+			surface = "A tag a movement's step meets on it, as \"ice\" or \"spikes\".",
+			friction = "The friction a movement's step meets on it (1: normal).",
+			floor = "Lying flat with collision off: a floor patch whose surface and friction bodies meet underfoot.",
+			voxel = "A voxel type whose textures it wears (empty: its colour).",
+			edge_depth = "Cells deep of the voxel's top texture along its upward edges (0: none).",
+		},
 	},
 	params = {
 		points = {type = "points", default = {{-2, -0.5}, {2, -0.5}, {2, 0.5},

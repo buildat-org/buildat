@@ -17,6 +17,18 @@ return {
 	version = 1,
 	about = {
 		what = "A creature's movement: it walks where its behaviours say, on Kit's paths.",
+		params = {
+			speed = "Walking speed in m/s.",
+			width = "Its body's width in metres.",
+			height = "Its body's height in metres.",
+			jump_height = "How high a jump goes in metres; also how high its paths may climb.",
+			acceleration = "How fast it gets up to speed, in m/s^2.",
+			gravity = "The fall's acceleration in m/s^2.",
+			step_height = "The tallest step in metres it walks up without a jump.",
+			slope_limit = "The steepest slope in degrees it walks up.",
+			rate = "Steps a second of its movement.",
+			substeps = "Smaller steps in each step: finer collisions, more work.",
+		},
 	},
 	component = true,
 	movement = {body = {r = 0.4, h = 0.9}, steered = true},
