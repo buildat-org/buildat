@@ -845,7 +845,10 @@ local function show_starting(game)
 	-- seconds. The join takes the same screen over (release()), so there
 	-- is no frame between this and the game's own. The stack's root is
 	-- for its keys and its Update.
-	local root = uistack.main:push({desc = "starting_local_server"})
+	-- [UI_MODAL_DIM] A tap on the stripes is not Back: Escape cancels the
+	-- start, a stray tap did too
+	local root = uistack.main:push({desc = "starting_local_server",
+			tap_outside = false})
 	local screen = (ui_utils.safe or ui_utils).load_screen()
 	local title = "Starting "..game.."..."
 	screen.line(title)

@@ -971,7 +971,11 @@ local function ask_pin(on_done)
 		on_done(true)
 		return
 	end
-	local root, w = open_window("starport pin", 420, nil, {close_glyph = false})
+	-- [UI_MODAL_DIM] Escape, and a tap beside it, is no answer: on_done
+	-- (false, true), cancelled (the caller heard nothing before)
+	local root, w = open_window("starport pin", 420, function()
+		on_done(false, true)
+	end, {close_glyph = false})
 	add_text(w, "These settings are locked with a PIN.")
 	local e = add_edit(w, "", true)
 	e:SetFocus(true)
@@ -2297,7 +2301,9 @@ local function ask_age(url, session, on_done)
 		if not can then
 			return on_done(false)
 		end
-		local root, w = open_window("starport id age", 560, nil, {close_glyph = false})
+		local root, w = open_window("starport id age", 560, function()
+			on_done(false)
+		end, {close_glyph = false})
 		add_text(w, "Your Starport ID has no age yet")
 		add_text(w, "Servers on " .. url .. " have age limits, so before "..
 				"your ID joins one, say whether you are 18 or over. For "..
@@ -2365,7 +2371,10 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 	if rename_reason then
 		q = q .. "&rename=1"
 	end
-	local root, w = open_window("starport id web", 520, nil, {close_glyph = false})
+	local root, w = open_window("starport id web", 520, function()
+		web_wait = nil
+		cb(nil, "cancelled")
+	end, {close_glyph = false})
 	if rename_reason then
 		add_text(w, rename_reason)
 	end
@@ -2489,7 +2498,9 @@ function M.safe.id_token_here(cb, rename_reason)
 				return cb(nil, "The Starport cannot be reached (" .. why ..
 						"), and there is no saved login for this server")
 			end
-			local root, w = open_window("starport id offline", 520, nil, {close_glyph = false})
+			local root, w = open_window("starport id offline", 520, function()
+				cb(nil, "cancelled")
+			end, {close_glyph = false})
 			add_text(w, "The Starport cannot be reached. Your saved login "..
 					"for this server is locked with your Starport password:")
 			local e = add_edit(w, "", true)
@@ -2521,7 +2532,9 @@ function M.safe.id_token_here(cb, rename_reason)
 		local ask
 		-- The name to use in the community, the reason first if any
 		local function name_prompt(reason, suggest, rename)
-			local root, w = open_window("starport id name", 520, nil, {close_glyph = false})
+			local root, w = open_window("starport id name", 520, function()
+				cb(nil, "cancelled")
+			end, {close_glyph = false})
 			if reason then
 				add_text(w, reason, WARN)
 			end
@@ -2611,8 +2624,12 @@ end
 -- one is set; on_closed() at its Back
 function M.safe.open_settings(on_closed)
 	settings_closed = on_closed
-	ask_pin(function(ok)
-		settings_page(ok)
+	ask_pin(function(ok, cancelled)
+		if not cancelled then
+			settings_page(ok)
+		elseif on_closed then
+			on_closed()
+		end
 	end)
 end
 

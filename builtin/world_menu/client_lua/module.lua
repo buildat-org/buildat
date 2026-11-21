@@ -67,9 +67,12 @@ local function close()
 	end
 end
 
-local function own_push(kind)
+-- keep_taps: a tap beside it is not Back ([UI_MODAL_DIM]: the boot list,
+-- whose Back leaves the server)
+local function own_push(kind, keep_taps)
 	pop()
-	own_root = uistack.main:push({desc = "world menu: " .. kind})
+	own_root = uistack.main:push({desc = "world menu: " .. kind,
+			tap_outside = not keep_taps})
 	return own_root
 end
 
@@ -127,8 +130,8 @@ local function button_on(menu, parent, label, action, width, main)
 	return b
 end
 
-local function screen(spec, kind)
-	local root = (spec.push or own_push)(kind)
+local function screen(spec, kind, keep_taps)
+	local root = (spec.push or own_push)(kind, keep_taps)
 	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	return menu, root
@@ -220,7 +223,7 @@ local function draw_copy(spec, name)
 end
 
 function M.open(spec)
-	local menu, root = screen(spec, "worlds")
+	local menu, root = screen(spec, "worlds", not spec.back)
 	text_on(menu.window, spec.title)
 	local columns = menu.window:CreateChild("UIElement")
 	columns:SetLayout(narrow() and magic.LM_VERTICAL or magic.LM_HORIZONTAL,

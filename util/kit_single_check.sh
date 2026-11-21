@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-21)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor_input.lua builtin/kit/types/environment.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua 3rdparty/Urho3D/Source/Urho3D/UI/Window.cpp extensions/pause_menu/init.lua
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor_input.lua builtin/kit/types/environment.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua 3rdparty/Urho3D/Source/Urho3D/UI/Window.cpp extensions/pause_menu/init.lua builtin/world_menu/client_lua/module.lua extensions/launch_menu/screens.lua client/core/uistack/init.lua
 # [KIT_SINGLE] (kit_plan 4z37z) A type with single = true, one a holder
 # (the app root, a scene), on Workbench's server of Brimstone Speedway
 # (scenes world and trial; kit/game_rules 3 and kit/controls 4 on the
@@ -25,7 +25,15 @@
 #   4. [UI_MODAL_DIM] The palette's menu, the pause menu, the Server window
 #      over it and Kit's credits each shade the rest of the screen while up
 #      and not once a click off it has closed it (the credits' click off
-#      was eaten before).
+#      was eaten before). (0a84) The click that closes the pause menu is
+#      not the view's too; a plain ui_utils dialog over the editor (event
+#      message_dialog) has a click beside it and its own Escape (the pause
+#      menu opened over it).
+#   5. (0a84) The launcher (-a app/workbench/play, a local server): a tap
+#      on the start's stripes does not cancel it, one beside the boot list
+#      does not leave the server, one off the pause menu leaves it closed
+#      (TAP_BACK's Escape opened it again), one beside a dialog over the
+#      editor closes it and is not the view's.
 # Screenshots, kept with KEEP_TMP=1: $t/selected.png (the inspector on it),
 # $t/dim_*.png
 #   util/kit_single_check.sh
@@ -228,7 +236,9 @@ CLIENT=$!
 CHECK_PIDS+=($CLIENT)
 exec 3> "$t/c.cmd"
 await "$CL" 0 120 "Joined as kitboss"
-cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
+# (awaited here: the page can come before the client reads a wait_log_any)
+await "$CL" 0 30 "server window: the page ntfy"
+cmd "frames 3" 'click Button "Don'"'"'t add"'
 await "$CL" 0 30 "kit editor: edit rights: yes"
 await "$CL" 0 30 "kit editor: edit mode on"
 menu
@@ -309,10 +319,85 @@ await "$CL" "$m" 10 "kit editor: the credits closed"
 await "$CL" "$m" 10 "pause: the menu shown"
 step 10 "pause: a click off the menu" "${OFF[@]}"
 shot dim_credits_off 0
+# 0a84: a click that closed the menu is eaten (the view under it took it
+# too); a plain ui_utils dialog over the editor has the presses and its own
+# Escape (the pause menu opened over it)
+acted() # <offset>: a press the view took since
+{
+	tail -c +$(($1 + 1)) "$CL" | grep -aE "kit editor: (selected|into the crosshair|cursor at)" |
+		head -1
+}
+VIEW=("frames 3" "mouse_pos 300 400" "mouse_click left")
+menu
+m=$(mark "$CL")
+step 10 "pause: a click off the menu" "${VIEW[@]}"
+shot eaten1
+a=$(acted "$m")
+[ -z "$a" ] || fail "the click off the pause menu acted in the editor: $a ($CL)"
+step 10 "dim behind: message dialog" "event message_dialog A plain dialog"
+m=$(mark "$CL")
+cmd "${VIEW[@]}"
+shot eaten2
+a=$(acted "$m")
+[ -z "$a" ] || fail "a click beside the dialog acted in the editor: $a ($CL)"
+step 10 "show_message_dialog: closed" "frames 3" "keypress Escape"
+shot eaten3
+tail -c +$((m + 1)) "$CL" | grep -aq "pause: the menu shown" &&
+	fail "Escape on the dialog opened the pause menu ($CL)"
 cmd "quit"
 exec 3>&-
 wait $CLIENT
 CLIENT=
 kill -INT $SRV 2>/dev/null
 wait $SRV 2>/dev/null
-echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it"
+
+# 5. 0a84 on the launcher, Workbench on a local server of its own (the
+# launcher's placeholder under the game: a tap on nothing is Back, as
+# Escape): a tap on the start's stripes does not cancel it; one beside the
+# boot list does not leave the server; one off the pause menu closes it
+# and it stays closed (the Escape came after the menu's own close and
+# opened it again); one beside a dialog over the editor closes it and
+# the editor does not take it
+CL=$t/launcher.log
+mkfifo "$t/l.cmd"
+sleep 900 > "$t/l.cmd" &
+CHECK_PIDS+=($!)
+DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 timeout 600 bin/buildat \
+	-o launch_ui=launch_menu -D "$t/lu" -a app/workbench/play \
+	-w 1024x700 -l 3 -o sound_mute=1 -c - < "$t/l.cmd" > "$CL" 2>&1 &
+CLIENT=$!
+CHECK_PIDS+=($CLIENT)
+exec 3> "$t/l.cmd"
+await "$CL" 0 60 "launch_menu: start: Starting"
+m=$(mark "$CL")
+TAP=("mouse_pos 50 350" "mouse_click left")
+cmd "${TAP[@]}"
+await "$CL" "$m" 120 "world_menu: the list shown, 0 worlds"
+tail -c +$((m + 1)) "$CL" | grep -aq "Stopping local server" &&
+	fail "a tap on the stripes cancelled the start ($CL)"
+m=$(mark "$CL")
+step 10 "scan boot: done" "frames 3" "${TAP[@]}" "frames 5" "event scan boot"
+tail -c +$((m + 1)) "$CL" | grep -aq 'scan boot: menu ".*world menu: worlds"' ||
+	fail "a tap beside the boot list left it ($CL)"
+step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
+step 120 "kit editor: in session" "frames 3" 'click Button "Create"'
+step 10 "pause: the menu shown" "frames 10" "keypress Escape"
+m=$(mark "$CL")
+step 10 "pause: a click off the menu" "frames 3" "${TAP[@]}"
+shot off
+tail -c +$((m + 1)) "$CL" | grep -aq "pause: the menu shown" &&
+	fail "the pause menu came back after a click off it ($CL)"
+step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+step 10 "dim behind: message dialog" "frames 3" "event message_dialog A plain dialog"
+m=$(mark "$CL")
+step 10 "show_message_dialog: closed" "${VIEW[@]}"
+shot dialog
+a=$(acted "$m")
+[ -z "$a" ] || fail "the tap that closed the dialog acted in the editor: $a ($CL)"
+tail -c +$((m + 1)) "$CL" | grep -aq "pause: the menu shown" &&
+	fail "the tap off the dialog opened the pause menu ($CL)"
+cmd "quit"
+exec 3>&-
+wait $CLIENT
+CLIENT=
+echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it; a click off the pause menu or a dialog is eaten, the dialog's Escape its own; on the launcher a tap does not cancel the start nor leave the boot list, and the pause menu stays closed after one off it"

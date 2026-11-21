@@ -36,7 +36,8 @@
 --   menu.back() (the menu again, next frame) or menu.close() (play)
 -- menu.open(), menu.close(), menu.back(), menu.refresh() (drawn again if
 -- up), menu.chat() (the chat over the world, its back to play),
--- menu.shown() (the menu up), menu.held() (the menu or a page of it),
+-- menu.shown() (the menu up), menu.held() (the menu or a page of it, or
+-- the click off it that closed it, to that frame's end),
 -- menu.escape() (true: taken), menu.on_escape(fn): fn() first for an
 -- Escape in play, true taking it (Kit's pending link)
 local magic = require("buildat/extension/urho3d")
@@ -52,6 +53,10 @@ local M = {safe = {}}
 -- The app's menu: one at a time, the events below its
 local cur = nil
 magic.SubscribeToEvent("Update", function()
+	-- (after the frame's input: a click off the menu is done with)
+	if cur then
+		cur.click_off = nil
+	end
 	if cur and cur.pending then
 		local fn = cur.pending
 		cur.pending = nil
@@ -144,7 +149,10 @@ function M.safe.new(o)
 	end
 
 	local function draw()
-		root = uistack.main:push({desc = "pause"})
+		-- [UI_MODAL_DIM] A click off it is its own (the hold's, below):
+		-- TAP_BACK's Escape too came after that click had closed it, and
+		-- opened it again
+		root = uistack.main:push({desc = "pause", tap_outside = false})
 		local vm = ui_utils.vertical_menu(root, {min_width = 260})
 		local w = vm.window
 		w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
@@ -192,6 +200,10 @@ function M.safe.new(o)
 			if x < 0 or y < 0 or x >= w.width or y >= w.height then
 				log:info("pause: a click off the menu")
 				menu.close()
+				-- [UI_MODAL_DIM] The click is the menu's: held() to the
+				-- frame's end, so the game's own press handlers, after
+				-- this one, eat it (Kit's editor went into its crosshair)
+				S.click_off = true
 			end
 		end})
 	end
@@ -219,7 +231,7 @@ function M.safe.new(o)
 		return state == "open"
 	end
 	function menu.held()
-		return state ~= nil
+		return state ~= nil or S.click_off == true
 	end
 
 	-- The chat: from the menu its back is the menu, from the world play
