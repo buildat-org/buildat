@@ -1,5 +1,12 @@
 # util/kit_corpus_check.sh's record of api1/ship (RECORD=1 writes it)
 [warnings]
+W kit: World: entity N's kit/ui_text text: [back] is the old key hint (deprecated, removable at Kit API level N): {key:back} instead
+W kit: World: entity N's kit/ui_text text: [exit] is the old key hint (deprecated, removable at Kit API level N): {key:exit} instead
+W kit: World: entity N's kit/ui_text text: [forward] is the old key hint (deprecated, removable at Kit API level N): {key:forward} instead
+W kit: World: entity N's kit/ui_text text: [jump] is the old key hint (deprecated, removable at Kit API level N): {key:jump} instead
+W kit: World: entity N's kit/ui_text text: [left] is the old key hint (deprecated, removable at Kit API level N): {key:left} instead
+W kit: World: entity N's kit/ui_text text: [right] is the old key hint (deprecated, removable at Kit API level N): {key:right} instead
+W kit: World: entity N's kit/ui_text text: [use] is the old key hint (deprecated, removable at Kit API level N): {key:use} instead
 [composition]
 entities 32 (kit 1, api 1)
 2 1 scene

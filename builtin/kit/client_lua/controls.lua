@@ -1379,7 +1379,7 @@ end)
 
 -- [KIT_PLAY_HINTS] The movement's hints for an app's help line: its
 -- movement.help (the keys) or touch_help (a touchscreen's), {{keys, what,
--- input}...}, keys in key_text's [action] form, input f, r, jump or down.
+-- input}...}, keys as key_text's {key:<action>}, input f, r, jump or down.
 -- Each item is gone once its input was used in play, kept on this client
 -- per movement type (Kit's storage kit_hints, "<type> <input>" lines).
 -- kit.movement_help() -> "keys: what  ..." ("" all used), nil: none declared

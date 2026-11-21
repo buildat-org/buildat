@@ -2735,9 +2735,9 @@ local function compute_guide()
 				S.view == "2d" and "drag: into 3D, orbiting" or
 				S.view == "3d" and "drag: orbit" or S.view == "front" and
 				"drag: pan the view" or "drag: turn"
-		g.note = not S.touch and M.key_text("Ctrl+[copy]: copy the box (and " ..
-				"the selection), Ctrl+[paste]: paste, [box] or Esc: put the " ..
-				"box away") or nil
+		g.note = not S.touch and M.key_text("Ctrl+{key:copy}: copy the box " ..
+				"(and the selection), Ctrl+{key:paste}: paste, {key:box} or " ..
+				"Esc: put the box away") or nil
 		return g
 	end
 	if S.tool == "voxels" and (S.view == "walk" or NT.sh.on()) then
@@ -2755,7 +2755,8 @@ local function compute_guide()
 			g.right = t.front and "place " .. tostring(S.voxel) .. " at " ..
 					table.concat(t.front, ",") or nil
 		end
-		g.note = not S.touch and M.key_text("[voxels]: put the voxels away") ..
+		g.note = not S.touch and M.key_text("{key:voxels}: put the voxels " ..
+				"away") ..
 				(M.looking() and ", Esc: out of the crosshair" or "") or nil
 		return g
 	end
@@ -2777,8 +2778,8 @@ local function compute_guide()
 		g.right = (p and p.id and "its menu; " or "") .. (pans_right() and
 				"drag: pan the view" or S.view == "2d" and "drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
 				S.view == "front" and "drag: pan the view" or "drag: turn")
-		g.note = not S.touch and M.key_text("[voxels] or Esc: put the voxels " ..
-				"away") or nil
+		g.note = not S.touch and M.key_text("{key:voxels} or Esc: put the " ..
+				"voxels away") or nil
 		return g
 	end
 	if S.placing and NT.pg.guide(g, mx, my) then

@@ -1,5 +1,7 @@
 # util/kit_corpus_check.sh's record of api1/ctf (RECORD=1 writes it)
 [warnings]
+W kit: World: entity N's kit/sign text: [ready] is the old key hint (deprecated, removable at Kit API level N): {key:ready} instead
+W kit: World: entity N's kit/ui_text text: [ready] is the old key hint (deprecated, removable at Kit API level N): {key:ready} instead
 [composition]
 entities 72 (kit 1, api 1)
 2 1 scene

@@ -1281,6 +1281,28 @@ static sv_<ss_> unknown_placeholders(const ss_ &s)
 	return out;
 }
 
+// [KIT_DEPRECATE] The <action>s of the old key hints "[<action>]" in s
+// (input.lua's key_text; deprecated, removable at Kit API level 2), each
+// once. simplified: every [<lowercase word>], an action or not (the
+// server does not know the client's and the app's actions)
+static sv_<ss_> old_key_hints(const ss_ &s)
+{
+	sv_<ss_> out;
+	for(size_t i = s.find('['); i != ss_::npos; i = s.find('[', i + 1)){
+		size_t j = i + 1;
+		if(j >= s.size() || !islower((unsigned char)s[j]))
+			continue;
+		while(j < s.size() && (islower((unsigned char)s[j]) ||
+				isdigit((unsigned char)s[j]) || s[j] == '_'))
+			j++;
+		const ss_ w = s.substr(i + 1, j - i - 1);
+		if(j < s.size() && s[j] == ']' &&
+				std::find(out.begin(), out.end(), w) == out.end())
+			out.push_back(w);
+	}
+	return out;
+}
+
 // A type's inputs or outputs as its file gives them, {"a", b = "number"}
 // (an array, or an object whose number keys are names of type "any"):
 // the names, each one's type; the declaration's key made the array of the
@@ -35189,7 +35211,7 @@ struct Module: public interface::Module, public Interface
 				"(experimental) = "
 				"{{\"Left\", \"r\", -1}, {\"Right\", \"r\", 1}} (a stack at the "
 				"lower left, each holding f or r at that value); help = "
-				"{{\"[forward]/[back]\", \"gas, brake\", \"f\"}...} and "
+				"{{\"{key:forward}/{key:back}\", \"gas, brake\", \"f\"}...} and "
 				"touch_help alike: the help line in play (keys, what, the input "
 				"f, r, jump or down), each item gone once its input is used. "
 				"client: an optional client part the clients run (sandboxed): a "
@@ -39720,8 +39742,9 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_TEXT_PLACEHOLDER] The authored texts' {<word>:...} of a word Kit
-	// has no meaning for: drawn as written, the word Kit's to give one later.
-	// At Play, in get_goal_warnings and (only: those) after an edit.
+	// has no meaning for: drawn as written, the word Kit's to give one later;
+	// and ([KIT_DEPRECATE]) their old key hints "[<action>]". At Play, in
+	// get_goal_warnings and (only: those) after an edit.
 	// simplified: every string parameter read as a text, drawn or not
 	sv_<ss_> placeholder_warnings(const std::set<uint64_t> *only = nullptr)
 	{
@@ -39734,13 +39757,20 @@ struct Module: public interface::Module, public Interface
 				continue;
 			for(const Instance &in : x.second.comps)
 				for(json::Iterator it(in.params); it; ++it)
-					if((*it).is_string())
+					if((*it).is_string()){
+						const ss_ at = "entity "+itos(x.first)+"'s "+in.type+
+								" "+it.key()+": ";
 						for(const ss_ &w : unknown_placeholders(
 								(*it).as_string()))
-							out.push_back("entity "+itos(x.first)+"'s "+in.type+
-									" "+it.key()+": {"+w+":...} is no text "
+							out.push_back(at+"{"+w+":...} is no text "
 									"placeholder of Kit's, shown as written ("
 									"{<word>:...} is reserved; Kit has "+known+")");
+						// [KIT_DEPRECATE] the old key hint
+						for(const ss_ &w : old_key_hints((*it).as_string()))
+							out.push_back(at+"["+w+"] is the old key hint "
+									"(deprecated, removable at Kit API level 2): "
+									"{key:"+w+"} instead");
+					}
 		}
 		return out;
 	}

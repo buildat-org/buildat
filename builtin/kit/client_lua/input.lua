@@ -19,7 +19,8 @@
 --     ([KIT_UI_KEYS] both false while a screen of Kit's UI has the keys,
 --     kit.ui_keys(), but for Edit mode's key)
 --   kit.key_name(id) -> the action's key ("" unbound; nil: no such action)
---   kit.key_text(s) -> s with each "[id]" of an action "[its key]" and
+--   kit.key_text(s) -> s with each "[id]" of an action "[its key]"
+--     ([KIT_DEPRECATE] deprecated, removable at Kit API level 2) and
 --     ([KIT_TEXT_PLACEHOLDER]) each "{key:id}" its key bare, "(unbound)"
 --     with none (a touchscreen: the on-screen control's label for both,
 --     kit.touch_label), as signs and the HUD show it, every frame: a
@@ -50,7 +51,7 @@ local KIT_KEYS = {
 		default = "Space", shared = "jump", pad = 0},
 	{id = "down", label = "Down in the editor's 3D view", default = "C"},
 	-- No key by default: the left click uses ([KIT] stage 4e2: E no longer
-	-- did), the text's "[use]" says so; a key bound uses too
+	-- did), the text's {key:use} says so; a key bound uses too
 	{id = "use", label = "Use what you point at (also the left click)",
 		pad = 2, mouse = "Left click"},
 	{id = "exit", label = "Leave a seat", default = "F", pad = 1},

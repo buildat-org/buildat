@@ -19,10 +19,10 @@
 --     change in any release) = {{"Left", "r", -1}, {"Right", "r", 1}}:
 --     a stack at the lower left beside the stick (top to bottom), each holding
 --     that input (f or r) at that value while pressed (full steering taps),
---     [KIT_PLAY_HINTS] help = {{"[forward]/[back]", "gas, brake", "f"}...}
---     and touch_help alike: an app's help line in play (keys, what, the
---     input: f, r, jump or down), each item gone once its input is used
---     (controls.lua's kit.movement_help; without them the app's own)}
+--     [KIT_PLAY_HINTS] help = {{"{key:forward}/{key:back}", "gas, brake",
+--     "f"}...} and touch_help alike: an app's help line in play (keys,
+--     what, the input: f, r, jump or down), each item gone once its input
+--     is used (controls.lua's kit.movement_help; without them the app's own)}
 --   step = function(s, i, dt, w, p) ... end
 -- [KIT_PLANE] stage 4, a movement of a builder's own (a custom type) has more:
 --   movement.raw_keys = true: the side camera's keys as they are (f forward
