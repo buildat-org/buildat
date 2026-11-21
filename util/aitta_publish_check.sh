@@ -104,15 +104,15 @@ mapfile -t cmds < <(
 	echo "delay 1000" # the question's window drawn after the line
 	# The admin's ntfy question first, in the Aitta's window: Later, back
 	# to the Aitta's page ([NTFY_ASK_OVER_GAME])
-	echo "mouse_pos 437 134"; echo "mouse_click left"
+	echo 'click Button "Later"'
 	echo "wait_log 10000 aitta: home, no author"; echo "delay 500"
 	echo "shot bind.png"; echo "event scan"
 	# The Aitta's page: Bind, then Back to the launcher, under the bound
 	# name and the form for another ([AITTA_AUTHORS])
-	echo "mouse_pos 422 193"; echo "mouse_click left"
+	echo 'click Button "Bind"'
 	echo "wait_log 10000 aitta: home, author tester"; echo "delay 500"
 	echo "shot bound.png"
-	echo "mouse_pos 422 272"; echo "mouse_click left"
+	echo 'click Button "Back to the launcher"'
 	open publish "wait_log 30000 launch_menu: back to Home"
 	page "the package page" 10000
 	tabs 16; echo "keypress Return"; page "the key page, The key is bound" 20000
