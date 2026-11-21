@@ -9,7 +9,7 @@
 # game_values, the check's shorter ones over them):
 #   the lobby (scene "world"): a flat World, kit/game_rules (inventory
 #     building, hand_level 0, on_death keep, respawn on_signal), a
-#     spawner of players, a kit/arena off it (map "map", time_up "most");
+#     spawner of players, a kit/arena off it (maps "map", time_up "most");
 #     the items kitboss/knife (kit/sword: damage 1000, reach 3, cooldown
 #     5, no knockback) and kitboss/bomb (use "use", the look kit/bomb_look)
 #   the map (scene "map"): a flat 96x96 grassland World (grass 1, dirt 1,
@@ -80,6 +80,20 @@ if [ -z "$build_only" ]; then
 	mkdir -p "$t/user/apps/workbench/check_types"
 	# The check's warps (util/kit_ctf_warp.lua)
 	cp "$here/util/kit_ctf_warp.lua" "$t/user/apps/workbench/check_types/warp.lua"
+	# [KIT_MAP_ROTATION] A reads_teams type with kit/arena's next_map state
+	# (the arena's own sets it from its maps: kit_arena_most_check.sh):
+	# outside a round Kit gives it the teams of that scene
+	cat > "$t/user/apps/workbench/check_types/teams_seen.lua" <<'EOF'
+return {version = 1, reads_teams = true, state = {next_map = {default = "map"}},
+	on_start = function(c)
+		local n = {}
+		for _, t in ipairs(c.teams or {}) do
+			n[#n + 1] = tostring(t.params.name)
+		end
+		table.sort(n)
+		c:log("teams seen:", table.concat(n, " "))
+	end}
+EOF
 	export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 fi
 cd "$here/Build"
@@ -234,7 +248,7 @@ EOF
 	set_ $id duration $DURATION
 	set_ $id results $RESULTS
 	set_ $id time_up '"most"'
-	set_ $id map '"map"'
+	set_ $id maps '"map"'
 	set_ $id hud_style '"shapes"'
 	# The map
 	id=$((id + 1))
@@ -513,6 +527,7 @@ extras()
 	echo "$SCENE_LOBBY"
 	place workbench/warp '-4, 1, 4'
 	set_ $id p1 '[9, 1, 1]'
+	place workbench/teams_seen '-6, 1, 4'
 }
 {
 	compose
@@ -834,6 +849,8 @@ def after(a, text, what):
 def part(n):
 	return log.split("Session %d (a game)" % n)[1].split("Session %d ended" % n)[0]
 s1, s2 = part(1), part(2)
+assert re.search(r"teams_seen \d+: teams seen: Blue Red\n",
+	log.split("Session 1 (a game)")[0]), "the map's teams in the lobby"
 for who, team in [("kitboss", "Red"), ("kitbob", "Blue"), ("kitcat", "Red")]:
 	assert "%s joins team %s" % (who, team) in s1, who + " in " + team
 # 1. prep

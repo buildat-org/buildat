@@ -3,11 +3,11 @@
 [composition]
 entities 72 (kit 1, api 1)
 2 1 scene
-3 2 kit/terrain@2#0753ad86/97d170e1
+3 2 kit/terrain@2#353a6803/97d170e1
 4 2 kit/spawner@2#2f075759/97d170e1
 5 2 kit/part@1#996c43ce/97d170e1
 6 2 kit/part@1#3c4ebd3a/97d170e1
-7 2 kit/arena@3#ad80eeaf/0f79aa85
+7 2 kit/arena@3#64a6b212/0f79aa85
 8 2 kit/sign@1#6bc010fa/97d170e1
 9 2 kit/sign@1#cbcf1d72/97d170e1
 10 2 kit/ui_text@2#0b0bc0ae/97d170e1
@@ -16,7 +16,7 @@ entities 72 (kit 1, api 1)
 13 2 kit/part@1#3c5ba33d/97d170e1
 14 2 kit/part@1#3c5ba33d/97d170e1
 15 1 scene
-16 15 kit/terrain@2#c6cfafc4/97d170e1
+16 15 kit/terrain@2#f96c6aad/97d170e1
 17 15 kit/symmetry@2#a40ef902/97d170e1
 18 17 kit/team@1#459f83f5/97d170e1
 19 18 kit/region@1#a77bdf63/97d170e1
@@ -103,7 +103,7 @@ kit/bot 75: goal 64 reach ""
 kit/bot 76: goal 64 reach ""
 [keys]
 kit/action action key label
-kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map_pick maps max_players max_rounds own_look players ready results score_to_win size status_line time_up
 kit/effect along_hit arc_color arc_time at_entity axis box color color2 count drag every fade flash_color flash_time gravity grow land light_brightness light_color light_range light_time offset repeats scale_by_damage shape size_max size_min speed_max speed_min spin spread team_color trigger ttl_max ttl_min where
 kit/flag click_range color enabled holder_hint home_range hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y immunity lift marker_color marker_label marker_lift marker_style on_blast on_death own_look place_action place_by place_key place_label placed_range poll return_time score_interval score_points score_to speed steal steal_range take_home take_placed use
 kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
@@ -117,7 +117,7 @@ kit/spawner copy every max own_look players prefab spread
 kit/starting_kit clear items when
 kit/symmetry angle enabled mode slice slices
 kit/team color friendly_fire name own_look win_score
-kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/terrain biome border caves decorations depth dig flatten generator height level materials place sea_level seed size sky_light soil_depth spread surface width
 kit/timer autostart interval repeats scope
 kit/ui_bar anchor background blink_below border color direction form height label max min order shown size source start style to width x y
 kit/ui_panel anchor background border color gap height keyboard layout order screen shown size style title to width x y

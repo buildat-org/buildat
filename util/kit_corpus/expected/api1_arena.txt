@@ -3,11 +3,11 @@
 [composition]
 entities 90 (kit 1, api 1)
 2 1 scene
-3 2 kit/terrain@2#0753ad86/97d170e1
+3 2 kit/terrain@2#353a6803/97d170e1
 4 2 kit/spawner@2#2f075759/97d170e1
 5 2 kit/part@1#996c43ce/97d170e1
 6 2 kit/part@1#3c4ebd3a/97d170e1
-7 2 kit/arena@3#d1b6d56e/3b691aea
+7 2 kit/arena@3#9b346b3f/3b691aea
 8 2 kit/sign@1#18433c70/97d170e1
 9 2 kit/sign@1#b0f70e6a/97d170e1
 10 2 kit/part@1#3c5ba33d/97d170e1
@@ -15,7 +15,7 @@ entities 90 (kit 1, api 1)
 12 2 kit/part@1#3c5ba33d/97d170e1
 13 2 kit/part@1#3c5ba33d/97d170e1
 14 1 scene
-15 14 kit/terrain@2#2a6de703/97d170e1
+15 14 kit/terrain@2#896b8773/97d170e1
 16 14 kit/team@1#459f83f5/fd5634be
 17 16 kit/starting_kit@1#86dcf718/97d170e1
 18 16 kit/region@1#27ccf814/97d170e1
@@ -55,7 +55,7 @@ entities 90 (kit 1, api 1)
 52 14 kit/ui_text@2#769971a4/97d170e1
 53 14 kit/ui_text@2#e0795132/97d170e1
 54 1 scene
-55 54 kit/terrain@2#586b7999/97d170e1
+55 54 kit/terrain@2#5ab55c1d/97d170e1
 56 54 kit/team@1#459f83f5/9d7a2e89
 57 56 kit/starting_kit@1#86dcf718/97d170e1
 58 56 kit/region@1#27ccf814/97d170e1
@@ -115,7 +115,7 @@ kit/goal 81: waits for activate
 kit/goal 84: waits for activate
 kit/goal 85: waits for activate
 [keys]
-kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map map_pick maps max_players max_rounds own_look players ready results score_to_win size time_up
+kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map_pick maps max_players max_rounds own_look players ready results score_to_win size status_line time_up
 kit/button color color_down hold own_look sound_press use
 kit/goal audience autostart except_own_zone hud_anchor hud_background hud_border hud_color hud_height hud_order hud_panel hud_size hud_style hud_width hud_x hud_y item_tag kind marker marker_color marker_label marker_lift marker_style pick priority repeat size target text to validate_reachable via when_holding
 kit/part collision color material own_look rotation shape size voxel
@@ -124,5 +124,5 @@ kit/sign background board both_sides color facing material own_look size solid t
 kit/spawner copy every max own_look players prefab spread
 kit/starting_kit clear items when
 kit/team color friendly_fire name own_look win_score
-kit/terrain biome border caves decorations depth dig generator height level materials place sea_level seed size sky_light soil_depth spread surface width
+kit/terrain biome border caves decorations depth dig flatten generator height level materials place sea_level seed size sky_light soil_depth spread surface width
 kit/ui_text anchor background border color height order shown size style text to width x y

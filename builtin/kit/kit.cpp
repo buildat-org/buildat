@@ -18506,15 +18506,16 @@ struct Module: public interface::Module, public Interface
 	// [KIT_MINIGAMES_FIX] The teams a `reads_teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
 	// any (a placed prefab's own)
-	// [KIT_CTF] A `map` scene of its own (kit/arena's): that scene's teams
+	// [KIT_CTF] A `next_map` scene in its state (kit/arena's next round's,
+	// of its `maps`): that scene's teams
 	sv_<uint64_t> teams_of(const Entity &e)
 	{
 		ss_ scene;
 		scene_of(e, &scene);
 		for(const Instance &in : e.comps)
 			if(m_types[in.type].teams && m_host.scenes.count(
-					jstr(in.params, "map")))
-				scene = jstr(in.params, "map");
+					jstr(in.state, "next_map")))
+				scene = jstr(in.state, "next_map");
 		// [KIT_MAP_ROTATION] Its round's: the map picked for it
 		const GameSession *gs = active_session();
 		if(gs && gs->maker == e.id && !gs->map.empty())
@@ -46516,7 +46517,7 @@ struct Module: public interface::Module, public Interface
 			m_peer_session[peer] = to;
 		else
 			m_peer_session.erase(peer);
-		// [KIT_CTF] kit/arena's `map`: into the game in that scene, and
+		// [KIT_CTF] a session's map (kit/arena's): into the game in that scene, and
 		// back out in the arena's own
 		auto msi = m_sessions.find(to ? to : from);
 		const ss_ map = msi == m_sessions.end() ? "" : msi->second->map;
@@ -46754,10 +46755,10 @@ struct Module: public interface::Module, public Interface
 				for(uint64_t b : o.bots)
 					taken += bot_free(b);
 				m_sessions[id]->start_players = taken;
-				// [KIT_MAP_ROTATION] the map asked for, else the maker's `map`
-				// [KIT_CTF]; of the others never the arena's own scene
+				// [KIT_MAP_ROTATION] the map asked for; of the others never
+				// the arena's own scene
 				GameSession &gs = *m_sessions[id];
-				gs.map = o.map.empty() ? maker_param(id, "map", "") : o.map;
+				gs.map = o.map;
 				if(!m_host.scenes.count(gs.map))
 					gs.map.clear();
 				gs.left_out = o.left_out;

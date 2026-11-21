@@ -91,6 +91,12 @@ arena.on_start(l)
 assert(l.state.shown == false and l.state.status:find("Waiting for players"),
 	"none in the lobby: " .. tostring(l.state.shown))
 print("ok: status_line full, time_scores, time, scores (its result) and none (the lobby's too); the output the full line")
+-- [KIT_MAP_ROTATION] Before the first round the lobby's next_map (whose
+-- teams Kit gives it) is the rotation's first scene
+l.params.maps, l.scenes = "nowhere, map", {"map"}
+arena.on_start(l)
+assert(l.state.next_map == "map", "next_map in the lobby: " .. l.state.next_map)
+print("ok: the lobby's next_map the first of maps")
 EOF
 echo "PASS: kit/arena's time_up \"most\" with no teams, and its status_line"
 # vim: set noet ts=4 sw=4:
