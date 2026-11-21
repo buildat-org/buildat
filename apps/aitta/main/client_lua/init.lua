@@ -428,13 +428,23 @@ home = function()
 			text(page, message, YELLOW)
 			message = nil
 		end
-		if me.author == "" then
+		-- [AITTA_AUTHORS] The account's author names, then the form for
+		-- another while it may bind one
+		local names = {}
+		for _, a in ipairs(me.authors) do
+			text(page, "Author: " .. a.author .. "  key " .. a.key:sub(1, 16) ..
+					"...", GREY)
+			names[#names + 1] = a.author
+		end
+		if #me.authors < me.authors_max then
 			text(page, "Bind an author name to your key to publish. The key " ..
 					(offer and "and the name are your launcher's, from its " ..
 					"publish screen" or "is the line `bin/buildat aitta " ..
 					"keygen <file>` printed; the name is what your " ..
 					"releases' meta.json say as \"author\"") ..
-					", and neither changes after.", GREY)
+					", and neither changes after. One account may bind up to " ..
+					me.authors_max .. " author names, one key each (e.g. " ..
+					"yours and your servers').", GREY)
 			local author = edit(page, "Author name (a-z, 0-9, _)")
 			local key = edit(page, "Public key")
 			if offer then
@@ -448,17 +458,15 @@ home = function()
 							"publish from Settings, Developer." or
 							"Bound. Publish with: bin/buildat aitta " ..
 							"publish <release .zip> <this server's address>"
+					offer = nil -- bound: not filled in again
 					home()
 				end)
 			end)
-		else
-			text(page, "Author: " .. me.author .. "  key " ..
-					me.key:sub(1, 16) .. "...", GREY)
 		end
 		-- Where the publish screen is ([AITTA_PUBLISH_UI])
 		button(page, "Back to the launcher", function() buildat.leave() end)
-		log:info("aitta: home, " .. (me.author ~= "" and "author " ..
-				me.author or "no author"))
+		log:info("aitta: home, " .. (#names > 0 and "author " ..
+				table.concat(names, ", ") or "no author"))
 		if me.reviewer then
 			-- [AITTA_REVIEW_AMBER] Amber while something waits
 			local function waiting(label, n, fn)
@@ -472,7 +480,7 @@ home = function()
 			log:info("aitta: waiting " .. tostring(me.unreviewed) ..
 					" unreviewed, " .. tostring(me.open_reports) .. " reports")
 		end
-		if me.author ~= "" then
+		if #names > 0 then
 			button(page, "What was done to my releases",
 					function() statements_page() end)
 		end
