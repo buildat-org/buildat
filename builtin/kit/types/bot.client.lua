@@ -87,6 +87,7 @@ local function open(e)
 					return
 				end
 				b.v[k.key] = math.max(k.min, math.min(k.max, b.v[k.key] + d))
+				b.changed = true
 				val:SetText(shown(k, b.v[k.key]))
 				e:log("bot dialog: " .. k.key .. " " .. shown(k, b.v[k.key]))
 			end
@@ -119,7 +120,9 @@ local function open(e)
 		answer(string.format("%g %g %g", v.aim, math.floor(v.reaction * 10 + 0.5) / 10,
 				v.speed))
 	end)
-	button(row, "Cancel", "bot cancel", function() answer("cancel") end)
+	box.cancel = function() answer("cancel") end
+	button(row, "Cancel", "bot cancel", box.cancel)
+	ui_utils.dim_behind(win, "kit bot dialog")
 	-- The pointer this player's to click with (as kit/ui_panel's)
 	ui_utils.wants_clicks(win)
 	local input = magic.input
@@ -136,6 +139,20 @@ local function open(e)
 	e:log("bot dialog shown, the pointer free: " .. tostring(input.mouseVisible) .. ": " ..
 			table.concat(shown_v, " "))
 end
+
+-- [UI_MODAL_DIM] A click off it is its Cancel (it was eaten), while no knob
+-- has been moved: a choice made in it is not lost to a stray click
+magic.SubscribeToEvent("UIMouseClick", function(_, d)
+	local b = box
+	if not b or b.changed then
+		return
+	end
+	local rp, p, sz = magic.ui.root.position, b.win.screenPosition, b.win.size
+	local x, y = d:GetInt("X") - rp.x, d:GetInt("Y") - rp.y
+	if x < p.x or y < p.y or x >= p.x + sz.x or y >= p.y + sz.y then
+		b.cancel()
+	end
+end)
 
 return {
 	on_state = function(e, key)

@@ -778,6 +778,7 @@ function M.show_credits(menu)
 	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	ui_utils.dim_behind(w, "kit dialog credits")
 	w:SetFixedWidth(math.min(560, magic.ui.root.width - 16))
 	text(w, "Credits: what this world is made of")
 	for _, c in ipairs(E.credits or {}) do
@@ -809,7 +810,13 @@ function M.show_credits(menu)
 	end
 	button(w, "Close", close)
 	if menu then
-		menu.hold(close, w)
+		-- [UI_MODAL_DIM] a click off it is Close (it was eaten)
+		menu.hold(close, w, {click = function(x, y)
+			if W.dialog == w and not inside(w, x, y) then
+				log:info("kit editor: a click off the credits")
+				close()
+			end
+		end})
 	end
 end
 
@@ -1432,6 +1439,18 @@ local function pan_text()
 			S.fx or 0, S.fy or 0) or string.format("panned the plan to %.1f,%.1f",
 			S.cx or 0, S.cz or 0)
 end
+-- Whether a LineEdit is under e (a dialog's form)
+-- simplified: any field, typed into or not
+local function has_field(e)
+	for i = 0, e:GetNumChildren() - 1 do
+		local c = e:GetChild(i)
+		if c and (c:GetTypeName() == "LineEdit" or has_field(c)) then
+			return true
+		end
+	end
+	return false
+end
+
 local function mouse_down(button_)
 	if not E.editing or S.touch then
 		return
@@ -1452,6 +1471,17 @@ local function mouse_down(button_)
 	end
 	if W.ctx then
 		close_menu()
+		S.swallow_up = button_
+		return
+	end
+	-- [UI_MODAL_DIM] A press on the view off a dialog (the desktop's, shaded
+	-- round) is its Cancel, as Escape; eaten where it has a field, so that
+	-- nothing typed is lost (it went to the world before)
+	if W.dialog and not NT.sh.on() then
+		if not has_field(W.dialog) then
+			drop("dialog")
+			log:info("kit editor: a press off the dialog closed it")
+		end
 		S.swallow_up = button_
 		return
 	end

@@ -463,6 +463,7 @@ local function link_menu(c)
 	local w = window(magic.HA_LEFT, magic.VA_TOP, p.x, p.y + c.b.height)
 	W.ctx = w
 	w.priority = 10
+	ui_utils.dim_behind(w, "kit link menu")
 	text(w, c.l.output .. " → " .. c.l.input, DIM)
 	button(w, "Delete", function()
 		W.ctx:Remove()
@@ -2089,6 +2090,7 @@ function SG.palette_popup(cols)
 	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	W.ctx, SG.popup = w, w
 	w.priority = 10
+	ui_utils.dim_behind(w, "kit palette menu")
 	-- Sized from the root: not to hold the client's fit down (update_ui_fit)
 	w:SetVar("FollowsRoot", "1")
 	local items = NT.palette_items("All")

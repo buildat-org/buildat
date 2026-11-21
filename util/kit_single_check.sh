@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-21)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor_input.lua builtin/kit/types/environment.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor_input.lua builtin/kit/types/environment.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua 3rdparty/Urho3D/Source/Urho3D/UI/Window.cpp extensions/pause_menu/init.lua
 # [KIT_SINGLE] (kit_plan 4z37z) A type with single = true, one a holder
 # (the app root, a scene), on Workbench's server of Brimstone Speedway
 # (scenes world and trial; kit/game_rules 3 and kit/controls 4 on the
@@ -22,7 +22,12 @@
 #   3. The editor's Place of kit/environment in world (the palette's
 #      menu): nothing placed, world's selected in the inspector, the hint
 #      in the status.
-# Screenshot, kept with KEEP_TMP=1: $t/selected.png (the inspector on it)
+#   4. [UI_MODAL_DIM] The palette's menu, the pause menu, the Server window
+#      over it and Kit's credits each shade the rest of the screen while up
+#      and not once a click off it has closed it (the credits' click off
+#      was eaten before).
+# Screenshots, kept with KEEP_TMP=1: $t/selected.png (the inspector on it),
+# $t/dim_*.png
 #   util/kit_single_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -253,10 +258,61 @@ await "$CL" "$mc" 5 "kit editor: selected $env "
 cmd "frames 5" "screenshot $t/selected.png"
 tail -c +$((m + 1)) "$SL" | grep -aq "placed kit/environment" &&
 	fail "a second kit/environment placed ($SL)"
+
+# 4. [UI_MODAL_DIM] Each menu shades the rest while up ("dim behind:
+# <name>"; the view's left edge darker than in dim_none.png), and not once
+# it is gone; a click off each closes it
+shot() # <name> [0|1]: $t/<name>.png, its view's left edge shaded or not
+{
+	local m
+	m=$(mark "$CL")
+	cmd "frames 5" "screenshot $t/$1.png"
+	await "$CL" "$m" 10 "Wrote screenshot .*/$1.png"
+	[ -z "${2:-}" ] && return 0
+	python3 -I - "$t/dim_none.png" "$t/$1.png" "$2" <<'PY' ||
+import sys
+from PIL import Image, ImageStat
+a, b = (ImageStat.Stat(Image.open(p).convert("L").crop((5, 330, 60, 560))).mean[0]
+        for p in sys.argv[1:3])
+print("%.1f of %.1f" % (b, a))
+sys.exit(0 if (b < a * 0.75) == (sys.argv[3] == "1") else 1)
+PY
+		fail "$1.png: the view's edge $([ "$2" = 1 ] && echo "not shaded" || echo "still shaded") ($t)"
+}
+OFF=("frames 3" "mouse_pos 30 450" "mouse_click left")
+shot dim_none
+# The palette's menu
+step 10 "dim behind: kit menu" "$(pal_find kit/environment)" 'click Button "kit/environment"'
+shot dim_menu 1
+cmd "${OFF[@]}"
+shot dim_menu_off 0
+# The pause menu, the Server window over it (its click off back to the menu)
+m=$(mark "$CL")
+menu
+await "$CL" "$m" 5 "dim behind: pause menu"
+shot dim_pause 1
+step 10 "dim behind: server window" "frames 3" 'click Button "My account*"'
+shot dim_server 1
+m=$(mark "$CL")
+cmd "${OFF[@]}"
+await "$CL" "$m" 10 "server window: closed"
+await "$CL" "$m" 10 "pause: the menu shown"
+step 10 "pause: a click off the menu" "${OFF[@]}"
+shot dim_pause_off 0
+# Kit's credits from the pause menu: a click off it was eaten, now its Close
+menu
+step 10 "dim behind: kit dialog credits" "frames 3" 'click Button "Credits..."'
+shot dim_credits 1
+m=$(mark "$CL")
+cmd "${OFF[@]}"
+await "$CL" "$m" 10 "kit editor: the credits closed"
+await "$CL" "$m" 10 "pause: the menu shown"
+step 10 "pause: a click off the menu" "${OFF[@]}"
+shot dim_credits_off 0
 cmd "quit"
 exec 3>&-
 wait $CLIENT
 CLIENT=
 kill -INT $SRV 2>/dev/null
 wait $SRV 2>/dev/null
-echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there"
+echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it"
