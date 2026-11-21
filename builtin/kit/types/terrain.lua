@@ -7,6 +7,11 @@
 --              height, a feature every spread cells), valleys (Luanti's
 --              valleys mapgen's surface, without rivers; native servers)
 --   seed       noise and valleys
+--   flatten    ([KIT_TERRAIN_FLATTEN]) noise flat at level round the scene's
+--              parts on the ground (a look's box within 3 of level), the
+--              hills rising 1 to 9 cells past each; off: hills under them too.
+--              simplified: the parts as the World generates; one placed or
+--              moved later is flattened round at its next generation
 --   materials  ([KIT_MATERIAL_SETS]) the material set: "" the app's
 --              (Workbench's: Kit's own), or an installed set package's
 --              (where the app allows it); the inspector's dropdown of them.
@@ -78,6 +83,8 @@ return {
 		level = {type = "number", default = 0, min = -100, max = 200},
 		height = {type = "number", default = 12, min = 0, max = 100},
 		spread = {type = "number", default = 48, min = 4, max = 2000},
+		-- [KIT_TERRAIN_FLATTEN]
+		flatten = {type = "bool", default = true},
 		sea_level = {type = "number", default = 0, min = -100, max = 200},
 		soil_depth = {cat = "look", type = "number", default = -1, min = -1,
 			max = 16},

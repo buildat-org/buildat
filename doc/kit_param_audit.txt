@@ -6,7 +6,7 @@ interesting parameter changed in the editor, played, and looked at
 a builder would expect), FIXED (a Kit fault, fixed with the audit),
 fault (a Kit fault left), proposal (a template or Kit improvement; works
 as written, could be clearer). util/kit_param_audit_check.sh keeps the
-first five Brimstone rows; util/kit_racer_check.sh step 6 the chase
+first five Brimstone rows and its ground's; util/kit_racer_check.sh step 6 the chase
 camera, util/kit_symmetry_check.sh the symmetry fit.
 
 Brimstone Speedway (top-down racer)
@@ -31,11 +31,28 @@ time 18.5 / weather rain       | dusk / rain               | orange dusk; drops,
 trial_laps 2                   | HUD "Lap 1/2", 2 laps     | "Lap 1/2" after Retry; lap end kit_racer's | pass
 yard generator seed 7, width 8 | a new, narrower track     | narrower road, junk moved; the driver      | pass
                                |                           | got through the U bend                     |
-trial ground flat -> noise     | hills, still drivable     | dunes -10..8; the car drives over them,    | proposal
+trial ground flat -> noise     | hills, still drivable     | dunes -10..8; the car drives over them,    | FIXED
                                |                           | but road, walls, polygons stay at the old  |
-                               |                           | level (floating or buried): the Bone Yard  |
-                               |                           | generator could lay the road on the ground |
+                               |                           | level (floating or buried). Now kit/terrain|
+                               |                           | flatten (on by default) keeps the noise at |
+                               |                           | level round the scene's parts: the road's  |
+                               |                           | ground as on flat, dunes between (11 of a  |
+                               |                           | 16 m grid's 140 points over 2 m off), the  |
+                               |                           | car driven on ([KIT_TERRAIN_FLATTEN]). The |
+                               |                           | road on the hills (flatten off): not with  |
+                               |                           | the car held at one height (below)         |
 undo of each of the above      | exactly as before         | the authored entities equal (next_id aside)| pass
+
+The Bone Yard laying its road on a noise ground (flatten off; tried
+2026-11-21, not done): Brimstone is a 2D game in kit/controls' plane
+horizontal. The car is held at one height (brim_car steps x and z only),
+w:under finds the floors (gravel, mud, the finish line that counts laps)
+at the car's height, and the walls stop it only where their depth spans
+the plane's height. A road on the hills needs the car to follow the
+ground (move.lua's plane, the client's prediction), floors and walls met
+at the local height, and the straights and bends cut into short tilted
+pieces (several times the ~260 children, over the type's 600 cap, the
+build and its landing tick growing with them). Not a quick change.
 
 Puzzle room (walker, first person)
 ----------------------------------
@@ -48,9 +65,12 @@ camera top_down                | playable from above       | the body hidden beh
 camera side                    | a side view               | understandable                             | pass
 movement click_to_move +       | walks to the click        | walks there                                | pass
   top_down                     |                           |                                            |
-terrain flat -> noise          | hills under the room      | ground -6..1 with sea_level 0: the room    | proposal
+terrain flat -> noise          | hills under the room      | ground -6..1 with sea_level 0: the room    | FIXED
                                |                           | flooded, the player underwater; the parts  |
-                               |                           | stay at the old level. A lower sea_level   |
+                               |                           | stay at the old level. Now flatten (on by  |
+                               |                           | default): flat round 33 parts, the room on |
+                               |                           | level 0 and dry, ground -5..1 round it,    |
+                               |                           | water below 0 outside. A lower sea_level   |
                                |                           | (or level) gives dry hills                 |
 noise -> flat (undo)           | the room as before        | the body stayed buried 4.5 m down (unbury  | FIXED
                                |                           | reached 2.7 m): unbury now lifts up to     |

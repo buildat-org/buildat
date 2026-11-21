@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-21)
-# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/controls.lua builtin/kit/types/controls.lua builtin/kit/types/environment.lua builtin/kit/types/terrain.lua builtin/kit/kit.cpp
+# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/controls.lua builtin/kit/types/controls.lua builtin/kit/types/environment.lua builtin/kit/types/terrain.lua builtin/kit/kit.cpp builtin/kit/terrain.h
 # [KIT_PARAM_AUDIT] (doc/kit_param_audit.txt) A builder's simple changes to
 # Brimstone Speedway (new from its template on Workbench, one server,
 # kitboss on a headless weston's Xwayland of the check's own) do what he
@@ -16,7 +16,11 @@
 #      still: the walls' shadows on the ground, darker than its sunlit rest
 #      and bluer (the sky's light alone) (env_fast.png, env_phys.png);
 #   4. the trial's ground flat to noise: the World generated anew, hills
-#      over a flat ground, its look changed (noise.png);
+#      over a flat ground, its look changed (noise.png); [KIT_TERRAIN_FLATTEN]
+#      flat round the track's parts: the client's ground along the racing
+#      line where the flat one had it (not over the road, nor under it),
+#      over 2 m off it on 8 or more of a 16 m grid over the map, and the car
+#      driven on from the U bend to the east straight;
 #   5. every one of those undone: the composition exactly as it was.
 #   util/kit_param_audit_check.sh
 set -u
@@ -44,6 +48,13 @@ def typed(t, s=None):
 print("TRIAL=%d CONTROLS=%d GROUND=%d" % ([e["id"] for e in E if e.get("name") == "the race"
       and e.get("parent") == scene["trial"]][0], typed("kit/controls")[0],
       typed("kit/terrain", "trial")[0]))
+# (the trial's racing line, on the road: every sixth point, in the world)
+yard = [e["id"] for e in E if e.get("parent") == scene["trial"] and
+        any(c["type"] == "local/brim_yard" for c in e.get("components", []))][0]
+line = [e for e in E if e.get("parent") == yard and e.get("name") == "the racing line"][0]
+o = line["pos"]
+print("ROAD='%s'" % " ".join("%.2f,%.2f" % (o[0] + p[0], o[2] + p[1])
+      for p in line["components"][0]["params"]["points"][::6]))
 PY
 . "$t/ids"
 export PATH_PTS="-100,-58,12 60,-58,10 60,-34,10 10,-34,9 0,-14,9 30,0,10 95,0,12 95,55,12 50,55,9 40,30,8 25,30,8 15,58,10 -40,58,12 -55,20,10 -30,5,9 -60,-10,10 -100,-20,12"
@@ -208,7 +219,16 @@ assert f > 0.01 and ml(shade) < 0.75 * ml(lit) and br(shade) > br(lit) + 0.08
 PY
 echo "ok: kit/environment physical: shadows, darker and bluer than the sunlit ground"
 
-# 4. The trial's ground flat to noise
+# 4. The trial's ground flat to noise; the client's ground along the racing
+# line and on a grid over the map (every 16 m) on each: its log's offset
+GRID=$(for z in $(seq -72 16 72); do for x in $(seq -104 16 104); do printf '%s,%s ' $x $z; done; done)
+ground() # <var>: set to the log's offset
+{
+	printf -v "$1" %s "$(mark "$CL")"
+	cmd "event kit_ground $ROAD $GRID" "frames 3"
+	await "$CL" "${!1}" 10 "kit: ground at 104,72 "
+}
+ground mf
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
 m=$(mark "$SL")
 set_p $GROUND generator '"noise"'
@@ -216,8 +236,36 @@ await "$SL" "$m" 60 "World by kitboss: noise "
 g=$(tail -c +$((m + 1)) "$SL" | grep -aoP "World by kitboss: noise .*ground \K-?[0-9]+ to -?[0-9]+" | tail -1)
 set -- $g
 [ "${1:-0}" -lt -2 ] && [ "${3:-0}" -gt 2 ] || fail "the noise ground $g, not hills ($SL)"
+parts=$(tail -c +$((m + 1)) "$SL" | grep -aoP "World: the noise flat round \K[0-9]+" | tail -1)
+[ "${parts:-0}" -gt 100 ] || fail "the noise flat round ${parts:-no} parts, not the track's ($SL)"
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 shot noise.png 60
+ground mn
+python3 -I - "$CL" "$mf" "$mn" "$ROAD" <<'PY' || fail "the ground under the road ($CL)"
+import re, sys
+s = open(sys.argv[1], "rb").read().decode(errors="replace")
+def at(o):
+    return [(m[1], float(m[2])) for m in re.finditer(
+        r"kit: ground at (\S+) (-?[0-9.]+)", s[int(o):])][:len(GRID) + len(ROAD)]
+ROAD = sys.argv[4].split()
+GRID = ["%d,%d" % (x, z) for z in range(-72, 73, 16) for x in range(-104, 105, 16)]
+F, N = at(sys.argv[2]), at(sys.argv[3])
+assert len(F) == len(N) == len(ROAD) + len(GRID), (len(F), len(N))
+road = [(p, a, b) for (p, a), (_, b) in zip(F[:len(ROAD)], N[:len(ROAD)])]
+hills = [abs(b - a) for (_, a), (_, b) in zip(F[len(ROAD):], N[len(ROAD):])]
+moved = [r for r in road if abs(r[2] - r[1]) > 0.05]
+print("the ground at %d points of the racing line %.2f to %.2f (flat: %.2f to %.2f); "
+      "%d of %d points of the map moved over 2 m" % (len(road), min(r[2] for r in road),
+      max(r[2] for r in road), min(r[1] for r in road), max(r[1] for r in road),
+      sum(h > 2 for h in hills), len(hills)))
+# (the road where the flat ground had it, the hills round it)
+assert not moved, moved
+assert sum(h > 2 for h in hills) >= 8
+PY
+# (still drivable: from the U bend on through corners 4 and 5, east)
+python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 40 \
+	'kit: body at (6[0-9]|7[0-9])\.[0-9]+,-?[0-9.]+,-?[0-9]\.' > "$t/drive_noise.log" 2>&1 ||
+	fail "the car not driven on to the east straight on the noise ground ($t/drive_noise.log)"
 python3 -I - "$t/env_phys.png" "$t/noise.png" <<'PY' || fail "the noise ground not seen ($t/env_phys.png, $t/noise.png)"
 import sys
 from PIL import Image
@@ -227,9 +275,10 @@ px = [(A.getpixel((x, y)), B.getpixel((x, y))) for y in range(70, h - 30, 3)
       for x in range(0, w, 3)]
 f = sum(sum(abs(a[i] - b[i]) for i in range(3)) > 60 for a, b in px) / len(px)
 print("%.0f %% of the view changed" % (100 * f))
-assert f > 0.2
+# (the road and its walls as they were: the hills between, 18 % 2026-11-21)
+assert f > 0.1
 PY
-echo "ok: the trial's ground noise: hills $g, the view changed"
+echo "ok: the trial's ground noise: hills $g, flat round $parts parts (the road on the ground), the view changed, driven on"
 
 # 5. All undone
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
@@ -242,5 +291,5 @@ authored "$t/authored1.json" "$t/authored0.json" ||
 	fail "the composition not as it was after the undos: $t/authored0.json, $t/authored1.json"
 echo "ok: every alteration undone: the composition's entities as they were"
 cmd "quit"
-echo "PASS: Brimstone's simple changes: trial_laps 2 in the HUD, first_person following the car, physical's shadows (darker, bluer), a noise ground seen, all undone exactly; screenshots $t/fp_east.png $t/fp_west.png $t/env_fast.png $t/env_phys.png $t/noise.png"
+echo "PASS: Brimstone's simple changes: trial_laps 2 in the HUD, first_person following the car, physical's shadows (darker, bluer), a noise ground seen with the road on it and driven on, all undone exactly; screenshots $t/fp_east.png $t/fp_west.png $t/env_fast.png $t/env_phys.png $t/noise.png"
 # vim: set noet ts=4 sw=4:

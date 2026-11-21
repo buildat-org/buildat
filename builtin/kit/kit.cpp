@@ -11329,6 +11329,36 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
+	// [KIT_TERRAIN_FLATTEN] The parts a noise ground flattens round: the
+	// authored entities of the World's scene with a look (look_zone(), at
+	// rest) whose box reaches within FLAT_BAND of the flat level; their
+	// boxes on x and z.
+	// simplified: taken as the World generates (its parameters changed, a
+	// start, a regeneration): a part placed or moved later is flattened
+	// round at the next. A box is its look's world bounds (a turned wall's
+	// is wider than the wall); voxel objects and prefabs' voxels are not parts
+	static constexpr double FLAT_BAND = 3;
+	sp_<const world::Flatten> flatten_boxes(const world::Params &p)
+	{
+		AtRest rest(m_at_rest);
+		sp_<world::Flatten> f = std::make_shared<world::Flatten>();
+		for(auto &it : m_entities){
+			const Entity &e = it.second;
+			ZoneShape z;
+			if(e.made || !e.kind.empty() || !e.has_pos ||
+					scene_of(e) != m_w->world_scene || !look_zone(e, z))
+				continue;
+			if(z.lo[1] > p.level + FLAT_BAND || z.hi[1] < p.level - FLAT_BAND)
+				continue;
+			f->add((float)z.lo[0], (float)z.lo[2], (float)z.hi[0],
+					(float)z.hi[2]);
+		}
+		if(f->boxes.empty())
+			return nullptr;
+		log_i(MODULE, "World: the noise flat round %zu parts", f->boxes.size());
+		return f;
+	}
+
 	bool apply_world(const json::Value &params, const ss_ &by, bool first,
 			ss_ &why)
 	{
@@ -11417,6 +11447,8 @@ struct Module: public interface::Module, public Interface
 		if(p.heightmap())
 			for(const char *r : {"top", "stone", "riverbed"})
 				layers.push_back(ms.voxels.find(ms.resolve(b, r))->second.layer);
+		if(p.generator == "noise" && p.flatten)
+			p.flat = flatten_boxes(p);
 		up_<world::Heights> h(new world::Heights());
 		h->p = p;
 		valleys_query(*h);
@@ -11584,6 +11616,10 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SOIL_DEPTH] the biome's (-1), the key from before it
 		if(json::jint(c, "soil_depth", -1) < 0)
 			c.del_key("soil_depth");
+		// [KIT_TERRAIN_FLATTEN] on (the default), or not noise: the key from
+		// before it
+		if(!c.get("flatten").is_false() || json::jstr(c, "generator") != "noise")
+			c.del_key("flatten");
 		// [KIT_HEIGHTMAP_REGEN_LOSS] The app's own set ("") is the key
 		// from before [KIT_MATERIAL_SETS]: no "materials", no pin
 		if(json::jstr(c, "materials").empty())

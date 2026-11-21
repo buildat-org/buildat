@@ -1985,6 +1985,16 @@ magic.SubscribeToEvent("command_seq:kit_probe", function(_, data)
 			table.concat(ids, ",") .. (rg and ", region " ..
 			rg.node:GetVar("kit_id"):GetInt() or ""))
 end)
+-- [KIT_TERRAIN_FLATTEN] For a check: "event kit_ground <x> <z>..." logs the
+-- heightmap's ground this client has at each point (none: no heightmap)
+magic.SubscribeToEvent("command_seq:kit_ground", function(_, data)
+	local s = data:GetString("Param")
+	for x, z in s:gmatch("(%-?[%d.]+),(%-?[%d.]+)") do
+		local h = heightmap.height_at(tonumber(x), tonumber(z))
+		log:info("kit: ground at " .. x .. "," .. z .. " " ..
+				(h and string.format("%.2f", h) or "none"))
+	end
+end)
 -- [KIT_FREE_ROTATION] For a drive: "event kit_pose <id>...": where an entity's
 -- node and look are as drawn
 magic.SubscribeToEvent("command_seq:kit_pose", function(_, data)
