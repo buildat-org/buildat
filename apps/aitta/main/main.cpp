@@ -46,7 +46,8 @@
 // and "ai:res" the answer {id, ok, result | error}.
 //
 // The records are in the save "aitta": stores authors (author -> its key
-// and account), keys (key -> author), owners (account -> author),
+// and account), keys (key -> author), owners (account -> its author
+// name, or a JSON list of its names once it has several),
 // releases ("author/name/version" -> the manifest's fields, sha256, size,
 // key, time, delisted, review, review_note, reviewed_by, playtested_by),
 // changelogs (the same key -> {text}), relabels (author/name -> the
@@ -112,9 +113,12 @@ static const size_t MANIFEST_MAX = 16 * 1024;
 static const size_t FILES_MAX = interface::aitta::WORLD_FILES_MAX;
 // [AITTA_BUILD_QUEUE] An author's releases waiting to be built at once
 // (builds are one at a time, up to 300 s each); a publish
-// past it is refused. simplified: by author, and an account binds one,
-// so many accounts get many times it
+// past it is refused. simplified: by author, and an account binds up to
+// AUTHORS_MAX, so many accounts or names get many times it
 static const int64_t WEB_WAITING_MAX = 3;
+// [AITTA_AUTHORS] The author names one account binds, each to a key of
+// its own (a person's, their servers')
+static const size_t AUTHORS_MAX = 8;
 
 // An author name: what a manifest's "author" may be
 static bool plain_name(const ss_ &s)
@@ -503,6 +507,21 @@ struct Module: public interface::Module, public moderation::Host
 		ss_ v;
 		store(store_name)->get(key, v);
 		return v;
+	}
+	// [AITTA_AUTHORS] An account's author names, first bound first: its
+	// owners row is the name alone (as an older Aitta wrote it, and this
+	// one does for a single name) or a JSON list of them; a name never
+	// starts with "["
+	sv_<ss_> names_of(const ss_ &account)
+	{
+		const ss_ v = get("owners", account);
+		if(v.empty() || v[0] != '[')
+			return v.empty() ? sv_<ss_>() : sv_<ss_>{v};
+		const json::Value l = json::load_string(v.c_str());
+		sv_<ss_> names;
+		for(unsigned i = 0; i < l.size(); i++)
+			names.push_back(l.at(i).as_string());
+		return names;
 	}
 
 	void on_start()
@@ -2960,16 +2979,26 @@ struct Module: public interface::Module, public moderation::Host
 					v.set("open_reports", (int64_t)m->open_groups(this).size());
 				});
 			}
-			const ss_ author = get("owners", name);
-			v.set("author", author);
-			v.set("key", author.empty() ? "" : jstr(load("authors", author), "key"));
+			// [AITTA_AUTHORS] Each name with its key, and the most it may
+			// have
+			json::Value authors = json::array();
+			for(const ss_ &n : names_of(name)){
+				json::Value a = json::object();
+				a.set("author", n);
+				a.set("key", jstr(load("authors", n), "key"));
+				authors.append(a);
+			}
+			v.set("authors", authors);
+			v.set("authors_max", (int64_t)AUTHORS_MAX);
 			v.set("releases", releases(admin));
 			return v;
 		}
 		if(cmd == "bind"){
 			const ss_ author = jstr(q, "author"), key = jstr(q, "key");
-			if(!get("owners", name).empty())
-				throw Exception("this account has its author name already");
+			sv_<ss_> names = names_of(name);
+			if(names.size() >= AUTHORS_MAX)
+				throw Exception("this account has "+itos(AUTHORS_MAX)+
+						" author names already, the most it may bind");
 			if(!plain_name(author))
 				throw Exception("an author name is 1 to 40 of a-z, 0-9 and _");
 			if(!get("authors", author).empty())
@@ -2987,7 +3016,11 @@ struct Module: public interface::Module, public moderation::Host
 			a.set("time", now_s());
 			put("authors", author, a);
 			store("keys")->set(key, author);
-			store("owners")->set(name, author);
+			names.push_back(author);
+			json::Value l = json::array();
+			for(const ss_ &n : names)
+				l.append(n);
+			store("owners")->set(name, names.size() == 1 ? author : l.stringify());
 			log_i(MODULE, "%s bound the author name %s to a key", cs(name),
 					cs(author));
 			return json::Value(true);
