@@ -1,0 +1,7 @@
+<!-- [KIT_LIGHTING_SCENE] A sign's text under physical lighting (module.lua's
+     text3d): Urho's Text shader in the pass "kittext", which KitTextPass.xml draws
+     after the exposure and the tonemap, so the text reads as UI text does. The
+     font's texture is an alpha one (FreeType's): ALPHAMAP. -->
+<technique vs="Text" ps="Text">
+    <pass name="kittext" psdefines="ALPHAMAP" depthwrite="false" blend="alpha" />
+</technique>

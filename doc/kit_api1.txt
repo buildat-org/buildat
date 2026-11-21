@@ -802,7 +802,7 @@ type kit/environment param fog_start | {"default": 120, "kind": "number", "max":
 type kit/environment param gravity | {"default": 1, "kind": "number", "max": 10, "min": 0}
 type kit/environment param intensity | {"default": 1, "kind": "number", "max": 1, "min": 0}
 type kit/environment param latitude | {"default": 25, "kind": "number", "max": 89, "min": -89}
-type kit/environment param lighting | {"choices": ["cartoon", "fast_physical", "physical"], "default": "fast_physical", "kind": "string"}
+type kit/environment param lighting | {"choices": ["inherit", "cartoon", "fast_physical", "physical"], "default": "inherit", "kind": "string"}
 type kit/environment param moon | {"default": true, "kind": "bool"}
 type kit/environment param north | {"default": 0, "kind": "number", "max": 360, "min": 0}
 type kit/environment param season | {"choices": ["spring", "summer", "autumn", "winter"], "default": "summer", "kind": "string"}

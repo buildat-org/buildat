@@ -22810,6 +22810,23 @@ struct Module: public interface::Module, public Interface
 		return v;
 	}
 
+	// [KIT_LIGHTING_SCENE] A scene's lighting: the nearest environment's
+	// from the scene up that says other than inherit; inherit on the root's
+	// is fast_physical, no environment on the root cartoon
+	ss_ env_lighting(const ss_ &scene)
+	{
+		for(uint64_t h : scene_chain(scene)){
+			const Instance *in = env_at(h);
+			const json::Value l = in ? env_values(*in).get("lighting") :
+					json::Value();
+			if(l.is_string() && l.as_string() != "inherit")
+				return l.as_string();
+			if(h == 1)
+				return in ? "fast_physical" : "cartoon";
+		}
+		return "cartoon";
+	}
+
 	double env_gravity(const ss_ &scene)
 	{
 		const Instance *in = env_of(scene);
@@ -22891,11 +22908,7 @@ struct Module: public interface::Module, public Interface
 			j.set(it.key(), *it);
 		j.set("from", from);
 		j.set("entity", (int64_t)id);
-		// [KIT_LIGHTING] The lighting is the composition's: the root's
-		// environment's (cartoon with none there), whatever a scene's says
-		const Instance *root = env_at(1);
-		j.set("lighting", root ? env_values(*root).get("lighting") :
-				json::Value("cartoon"));
+		j.set("lighting", env_lighting(scene));
 		// and the voxel types that give light ({name: 1..15}), which
 		// physical draws
 		json::Value lamps = json::object();
@@ -40963,8 +40976,8 @@ struct Module: public interface::Module, public Interface
 			"scene; kit/environment goes on your scene in a game of more than "
 			"one scene (on \"root\": the app root's, every scene's sky). Each scene "
 			"has its own World (kit/terrain); a new scene has none (no ground) "
-			"unless made with new_scene's copy. Game-wide: kit/environment's lighting "
-			"(the root's alone), the voxel types, textures, prefabs and item "
+			"unless made with new_scene's copy. Game-wide: the voxel types, "
+			"textures, prefabs and item "
 			"types. Entities (parts, polygons, effects) are their scene's.\n"
 			"\n## kit/controls: the camera\n"
 			"camera first_person (the eye), chase (behind the player, distance "
@@ -41023,12 +41036,13 @@ struct Module: public interface::Module, public Interface
 			"underground or space), clouds (cover 0...1, height, wind), "
 			"weather clear, cloudy, rain, snow or storm at intensity (it dims "
 			"the light and thickens the fog; weather_fade seconds), season "
-			"(the voxels' season textures), latitude, north, gravity. lighting "
-			"(the root's alone): cartoon (flat, one sun, the fog), "
-			"fast_physical (the default: physical's sky, light of the hour and "
-			"voxel lamps without the shadow map or bloom) or physical (HDR, "
-			"bloom, the sun's shadow map). No kit/environment: cartoon and "
-			"Kit's defaults.\n"
+			"(the voxels' season textures), latitude, north, gravity. lighting: "
+			"inherit (the default: a scene's the environment's above it, the "
+			"root's fast_physical), cartoon (flat, one sun, the fog), "
+			"fast_physical (physical's sky, light of the hour and voxel lamps "
+			"without the shadow map or bloom) or physical (HDR, bloom, the "
+			"sun's shadow map); a scene's other than inherit is that scene's. "
+			"No kit/environment: cartoon and Kit's defaults.\n"
 			"\n## kit/terrain: the World (the ground)\n"
 			"generator empty, flat (at level), noise (level +- height, a "
 			"feature every spread cells) or valleys; seed; materials (a "
@@ -44702,7 +44716,7 @@ struct Module: public interface::Module, public Interface
 					ss_())+(ps.is_object() ? " with "+
 					comp.get("params").stringify() : ss_())+
 					(!env ? ss_() : on_scene ? " (this scene's own environment; "
-					"the lighting stays the app root's)" : " (every scene's "
+					"lighting inherit is the app root's)" : " (every scene's "
 					"environment but those with their own)");
 			return true;
 		}

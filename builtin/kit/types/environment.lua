@@ -13,14 +13,17 @@
 -- sky) and the season by the voxels' season textures (a material's
 -- "seasons", materials.json), the voxels unchanged.
 --
--- [KIT_LIGHTING] Its lighting is the composition's, the root's alone (a
--- scene's says nothing): cartoon (LDR, the ambient, one sun, the fog),
--- physical (HDR: sky_render's exposure, bloom and tonemap, physical_sky's
--- light by the hour and its sky, the sun's shadow map, the voxels' light
--- drawn) or fast_physical, the default ([KIT_FAST_PHYSICAL]: physical
+-- [KIT_LIGHTING] Its lighting: cartoon (LDR, the ambient, one sun, the
+-- fog), physical (HDR: sky_render's exposure, bloom and tonemap,
+-- physical_sky's light by the hour and its sky, the sun's shadow map, the
+-- voxels' light drawn), fast_physical ([KIT_FAST_PHYSICAL]: physical
 -- without the shadow map and the bloom, near cartoon's frame time; the
--- three a choice of style). The World's sky light darkens caves in all
--- three when it is on (cartoon where the root has no environment).
+-- three a choice of style) or inherit, the default
+-- ([KIT_LIGHTING_SCENE]): on the root fast_physical, on a scene the
+-- environment's above it (the root's; cartoon where the root has none).
+-- A scene's other than inherit is that scene's, the client's render path
+-- switched as a player goes between scenes. The World's sky light darkens
+-- caves in all three when it is on.
 --
 -- The sky, each mode its own (cartoon Luanti's, physical physical_sky's),
 -- by the same parameters: the time places the sun and the moon and fades
@@ -105,8 +108,8 @@ return {
 			max = 360},
 		season = {cat = "look", type = "string", default = "summer",
 			choices = {"spring", "summer", "autumn", "winter"}},
-		lighting = {cat = "look", type = "string", default = "fast_physical",
-			choices = {"cartoon", "fast_physical", "physical"}},
+		lighting = {cat = "look", type = "string", default = "inherit",
+			choices = {"inherit", "cartoon", "fast_physical", "physical"}},
 		cloud_cover = {cat = "look", type = "number", default = 0.4, min = 0,
 			max = 1},
 		cloud_height = {cat = "look", type = "number", default = 120, min = 10,
