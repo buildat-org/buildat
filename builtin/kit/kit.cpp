@@ -2077,8 +2077,13 @@ struct Module: public interface::Module, public Interface
 					k == "outputs_types" || k == "inputs_labels" ||
 					k == "outputs_labels")
 				continue;
-			out.push_back(k.substr(0, 64)+": not a type field Kit knows (a "
-					"helper goes in a local)");
+			// [KIT_DEPRECATE] A dropped name says its replacement
+			if(k == "players" || k == "teams" || k == "regions")
+				out.push_back(k+": not a type field Kit knows; reads_"+k+
+						" = true is the one");
+			else
+				out.push_back(k.substr(0, 64)+": not a type field Kit knows "
+						"(a helper goes in a local)");
 		}
 		for(const ss_ &h : handlers)
 			if(!handler_names().count(h))

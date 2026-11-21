@@ -394,7 +394,7 @@ namespace interface
 //                               key name, Input::GetKeyName's), label the
 //                               keys page's and a touch button's. Each
 //                               client binds its own key (its key store);
-//                               "[name]" in a shown text is that key.
+//                               {key:name} in a shown text is that key.
 //                               on_action(c, name, phase, value, by) on
 //                               every instance declaring it, in the
 //                               player's scene or on the root: phase
