@@ -21,7 +21,7 @@
 -- (c:body_var lap_open, [KIT_BODY_VARS]); the car's own step then counts
 -- the finish line as a lap (its event lap, linked here) on the server and
 -- in its prediction alike, and this closes it again.
--- Weapons (races only): a crate (local/brim_crate's taken, linked to crate;
+-- Weapons (races only): a crate (kit/collectible's pickup, linked to crate;
 -- value the kind) arms the car with a gun (6 shots ahead), mines (3, dropped
 -- behind: copies of the entity `mine`) or a ram boost (2.5 s, faster; a hit
 -- on a car then hurts it); the fire key (its action "fire", Left Ctrl by

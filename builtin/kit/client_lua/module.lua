@@ -161,9 +161,9 @@ end
 -- server made them of its extent), a sphere or ([KIT] stage 4d) a wedge,
 -- turned by its rotation, its material's, its `when` over it while the
 -- state `state` is true (a swing a quarter turn round a hinge at its -x
--- edge), a collision shape (a static body in the scene's physics) while
--- solid, its state `text` over it; a type's `hud = key` puts that state on
--- the screen.
+-- edge; [KIT_COLLECTIBLE] a vanish, update_play's), a collision shape (a
+-- static body in the scene's physics) while solid, its state `text` over
+-- it; a type's `hud = key` puts that state on the screen.
 -- **A type's client part** ([KIT] stage 4d): <name>.client.lua beside the
 -- type, sent at join, run as the client's own Lua is (this module's
 -- sandbox); it returns a table of handlers, each given `e`, the entity as
@@ -255,6 +255,7 @@ local function drop_look(n)
 	end
 	n.par_copies, n.par, n.par_solid = nil, nil, nil
 	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha, n.poly = nil, nil, nil, nil, nil
+	n.vanish = nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 	n.text_back, n.text_back_node = nil, nil
@@ -908,6 +909,11 @@ local function draw_look(id, n, look)
 		log:info("kit: entity " .. id .. "'s look: " .. tostring(look.state) ..
 				(on and " on" or " off"))
 	end
+	-- [KIT_COLLECTIBLE] when.vanish "fly": turned on from off as drawn (not
+	-- a look built anew), the body shrinks, turns and rises first (below)
+	local vanish = on and n.look and n.drawn_on == false and
+			type(look.when) == "table" and look.when.vanish == "fly"
+	n.drawn_on = on
 	n.on = on
 	local b = look_box(look, on)
 	n.box = b
@@ -1041,6 +1047,12 @@ local function draw_look(id, n, look)
 	else
 		n.body.position = v3(b.off)
 		n.body.scale = v3(b.size)
+	end
+	n.vanish = nil
+	if vanish and not n.poly and not look.when.swing then
+		n.vanish = {t = 0, from = look_box(look, false)}
+		n.body.position = v3(n.vanish.from.off)
+		n.body.scale = v3(n.vanish.from.size)
 	end
 	local col = color(b.color, magic.Color(0.8, 0.8, 0.8))
 	-- [KIT_LIGHTING_SCENE] Under physical decoded to linear, as a voxel's
@@ -1297,6 +1309,8 @@ local hud = nil
 -- look is drawn from outside its entity's node must set n.calm = 0 too, or
 -- a still look never shows it
 local CALM, frame_no = 8, 0
+-- [KIT_COLLECTIBLE] A look's when.vanish: seconds, metres risen
+local VANISH_TIME, VANISH_RISE = 0.35, 0.8
 local changed = {}
 -- (for "event kit_looks": what the frames since the last ask read and cost)
 local LK = {frames = 0, read = 0, looks = 0, us = 0}
@@ -1331,7 +1345,7 @@ local function still(id, n)
 		end
 	end
 	local pn = n.pid and n.pid ~= 0 and P.nodes[n.pid]
-	return not (n.text or show.hud ~= nil or look.hidden or n.rest or
+	return not (n.text or show.hud ~= nil or look.hidden or n.rest or n.vanish or
 			n.slide_to or n.wear_wanted or n.ghost or n.see_through or
 			n.attach_to or P.preview[id] or P.pose[id] or (pn and pn.slide_to))
 end
@@ -1398,6 +1412,25 @@ local function update_play(_, data)
 			end
 			draw_look(id, n, show.look)
 			own_look(id, n, show.look)
+			-- [KIT_COLLECTIBLE] A vanish under way: VANISH_TIME s of the body
+			-- shrinking, turning half round and rising, then the look as on
+			local v = n.vanish
+			if v then
+				v.t = v.t + dt
+				local k = math.min(1, v.t / VANISH_TIME)
+				local f, o = v.from.size, v.from.off
+				local s = math.max(0.01, 1 - k)
+				n.body.scale = magic.Vector3(f[1] * s, f[2] * s, f[3] * s)
+				n.body.position = magic.Vector3(o[1], o[2] + VANISH_RISE *
+						k * (2 - k), o[3])
+				n.body.rotation = magic.Quaternion(0, 180 * k, 0)
+				if k >= 1 then
+					n.vanish = nil
+					n.body.position, n.body.scale = v3(n.box.off), v3(n.box.size)
+					n.body.rotation = magic.Quaternion(0, 0, 0)
+					log:info("kit: entity " .. id .. " vanished")
+				end
+			end
 			-- A slide under way ([KIT] stage 4l)
 			if n.slide_to and n.slide_at and n.slide_speed and
 					(n.slide_to - n.slide_at):Length() > 1e-5 then
