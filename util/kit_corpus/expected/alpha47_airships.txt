@@ -4,7 +4,7 @@
 entities 53 (kit 1, api 1)
 2 1 scene
 3 2 kit/terrain@2#4aa9ea1d/97d170e1
-4 1 kit/game_rules@2#9e7ed0d3/97d170e1 kit/environment@1#3419ac72/97d170e1
+4 1 kit/game_rules@2#9e7ed0d3/97d170e1 kit/environment@1#85a68886/97d170e1
 5 2 kit/region@1#33801648/97d170e1
 6 2 kit/trigger_zone@1#d30a4cf8/97d170e1
 7 2 kit/terrain_region@1#40713d0e/97d170e1

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-21)
-# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/controls.lua builtin/kit/types/controls.lua builtin/kit/types/environment.lua builtin/kit/types/terrain.lua builtin/kit/kit.cpp builtin/kit/terrain.h
+# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/controls.lua builtin/kit/types/controls.lua builtin/kit/types/environment.lua builtin/kit/client_lua/environment.lua builtin/kit/types/terrain.lua builtin/kit/kit.cpp builtin/kit/terrain.h
 # [KIT_PARAM_AUDIT] (doc/kit_param_audit.txt) A builder's simple changes to
 # Brimstone Speedway (new from its template on Workbench, one server,
 # kitboss on a headless weston's Xwayland of the check's own) do what he
@@ -11,7 +11,7 @@
 #   2. kit/controls' camera first_person alone (the template's chase_follow
 #      0.3): through the U of corners 2 and 3 the eye's yaw follows the
 #      car's (east, then west), looking level (fp_east.png, fp_west.png);
-#   3. a kit/environment placed (time 8, its default fast_physical: no
+#   3. a kit/environment placed (time 8, its default inherit: fast_physical, no
 #      shadows) and then lighting physical, the view top_down and the car
 #      still: the walls' shadows on the ground, darker than its sunlit rest
 #      and bluer (the sky's light alone) (env_fast.png, env_phys.png);
@@ -21,6 +21,10 @@
 #      line where the flat one had it (not over the road, nor under it),
 #      over 2 m off it on 8 or more of a 16 m grid over the map, and the car
 #      driven on from the U bend to the east straight;
+#   4b. [KIT_LIGHTING_SCENE] the root's environment's lighting inherit (the
+#      default) drawn fast_physical; under the root's cartoon a kit/environment
+#      placed on the trial with lighting physical draws the trial physical,
+#      the lobby (scene world) cartoon, and the trial physical again;
 #   5. every one of those undone: the composition exactly as it was.
 #   util/kit_param_audit_check.sh
 set -u
@@ -279,6 +283,30 @@ print("%.0f %% of the view changed" % (100 * f))
 assert f > 0.1
 PY
 echo "ok: the trial's ground noise: hills $g, flat round $parts parts (the road on the ground), the view changed, driven on"
+
+# 4b. A scene's lighting: the root's inherit is fast_physical; under the
+# root's cartoon a kit/environment on the trial with physical gives the
+# trial physical, the lobby keeps cartoon, and back
+step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+mc=$(mark "$CL")
+set_p $ENV lighting '"inherit"'
+await "$CL" "$mc" 20 "kit: lighting fast_physical"
+mc=$(mark "$CL")
+set_p $ENV lighting '"cartoon"'
+await "$CL" "$mc" 20 "kit: lighting cartoon"
+mc=$(mark "$CL")
+edit '{"op": "place", "type": "kit/environment", "on": "scene", "pos": [0, 0, 0], "params": {"lighting": "physical", "time": 8}}'
+await "$CL" "$mc" 20 "kit: lighting physical"
+switch() # <scene> <lighting>: the client's lighting after it, ms taken in $ms
+{
+	local t0=$(date +%s%N)
+	step 30 "kit: lighting $2" "event kit_edit {\"op\": \"scene\", \"name\": \"$1\"}"
+	ms=$((($(date +%s%N) - t0) / 1000000))
+}
+switch world cartoon; m1=$ms
+switch trial physical; m2=$ms
+step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
+echo "ok: lighting inherit on the root fast_physical; the trial's own physical under the root's cartoon, the lobby cartoon (${m1} ms), back physical (${m2} ms)"
 
 # 5. All undone
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"

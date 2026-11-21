@@ -1,0 +1,5 @@
+<!-- [KIT_LIGHTING_SCENE] Appended to physical's render path (environment.lua's
+     lit_path): KitText.xml's pass, over the tonemapped frame. -->
+<renderpath>
+    <command type="scenepass" pass="kittext" sort="backtofront" />
+</renderpath>

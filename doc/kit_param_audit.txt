@@ -7,7 +7,8 @@ a builder would expect), FIXED (a Kit fault, fixed with the audit),
 fault (a Kit fault left), proposal (a template or Kit improvement; works
 as written, could be clearer), done (a proposal carried out after the
 audit: [KIT_TEXT_PLACEHOLDER], kit_plan 4z37x). util/kit_param_audit_check.sh keeps the
-first five Brimstone rows and its ground's; util/kit_racer_check.sh step 6 the chase
+first five Brimstone rows, its ground's and a scene's lighting;
+util/kit_racer_check.sh step 6 the chase
 camera, util/kit_symmetry_check.sh the symmetry fit.
 
 Brimstone Speedway (top-down racer)
@@ -26,8 +27,26 @@ movement walker (top_down)     | a walker on the track     | W walks +z 5 m; the
 place kit/environment, cartoon | about as without one      | sunlit road (112,86,76) vs (114,88,78)     | pass
 lighting physical              | shadows, shade bluer      | wall shadow (88,87,91) b/r 1.03 vs sunlit  | pass
                                |                           | (176,158,144) b/r 0.82; the brown road     |
-                               |                           | washes to pale beige (proposal: Kit's      |
-                               |                           | physical exposure, or the road's colour)   |
+                               |                           | washes to pale beige                       | FIXED
+                               |                           | (measured at 15 o'clock, top_down, the     |
+                               |                           | same view: a #808080 kit/part read 144     |
+                               |                           | under physical, 137 with no environment,   |
+                               |                           | 112 cartoon; the road (136,121,109) vs     |
+                               |                           | (114,88,77): not the exposure but the      |
+                               |                           | looks' albedo, a kit/part's colour and a   |
+                               |                           | voxel-textured polygon's, not decoded to   |
+                               |                           | linear as the World's voxels are. Now      |
+                               |                           | decoded: grey 101, road (88,67,55))        |
+                               |                           | ([KIT_LIGHTING_SCENE])                     |
+                               |                           | the signs' text near black (metered down   | FIXED
+                               |                           | in the frame's radiance): now drawn after  |
+                               |                           | the tonemap, as UI text                    |
+kit/environment on the trial   | that scene physical       | nothing: the lighting was the root's alone.| FIXED
+  scene, lighting physical     |                           | Now lighting inherit (the default: the     |
+                               |                           | root's fast_physical, a scene's the root's)|
+                               |                           | and a scene's own: the trial physical, the |
+                               |                           | lobby the root's, switched on a scene      |
+                               |                           | change (+0.4..0.6 s on llvmpipe)           |
 time 18.5 / weather rain       | dusk / rain               | orange dusk; drops, overcast, no shadows   | pass
 trial_laps 2                   | HUD "Lap 1/2", 2 laps     | "Lap 1/2" after Retry; lap end kit_racer's | pass
 yard generator seed 7, width 8 | a new, narrower track     | narrower road, junk moved; the driver      | pass
@@ -58,7 +77,8 @@ build and its landing tick growing with them). Not a quick change.
 Puzzle room (walker, first person)
 ----------------------------------
 lighting physical (env placed) | shadows, shade bluer      | (102,96,90) b/r 0.88 vs (151,135,118) 0.78;| pass
-                               |                           | sign text in shade low in contrast         | proposal
+                               |                           | sign text in shade low in contrast: now    | FIXED
+                               |                           | after the tonemap, as UI text              |
 camera chase                   | behind the walker         | behind it; with chase_follow it follows    | pass
 camera top_down                | playable from above       | the body hidden behind the south wall near | done
                                |                           | spawn. The template's kit/controls (camera |

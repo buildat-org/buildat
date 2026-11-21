@@ -3445,6 +3445,39 @@ function NT.song_section(w, e, key, k, values, mark)
 	end
 end
 
+-- [KIT_LIGHTING_SCENE] What an environment's lighting inherit is on the
+-- entity e: the environment's above it that says other (kit.cpp's
+-- env_lighting), inherit on the root's fast_physical, none there cartoon
+local function inherited_lighting(e)
+	local by, env = {}, {}
+	for _, x in ipairs(all_entities()) do
+		by[x.id] = x
+		for _, c in ipairs(x.pos == nil and x.kind == nil and
+				x.components or {}) do
+			if c.type == "kit/environment" and not c.disabled then
+				env[x.parent or 1] = env[x.parent or 1] or c
+			end
+		end
+	end
+	-- (from the scene e is on up: each scene over it, the root last)
+	local h = e.parent or 1
+	for _ = 1, 64 do
+		if h == 1 then
+			break
+		end
+		h = by[h] and by[h].parent or 1
+		local c = env[h]
+		local l = c and (c.params or {}).lighting or "inherit"
+		if h == 1 then
+			return not c and "cartoon" or l == "inherit" and
+					"fast_physical" or l
+		elseif by[h] and by[h].kind == "scene" and l ~= "inherit" then
+			return l
+		end
+	end
+	return "fast_physical"
+end
+
 -- [KIT_PARAM_CATEGORIES] A component's parameters, keep(name, decl) saying which
 -- (all without one), with Apply. Pending values and Apply cover every parameter
 -- of it, shown or not: the inspector's and the HUD view's panel's share them
@@ -3482,6 +3515,14 @@ function NT.params_form(w, e, ci, c, t, keep)
 			points[#points + 1] = k
 		else
 			local f = field(k, decl[k], values)
+			if k == "lighting" and c.type == "kit/environment" then
+				local l = inherited_lighting(e)
+				for _, ch in ipairs(f.choices or {}) do
+					if ch[2] == "inherit" then
+						ch[1] = "inherit (" .. l .. ")"
+					end
+				end
+			end
 			-- [KIT_SIDE_SCENERY] (8) under a parallax layer nothing is met
 			-- (kit.cpp's under_parallax()): its collision says so
 			if k == "collision" and (NT.parallax_note(e) or ""):find("^Under") then

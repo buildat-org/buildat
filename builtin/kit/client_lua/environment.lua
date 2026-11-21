@@ -10,9 +10,10 @@
 -- and given back as they were when the environment goes. module.lua runs
 -- this file with what it shares.
 --   kit.environment() -> what it is now (nil: none)
--- [KIT_LIGHTING] (kit_plan 4o) And the composition's lighting, where the
--- app draws through Kit's views (kit.viewport: Workbench; skeldat's own
--- HDR path stays its own):
+-- [KIT_LIGHTING] (kit_plan 4o) And the scene's lighting (the message's
+-- lighting, [KIT_LIGHTING_SCENE]: the server resolves a scene's own or the
+-- root's, so a scene change switches it), where the app draws through Kit's
+-- views (kit.viewport: Workbench; skeldat's own HDR path stays its own):
 --   cartoon  today's look: LDR, the ambient, one sun, the fog
 --   physical sky_render's path (HDR: exposure, bloom, tonemap), the light
 --            of the hour by extensions/voxel_light's terms (physical_sky's
@@ -150,6 +151,11 @@ local function lit_path(view)
 	if view.finish then
 		view.finish(rp)
 	end
+	-- [KIT_LIGHTING_SCENE] a sign's text over the tonemapped frame
+	-- (module.lua's text3d), after a view's own
+	if M.physical() then
+		rp:Append(magic.cache:GetResource("XMLFile", "kit/KitTextPass.xml"))
+	end
 	view.vp.renderPath = rp
 	LIT.grey = nil
 end
@@ -211,6 +217,9 @@ local function set_lighting(mode)
 	-- The voxels' techniques: the two physicals' the same
 	if phys ~= was_phys then
 		require("buildat/module/voxelworld").remesh_all()
+		if M.relit then
+			M.relit()
+		end
 	end
 	return true
 end

@@ -260,6 +260,19 @@ local function drop_look(n)
 	n.text_back, n.text_back_node = nil, nil
 end
 
+-- [KIT_LIGHTING_SCENE] The lighting turned physical or back (environment.lua's
+-- set_lighting): every look drawn again (its colour, a voxel material's
+-- technique, a text's, look_technique and text3d)
+function M.relit()
+	for _, n in pairs(P.nodes) do
+		if n.look then
+			drop_look(n)
+			n.last_text = nil
+			n.gen, n.calm = (n.gen or 0) + 1, 0
+		end
+	end
+end
+
 -- A client part's handler, protected: one that fails is left off for
 -- that entity, logged, and ([KIT_CLIENT_REACT] (4)) told to the server
 -- ("kit:part_failed" {id, type, handler, error}: the entity's log, a
@@ -497,6 +510,18 @@ local function voxel_tiles(def)
 	return tex, tint0, look_tech
 end
 
+-- [KIT_LIGHTING_SCENE] A look's technique: under physical a solid voxel
+-- material's albedo decoded to linear, as the World's voxels' are (undecoded,
+-- Brimstone's dirt road read pale beige; a plain colour is decoded where it is
+-- set). simplified: the solid look alone; a translucent, cut out or glass look
+-- stays as cartoon's (a Phys copy of their XML each is the upgrade)
+local function look_technique(name)
+	if name == "kit/KitVoxelLook.xml" and M.physical and M.physical() then
+		name = "kit/KitVoxelLookPhys.xml"
+	end
+	return magic.cache:GetResource("Technique", name)
+end
+
 -- [KIT_LOOK_MATERIAL] A unit box or wedge (wedge's) wearing a voxel
 -- material's tiles (voxel_tiles; a wedge's slope its +y, its back +z), a
 -- texture a metre of its sides `size` as the voxels wear theirs (a tile of a
@@ -606,7 +631,7 @@ local function voxel_mesh(node, def, size, shape)
 			end
 		end
 		local m = magic.Material:new()
-		m:SetTechnique(0, magic.cache:GetResource("Technique", look_tech))
+		m:SetTechnique(0, look_technique(look_tech))
 		m:SetTexture(magic.TU_DIFFUSE, t.t)
 		m:SetShaderParameter("MatDiffColor", tint0)
 		m:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
@@ -852,7 +877,7 @@ do
 					"kit/KitVoxelLookGlow.xml"
 			for i, g in ipairs(used) do
 				local m = magic.Material:new()
-				m:SetTechnique(0, magic.cache:GetResource("Technique",
+				m:SetTechnique(0, look_technique(
 						look.material == "glow" and glow or
 						glass and (def.translucent or def.alpha_masked) and
 						"kit/KitVoxelLookAlpha.xml" or
@@ -961,6 +986,17 @@ local function draw_look(id, n, look)
 				if type(look.text_color) == "string" then
 					t:SetColor(color(look.text_color, magic.Color(1, 1, 1)))
 				end
+				-- [KIT_LIGHTING_SCENE] Under physical after the exposure and
+				-- the tonemap (environment.lua's lit_path): as UI text, the
+				-- same in sun, shade and dusk. In the frame's radiance it was
+				-- metered down to near black against a sunlit board
+				if M.physical and M.physical() then
+					local m = magic.Material:new()
+					m:SetTechnique(0, magic.cache:GetResource("Technique",
+							"kit/KitText.xml"))
+					m.cullMode = magic.CULL_NONE
+					t.material = m
+				end
 				return l, t
 			end
 			local l, t = text3d("Text")
@@ -1007,6 +1043,11 @@ local function draw_look(id, n, look)
 		n.body.scale = v3(b.size)
 	end
 	local col = color(b.color, magic.Color(0.8, 0.8, 0.8))
+	-- [KIT_LIGHTING_SCENE] Under physical decoded to linear, as a voxel's
+	-- albedo (look_technique); a glow's drawn unlit, as given
+	if M.physical and M.physical() and look.material ~= "glow" then
+		col = magic.Color(col.r ^ 2.2, col.g ^ 2.2, col.b ^ 2.2, col.a)
+	end
 	if look.material == "glass" then
 		col = magic.Color(col.r, col.g, col.b, 0.4)
 	end

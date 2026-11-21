@@ -4,7 +4,7 @@
 entities 7 (kit 1, api 1)
 2 1 scene
 3 2 kit/terrain@2#a394cbaa/97d170e1
-4 1 kit/game_rules@2#b957f994/97d170e1 kit/environment@1#fce392c8/9f80a1b1 kit/walker@1#3463e6b0/97d170e1
+4 1 kit/game_rules@2#b957f994/97d170e1 kit/environment@1#7c2b1a43/9f80a1b1 kit/walker@1#3463e6b0/97d170e1
 5 1 kit/player_state@1#13d73a36/97d170e1
 7 2 kit/spawn_rule@2#812a726c/97d170e1
 8 2 kit/starting_kit@1#81553cf4/97d170e1
