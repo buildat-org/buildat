@@ -44,6 +44,8 @@ local ANCHORS = {"top_left", "top", "top_right", "left", "center", "right",
 return {
 	version = 2,
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	params = {
 		peaceful = {type = "bool", default = false},
 		building = {type = "string", default = "inventory",

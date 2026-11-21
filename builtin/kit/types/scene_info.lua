@@ -6,6 +6,8 @@
 return {
 	version = 1,
 	no_position = true,
+	-- [KIT_SINGLE] its scene's first is used: one a holder
+	single = true,
 	params = {
 		title = {type = "string", default = ""},
 		author = {type = "string", default = ""},

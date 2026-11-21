@@ -32,6 +32,16 @@ namespace interface
 // kit/game_rules, kit/environment, a builder's own) are looked up from a
 // player's scene up, the nearest copy winning (one on an entity right under
 // a scene with no position, "on": "scene"), the root's last.
+// [KIT_SINGLE] A type with `single = true` has at most one instance a
+// holder: the app root, a scene (the nearest scene above the entity, else
+// the root); one on the root and one in a scene is the scene's override.
+// A second's arrival in a holder (a place, a reparent, a paste, a prefab's
+// copy, an import) is refused naming the one there ("scene world has
+// kit/environment 12 already: one per scene"); the editor's Place selects
+// that one instead. Duplicates a saved game has load with a warning, the
+// first (by id) used. Kit's: kit/environment, kit/controls, kit/game_rules,
+// kit/terrain (the World), kit/player_state, the root movements
+// (kit/walker, kit/click_to_move), kit/scene_info and kit/symmetry.
 // simplified: game-wide whatever the scene: the inventory's size and screen
 // (kit/game_rules' slots, hotbar, stack, full, drop_items, screen),
 // kit/player_state and the types on every player (`player = true`: health,
@@ -1428,6 +1438,9 @@ namespace interface
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
+// [KIT_SINGLE] A place (a client's, not an agent's) refused for a single
+// type its holder has is answered with "kit:single" {"id": the one there,
+// "text": "place: why"} instead: the editor selects that one.
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
 // outputs, gizmo, usable, root}}, "authored": the row (positions and

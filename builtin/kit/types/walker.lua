@@ -33,6 +33,8 @@ return {
 		what = "A movement: players walk with the keys and jump.",
 	},
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	-- [KIT_ZONE_SHAPES] zones meet its body box, not its point
 	movement = {body = BODY, touch = "stick", zone = "box"},
 	params = {

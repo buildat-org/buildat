@@ -11,6 +11,8 @@
 -- entity's place and facing are mirrored, its look only turned
 return {
 	version = 2,
+	-- [KIT_SINGLE] one a scene (right under it: kit.cpp's sym_check)
+	single = true,
 	about = {
 		group = "World",
 		what = "Copies what is under it, and the voxels, into the map's other slices.",

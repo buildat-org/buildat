@@ -1,0 +1,262 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# tier: full
+# cost: ~1 min (2026-11-21)
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor_input.lua builtin/kit/types/environment.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua
+# [KIT_SINGLE] (kit_plan 4z37z) A type with single = true, one a holder
+# (the app root, a scene), on Workbench's server of Brimstone Speedway
+# (scenes world and trial; kit/game_rules 3 and kit/controls 4 on the
+# root), a second kit/game_rules (1331) put on the root in its file;
+# kitboss (the admin) on a headless weston's Xwayland of the check's own
+# (its clipboard carries the agent token):
+#   1. The load warns of the saved duplicate, 1331 named ignored.
+#   2. By MCP: kit/controls on the root refused naming 4; on world's own
+#      (on "scene") placed, the root's and the scene's both; a second
+#      there refused naming it. kit/environment on world (a game of two
+#      scenes), on the root, in trial: each placed; a second on world
+#      refused; set_parent of the root's into world, world's onto the
+#      root and duplicate of world's refused, each naming the one there;
+#      a kit/game_rules refused naming 3 (the first of the two).
+#      duplicate_scene world: world_2 has its own environment and
+#      controls.
+#   3. The editor's Place of kit/environment in world (the palette's
+#      menu): nothing placed, world's selected in the inspector, the hint
+#      in the status.
+# Screenshot, kept with KEEP_TMP=1: $t/selected.png (the inspector on it)
+#   util/kit_single_check.sh
+set -u
+. "$(dirname "$0")/check_lib.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+for c in weston xclip zip; do
+	command -v $c > /dev/null || skip "no $c"
+done
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
+	skip "a buildat server or client is already running"
+fi
+check_tmp kit_single; t=$CHECK_TMP
+cd "$here/Build"
+export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
+check_build
+sock=buildat-single-$$
+weston --backend=headless --xwayland --socket=$sock --width=1100 \
+	--height=800 > "$t/weston.log" 2>&1 &
+CHECK_PIDS+=($!)
+for i in $(seq 50); do
+	d=$(grep -ao "xserver listening on display :[0-9]*" "$t/weston.log" | grep -o ":[0-9]*$")
+	[ -n "$d" ] && break
+	sleep 0.2
+done
+[ -n "$d" ] || fail "weston's Xwayland ($t/weston.log)"
+CLIENT=
+mark() { wc -c < "$1"; }
+await() # <log> <offset> <seconds> <regex>
+{
+	local i
+	for i in $(seq $(($3 * 5))); do
+		tail -c +$(($2 + 1)) "$1" | grep -qaE "$4" && return 0
+		[ -z "$CLIENT" ] || kill -0 $CLIENT 2>/dev/null || fail "the client is gone ($CL)"
+		sleep 0.2
+	done
+	fail "no \"$4\" in $1 in $3 s (${SL:-}, ${CL:-})"
+}
+cmd() { printf '%s\n' "$@" >&3; }
+step() # <seconds> <regex in the client's log> <command>...
+{
+	local s=$1 re=$2 m
+	shift 2
+	m=$(mark "$CL")
+	cmd "$@"
+	await "$CL" "$m" "$s" "$re"
+}
+menu() # Escape until the pause menu is up (the editor's own Escapes first)
+{
+	local i k m
+	for i in 1 2 3; do
+		m=$(mark "$CL")
+		cmd "frames 3" "keypress Escape"
+		for k in $(seq 15); do
+			tail -c +$((m + 1)) "$CL" | grep -qa "pause: the menu shown" && return 0
+			sleep 0.2
+		done
+	done
+	fail "no pause menu ($CL)"
+}
+clip() # the clipboard once it holds a token
+{
+	local i got
+	for i in $(seq 50); do
+		got=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
+		[[ $got =~ ^bat_[0-9a-f]{64}$ ]] && break
+		sleep 0.2
+	done
+	printf '%s' "$got"
+}
+
+# The template with a second kit/game_rules on the root (a save of a Buildat
+# before single = true)
+mkdir -p "$t/tpl" "$t/user/shared"
+cp -r "$here/apps/workbench/templates/brimstone_speedway/." "$t/tpl/"
+python3 -I - "$t/tpl/composition.json" <<'PY' || fail "the template's duplicate"
+import json, sys
+p = sys.argv[1]
+c = json.load(open(p))
+gr = next(e for e in c["entities"] if e["id"] == 3)
+assert any(x["type"] == "kit/game_rules" for x in gr["components"]), gr
+dup = json.loads(json.dumps(gr))
+dup["id"], dup["name"] = c["next_id"], "game rules again"
+c["entities"].append(dup)
+c["next_id"] += 1
+json.dump(c, open(p, "w"), indent=1)
+print(dup["id"])
+PY
+(cd "$t/tpl" && zip -qrX "$t/user/shared/brim.zip" .) || fail "the template not zipped"
+SL=$t/server.log
+BUILDAT_WORKBENCH_PROJECT=brim BUILDAT_WORKBENCH_FROM=$t/user/shared/brim.zip \
+	start_server "$SL" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+	--sim-rate "$CHECK_RATE" || fail "the server did not come up ($SL)"
+SRV=$SERVER_PID
+CHECK_PIDS+=($SRV)
+wait_for_log "$SL" "workbench: .*brim" 120 || true
+# 1. The saved duplicate warned
+wait_for_log "$SL" "the app root has kit/game_rules 3 and 1331: one on the app root, that ignored" 30 ||
+	fail "no warning of the second kit/game_rules ($SL)"
+
+url() { echo "http://localhost:$SERVER_PORT/api/v1/mcp"; }
+cat > "$t/mcp.py" <<'PY'
+import json, re, sys, urllib.error, urllib.request
+url, tok, out = sys.argv[1:4]
+def post(msg):
+    h = {"Content-Type": "application/json",
+         "Accept": "application/json, text/event-stream",
+         "Authorization": "Bearer " + tok}
+    req = urllib.request.Request(url, data=json.dumps(msg).encode(), headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+n = 0
+def rpc(method, params=None):
+    global n
+    n += 1
+    m = {"jsonrpc": "2.0", "id": n, "method": method}
+    if params is not None:
+        m["params"] = params
+    s, b = post(m)
+    assert s == 200, (method, s, b)
+    return json.loads(b)
+def call(name, a={}, error=False):
+    r = rpc("tools/call", {"name": name, "arguments": a})["result"]
+    text = r["content"][0]["text"]
+    assert r["isError"] == error, (name, a, text[:2000])
+    print(" ", name, json.dumps(a)[:150], "->", text[:200].replace("\n", " "))
+    return text
+def refused(name, a, says):
+    text = call(name, a, error=True)
+    assert says in text, (name, a, says, text)
+def placed(text):
+    return int(re.search(r"placed \S+ (\d+)", text)[1])
+def state(**kw):
+    return json.loads(call("get_state", kw))
+def of(scene, t):
+    return [e["id"] for e in state(scene=scene, state=False)["entities"]
+        if e.get("kind") != "scene" and any(c["type"] == t for c in e["components"])]
+rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+    "clientInfo": {"name": "kit_single_check", "version": "1"}})
+if state(ids=[])["running"]:
+    assert call("stop").startswith("Ended")
+assert state(ids=[])["scene"] == "world"
+assert json.loads(call("list_types", {"type": "kit/environment"})).get("single") is True
+P = [0, 0, 0]
+# kit/controls: the root's 4, world's own beside it, no second
+refused("place", {"type": "kit/controls", "pos": P},
+    "the app root has kit/controls 4 already: one on the app root")
+c2 = placed(call("place", {"type": "kit/controls", "pos": P, "on": "scene"}))
+refused("place", {"type": "kit/controls", "pos": P, "on": "scene"},
+    "scene world has kit/controls %d already: one per scene" % c2)
+refused("set_parent", {"id": c2, "parent": "root"},
+    "the app root has kit/controls 4 already")
+# kit/environment: world's, the root's, trial's; no second
+ew = placed(call("place", {"type": "kit/environment", "pos": P}))
+er = placed(call("place", {"type": "kit/environment", "pos": P, "on": "root"}))
+refused("place", {"type": "kit/environment", "pos": P},
+    "scene world has kit/environment %d already: one per scene" % ew)
+refused("place", {"type": "kit/environment", "pos": P, "on": "root"},
+    "the app root has kit/environment %d already: one on the app root" % er)
+refused("set_parent", {"id": er, "parent": 0},
+    "scene world has kit/environment %d already" % ew)
+refused("set_parent", {"id": ew, "parent": "root"},
+    "the app root has kit/environment %d already" % er)
+refused("duplicate", {"ids": [ew], "by": [0, 0, 0]},
+    "scene world has kit/environment %d already" % ew)
+call("switch_scene", {"name": "trial"})
+et = placed(call("place", {"type": "kit/environment", "pos": P}))
+assert of("trial", "kit/environment") == [et]
+call("switch_scene", {"name": "world"})
+assert of("world", "kit/environment") == [ew], of("world", "kit/environment")
+# the saved pair's first named
+refused("place", {"type": "kit/game_rules", "pos": P},
+    "the app root has kit/game_rules 3 already")
+# A copy of world is a scene of its own: its own single ones
+call("duplicate_scene", {"name": "world"})
+assert len(of("world_2", "kit/environment")) == 1
+assert len(of("world_2", "kit/controls")) == 1
+call("switch_scene", {"name": "world"})
+json.dump({"env": ew}, open(out, "w"))
+print("ok")
+PY
+
+# kitboss: the setup code, a builder token
+wait_for_log "$SL" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
+[ -n "$code" ] || fail "no setup code ($SL)"
+mkfifo "$t/c.cmd"
+sleep 900 > "$t/c.cmd" &
+CHECK_PIDS+=($!)
+CL=$t/client.log
+DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kitboss \
+	BUILDAT_JOIN_CODE=$code timeout 600 bin/buildat -C "$t/client_cache" \
+	-D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 \
+	-c - < "$t/c.cmd" > "$CL" 2>&1 &
+CLIENT=$!
+CHECK_PIDS+=($CLIENT)
+exec 3> "$t/c.cmd"
+await "$CL" 0 120 "Joined as kitboss"
+cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
+await "$CL" 0 30 "kit editor: edit rights: yes"
+await "$CL" 0 30 "kit editor: edit mode on"
+menu
+step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
+	"frames 5" 'click Button "Connect an agent..."'
+step 10 "accounts: agents: a token made, builder" "frames 3" \
+	'click Button "Make a token..."' "frames 3" 'click Button "Make a token"'
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+tok=$(clip)
+[[ $tok =~ ^bat_ ]] || fail "no Builder token on the clipboard: $tok"
+cmd "frames 3" 'click Button "Done"'
+step 10 "pause: the menu shown" "frames 3" "keypress Escape"
+cmd "frames 3" "keypress Escape" "frames 3"
+
+# 2. MCP
+python3 -I "$t/mcp.py" "$(url)" "$tok" "$t/mcp.json" > "$t/mcp.log" 2>&1 ||
+	fail "the MCP run: $(tail -5 "$t/mcp.log") ($t/mcp.log, $SL)"
+env=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["env"])' "$t/mcp.json")
+
+# 3. The editor's Place of a second kit/environment in world
+m=$(mark "$SL") mc=$(mark "$CL")
+step 10 "kit editor: the palette's menu of" "$(pal_find kit/environment)" \
+	'click Button "kit/environment"'
+step 10 "kit editor: refused: place: scene world has kit/environment $env already: one per scene; $env selected" \
+	"frames 3" 'click Button "menu Place"'
+await "$CL" "$mc" 5 "kit editor: selected $env "
+cmd "frames 5" "screenshot $t/selected.png"
+tail -c +$((m + 1)) "$SL" | grep -aq "placed kit/environment" &&
+	fail "a second kit/environment placed ($SL)"
+cmd "quit"
+exec 3>&-
+wait $CLIENT
+CLIENT=
+kill -INT $SRV 2>/dev/null
+wait $SRV 2>/dev/null
+echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there"

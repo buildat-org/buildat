@@ -329,6 +329,7 @@ server type_field root
 server type_field seat
 server type_field senses
 server type_field sight
+server type_field single
 server type_field space
 server type_field spawn
 server type_field spawn_spots

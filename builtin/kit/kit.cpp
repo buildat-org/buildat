@@ -416,6 +416,8 @@ struct Type
 	// [KIT_ENVIRONMENT] it is an environment (kit/environment: the root's
 	// for every scene, a scene's own for it)
 	bool environment = false;
+	// [KIT_SINGLE] at most one a holder (single = true: the app root, a scene)
+	bool single = false;
 	ss_ spawn_param;
 	// Its voxel writes are builds by the player who set the run off, not
 	// game changes (builds = true)
@@ -2042,10 +2044,10 @@ struct Module: public interface::Module, public Interface
 				"no_position", "outputs", "owns_voxel", "parallax", "params",
 				"placeable", "player", "reads_players", "reads_regions",
 				"reads_teams", "reads_voxels", "region", "right_use", "root",
-				"seat", "senses", "sight", "space", "spawn", "spawn_spots",
-				"state", "takes_text", "team", "ui", "usable", "use_range",
-				"use_when", "version", "volume", "voxel_box", "world",
-				"world_region", "zone"};
+				"seat", "senses", "sight", "single", "space", "spawn",
+				"spawn_spots", "state", "takes_text", "team", "ui", "usable",
+				"use_range", "use_when", "version", "volume", "voxel_box",
+				"world", "world_region", "zone"};
 		return F;
 	}
 	// ... and the functions: its handlers
@@ -2325,6 +2327,7 @@ struct Module: public interface::Module, public Interface
 		t.no_position = t.decl.get("no_position").is_true();
 		t.world = t.decl.get("world").is_true();
 		t.environment = t.decl.get("environment").is_true();
+		t.single = t.decl.get("single").is_true();
 		t.builds = t.decl.get("builds").is_true();
 		for(const char *h : {"inventory_count", "inventory_add",
 				"inventory_take", "inventory_list"})
@@ -4023,13 +4026,7 @@ struct Module: public interface::Module, public Interface
 					why = "kit/symmetry goes right under its scene";
 					return false;
 				}
-				for(auto &p : m_entities)
-					if(p.first != c.first && p.second.parent == parent &&
-							!gone.count(p.first) && symmetry_in(p.second)){
-						why = "its scene has kit/symmetry "+itos(p.first)+
-								" already: one per scene";
-						return false;
-					}
+				// (one per scene: its single, single_check())
 				Entity n;
 				symmetry::Config cf;
 				if(on && (!entity_from_json(row, n, why) || !sym_config(n, cf,
@@ -4150,6 +4147,161 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		return true;
+	}
+
+	// ---- [KIT_SINGLE] A type with `single = true` (api.h): at most one
+	// instance a holder, the app root or a scene (the nearest scene above
+	// the entity, else the root). The authored entities' single instances
+	// as an edit leaves them (change: its rows over the entities; empty:
+	// as they are), by (type, holder), each (entity id, whether it arrived
+	// there: new, from another holder or the type newly on it)
+	typedef std::map<std::pair<ss_, uint64_t>,
+			sv_<std::pair<uint64_t, bool>>> Singles;
+	Singles singles(const sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		Singles out;
+		std::set<ss_> types;
+		for(auto &t : m_types)
+			if(t.second.single)
+				types.insert(t.first);
+		if(types.empty())
+			return out;
+		std::map<uint64_t, const json::Value*> rows;
+		for(auto &c : change)
+			rows[c.first] = &c.second;
+		// Its holder, the edit's rows read (now) or the entities alone
+		auto holder = [&](uint64_t id, bool now) -> uint64_t {
+			for(int i = 0; i < 128 && id > 1; i++){
+				auto r = now ? rows.find(id) : rows.end();
+				auto it = m_entities.find(id);
+				const json::Value *row = r != rows.end() ? r->second : nullptr;
+				if(row ? row->is_null() : it == m_entities.end())
+					return 1;
+				if(i && (row ? jstr(*row, "kind") : it->second.kind) == "scene")
+					return id;
+				id = row ? (uint64_t)json::jint(*row, "parent", 1) :
+						it->second.parent;
+			}
+			return 1;
+		};
+		auto had = [&](uint64_t id, const ss_ &t){
+			size_t n = 0;
+			auto it = m_entities.find(id);
+			if(it != m_entities.end())
+				for(const Instance &in : it->second.comps)
+					n += in.type == t;
+			return n;
+		};
+		for(auto &p : m_entities){
+			if(rows.count(p.first) || !authored(p.second) ||
+					!p.second.kind.empty())
+				continue;
+			const uint64_t h = holder(p.first, true);
+			for(const Instance &in : p.second.comps)
+				if(types.count(in.type))
+					out[std::make_pair(in.type, h)].push_back(
+							std::make_pair(p.first, holder(p.first, false) != h));
+		}
+		for(auto &r : rows){
+			auto it = m_entities.find(r.first);
+			if(!r.second->is_object() || !jstr(*r.second, "kind").empty() ||
+					(it != m_entities.end() && !authored(it->second)))
+				continue;
+			const json::Value &cs_ = r.second->get("components");
+			const uint64_t h = holder(r.first, true);
+			const bool moved = it == m_entities.end() ||
+					holder(r.first, false) != h;
+			std::map<ss_, size_t> n;
+			for(unsigned k = 0; k < cs_.size(); k++){
+				const ss_ t = full_type(jstr(cs_.at(k), "type"));
+				if(types.count(t))
+					out[std::make_pair(t, h)].push_back(std::make_pair(r.first,
+							moved || ++n[t] > had(r.first, t)));
+			}
+		}
+		return out;
+	}
+
+	// A holder as a refusal names it: "the app root", "scene <name>"
+	ss_ holder_text(uint64_t h, const sv_<std::pair<uint64_t, json::Value>>
+			&change = {})
+	{
+		if(h <= 1)
+			return "the app root";
+		for(auto &c : change)
+			if(c.first == h && c.second.is_object())
+				return "scene "+jstr(c.second, "name");
+		auto it = m_entities.find(h);
+		return "scene "+(it == m_entities.end() ? itos(h) : it->second.name);
+	}
+
+	// Whether an edit leaves a single type's second instance where one
+	// arrived ("scene world has kit/environment 12 already: one per
+	// scene"); *existing: that one (the one there before the edit)
+	bool single_check(const sv_<std::pair<uint64_t, json::Value>> &change,
+			ss_ &why, uint64_t *existing = nullptr)
+	{
+		// (none new, moved or with a single type: nothing arrives; a set
+		// or a voxel's edit scans nothing)
+		bool may = false;
+		for(auto &c : change){
+			auto it = m_entities.find(c.first);
+			if(!c.second.is_object())
+				continue;
+			may = may || it == m_entities.end() || it->second.parent !=
+					(uint64_t)json::jint(c.second, "parent", 1);
+			const json::Value &cs_ = c.second.get("components");
+			for(unsigned k = 0; !may && k < cs_.size(); k++){
+				auto ti = m_types.find(full_type(jstr(cs_.at(k), "type")));
+				may = ti != m_types.end() && ti->second.single;
+			}
+		}
+		if(!may)
+			return true;
+		for(auto &g : singles(change)){
+			if(g.second.size() < 2)
+				continue;
+			// The first that arrived, the first that was there (none: another)
+			const std::pair<uint64_t, bool> *in = nullptr, *was = nullptr;
+			for(auto &x : g.second){
+				if(x.second && !in)
+					in = &x;
+				if(!x.second && !was)
+					was = &x;
+			}
+			if(!in)
+				continue;
+			for(auto &x : g.second)
+				if(!was && x.first != in->first)
+					was = &x;
+			const uint64_t id = (was ? was : in)->first;
+			why = holder_text(g.first.second, change)+" has "+g.first.first+" "+
+					itos(id)+" already: "+(g.first.second <= 1 ?
+					"one on the app root" : "one per scene");
+			if(existing)
+				*existing = id;
+			return false;
+		}
+		return true;
+	}
+
+	// The single types' duplicates the entities have (a save of a Buildat
+	// before [KIT_SINGLE], or a type made single since): each logged, the
+	// first (by id) the one Kit uses
+	void single_warn()
+	{
+		for(auto &g : singles({})){
+			if(g.second.size() < 2)
+				continue;
+			ss_ ids;
+			for(size_t k = 1; k < g.second.size(); k++)
+				ids += (k > 1 ? ", " : "")+itos(g.second[k].first);
+			log_w(MODULE, "%s has %s %s and %s: one %s, %s ignored",
+					cs(holder_text(g.first.second)), cs(g.first.first),
+					cs(itos(g.second[0].first)), cs(ids),
+					g.first.second <= 1 ? "on the app root" : "per scene",
+					g.second.size() > 2 ? "those" : "that");
+		}
 	}
 
 	// ---- [KIT_SYMMETRY] The voxels, the samples and the decorations
@@ -5807,6 +5959,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!load_composition(c, why, by))
 			return false;
+		single_warn();
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
 					m_migrated);
@@ -9319,6 +9472,11 @@ struct Module: public interface::Module, public Interface
 				unlisted = unlisted || was_listed;
 			}
 			ch.second.set("components", comps);
+		}
+		// [KIT_SINGLE] (a new scene's own are its; a package with two of one)
+		if(!single_check(change, why)){
+			m_next_id = next0;
+			return why;
 		}
 		// Each as Kit takes it, before any goes in
 		for(auto &ch : change)
@@ -34634,7 +34792,10 @@ struct Module: public interface::Module, public Interface
 				"under parent if given. The answer names its new id. A type with "
 				"no_position takes a pos too, but has no position. A root type "
 				"(list_types: root) goes on the app root; on \"scene\" puts it "
-				"on your scene (its own copy). kit/environment goes on your "
+				"on your scene (its own copy). A single type (list_types: "
+				"single; kit/environment, kit/controls, kit/game_rules, the "
+				"World) is one on the app root and one a scene at most: a "
+				"second is refused naming the one there (set its params). kit/environment goes on your "
 				"scene in a game of more than one scene (in a one-scene game, on "
 				"the app root while it has none); on \"root\" (or parent "
 				"\"root\") puts it on the app root: the sky of every scene "
@@ -34959,7 +35120,8 @@ struct Module: public interface::Module, public Interface
 				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
 				"outputs likewise; usable = true (players use it: on_use); "
 				"reads_players = true (c.players), reads_teams = true (c.teams); "
-				"no other field or function (a helper goes in a local), no kit_ "
+				"single = true (one on the app root and one a scene at most: "
+				"a second's place there refused); no other field or function (a helper goes in a local), no kit_ "
 				"param or state name (Kit's); look "
 				"= {shape = \"box\"|\"sphere\", size = n or {x, y, z}, color = "
 				"\"#rrggbb\", solid = true, text = \"<shared state key>\"}; zone "
@@ -38575,7 +38737,8 @@ struct Module: public interface::Module, public Interface
 			const json::Value &d = m_types[type].decl;
 			o.set("type", type);
 			for(const char *k : {"about", "params", "inputs", "outputs",
-					"no_position", "component", "root", "player", "zone"})
+					"no_position", "component", "root", "single", "player",
+					"zone"})
 				if(!d.get(k).is_undefined())
 					o.set(k, d.get(k));
 			o.set("addable", addable(type));
@@ -43219,7 +43382,7 @@ struct Module: public interface::Module, public Interface
 						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement", "world", "environment", "parallax"})
+						"movement", "world", "environment", "parallax", "single"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				if(addable(t))
@@ -43240,7 +43403,7 @@ struct Module: public interface::Module, public Interface
 							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player", "ui", "about", "seat", "movement",
-							"world", "environment", "parallax"})
+							"world", "environment", "parallax", "single"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))
@@ -43860,12 +44023,27 @@ struct Module: public interface::Module, public Interface
 		m_bench_saved.clear();
 		const uint64_t next0 = m_next_id;
 		m_edit_next0 = next0;
+		uint64_t single = 0;
 		if(!build_change(op, j, p, change, what, why) ||
-				!rebuilds(change, p, what, why) || !sym_check(change, why)){
+				!rebuilds(change, p, what, why) || !sym_check(change, why) ||
+				!single_check(change, why, &single)){
 			m_paste.set = false;
 			m_follow.clear();
 			// [KIT_GENERATORS] a build refused: its ids not taken
 			m_next_id = next0;
+			// [KIT_SINGLE] the editor's place of one its holder has: that
+			// one selected instead (an agent's refused)
+			if(single && op == "place" && !agent_of(peer)){
+				log_i(MODULE, "An edit (place) by peer %zu refused: %s; entity "
+						"%s selected", peer, cs(why), cs(itos(single)));
+				json::Value s = json::object();
+				s.set("id", (int64_t)single);
+				s.set("text", "place: "+why);
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(peer, "kit:single", s.stringify());
+				});
+				return;
+			}
 			return refuse(why);
 		}
 		if(in_draft())
@@ -46994,7 +47172,8 @@ struct Module: public interface::Module, public Interface
 		m_follow_source = 0;
 		// ([KIT_BUILD_SLICED] its builds one call each: no undo)
 		m_build_sync++;
-		const bool ok = rebuilds(change, p, what, why);
+		const bool ok = rebuilds(change, p, what, why) &&
+				single_check(change, why);
 		m_build_sync--;
 		if(!ok){
 			m_follow.clear();

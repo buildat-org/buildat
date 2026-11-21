@@ -1193,8 +1193,8 @@ wait_log 5000 signals: the palette's popup
 frames 3
 click Button "kit/game_rules"
 wait_log 5000 signals: picked kit/game_rules
+wait_log 10000 kit editor: refused: place: the app root has kit/game_rules $RULES already: one on the app root; $RULES selected
 EOF
-	state
 	cat <<EOF
 frames 3
 sync 3000
@@ -1360,11 +1360,13 @@ placed=$(grep -aoP "An edit by kitboss: placed kit/logic \K\d+" "$s" | tail -1)
 want "$b" "kit editor: selected $placed " "kit editor: kit/logic a favourite" "kit editor: kit/logic not a favourite" \
 	"kit editor: placing kit/flag"
 echo "ok: a type with no position has the palette's menu: Cancel, Escape, a press elsewhere place nothing, Place at once and selected, Favourite kept; a drag places, a positioned one arms"
-# A type the root or the scene takes: the menu, not armed; a second kit/game_rules is not refused
+# A type the root or the scene takes: the menu, not armed; ([KIT_SINGLE]) a
+# second kit/game_rules from Add from palette not placed, the first selected
 wantp "$s" "An edit by kitboss: placed kit/environment \d+ (on the app root|on the scene)"
-[ "$(grep -ac "An edit by kitboss: placed kit/game_rules [0-9]*  *on the app root" "$s")" = 2 ] || fail "the popup's kit/game_rules ($s)"
+[ "$(grep -ac "An edit by kitboss: placed kit/game_rules [0-9]*  *on the app root" "$s")" = 1 ] || fail "the popup's kit/game_rules placed ($s)"
+want "$b" "kit editor: selected $RULES "
 kit "$b" | grep -aE "placing kit/(environment|game_rules)" && fail "armed ($b)"
-echo "ok: kit/environment and kit/game_rules have the palette's menu, placed on the root at once; the same from Add from palette"
+echo "ok: kit/environment and kit/game_rules have the palette's menu, placed on the root at once; Add from palette's second kit/game_rules selects the first"
 # 5. The name after a restart; 8. A wide window, a narrow touch one
 stop_server
 python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$BAR1" "$TIMER" "$LOGIC" "$KID" "$PIE" <<'PY' || fail "the save"

@@ -18,9 +18,10 @@
 #      (places and facings, a box's and a door's cells, the world point,
 #      the door's mirror, the link to the same slice's door).
 #   3. Refused: a copy moved, deleted, given a child, linked to; a source
-#      moved out of the authored slice; a second kit/symmetry. A parameter
-#      set on a copy stays over a source's move (an override), reset gives
-#      it the source's. kit/symmetry deleted: its copies go with it.
+#      moved out of the authored slice; a second kit/symmetry ([KIT_SINGLE]:
+#      the first selected instead). A parameter set on a copy stays over a
+#      source's move (an override), reset gives it the source's.
+#      kit/symmetry deleted: its copies go with it.
 # The copies are read from the server's log (-l 4: each copy as made).
 #
 #   util/kit_symmetry_check.sh
@@ -116,7 +117,7 @@ EOF
 	refused '{"op": "move", "id": 5, "pos": [-3, 1, 2]}' \
 		"move: entity 5 at -3, 2 is outside kit/symmetry 4's authored slice +x"
 	refused '{"op": "place", "type": "kit/symmetry", "pos": [1, 1, 1]}' \
-		"place: its scene has kit/symmetry 4 already: one per scene"
+		"place: scene world has kit/symmetry 4 already: one per scene; 4 selected"
 	edit '{"op": "set", "id": 45, "comp": 0, "param": "color", "value": "#ff0000"}'
 	edit '{"op": "move", "id": 5, "pos": [6, 1, 3]}'
 	edit '{"op": "prefab_reset", "id": 45, "comp": 0, "param": "color"}'

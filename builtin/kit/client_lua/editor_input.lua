@@ -3868,6 +3868,25 @@ function M.editor(options)
 			ui_utils.show_notification(E.status, 4)
 		end
 	end)
+	-- [KIT_SINGLE] A Place of a single type its holder has ("kit:single"
+	-- {"id", "text"}): that one selected in the inspector instead, a hint
+	buildat.sub_packet("kit:single", function(data)
+		local m = network.parse_json(data)
+		if type(m) ~= "table" or type(m.id) ~= "number" then
+			return
+		end
+		log:info("kit editor: refused: " .. tostring(m.text) .. "; " .. m.id ..
+				" selected")
+		NT.select_new, S.placing = nil, nil
+		clear_preview()
+		select(m.id)
+		NT.show_inspector()
+		NT.reveal(m.id)
+		NT.sg.reveal = m.id
+		E.status = tostring(m.text):gsub("^place: ", "") ..
+				": it is selected"
+		people()
+	end)
 	magic.SubscribeToEvent("KeyDown", function(_, data)
 		local key = data:GetInt("Key")
 		-- [KIT_DROPDOWN_ARROWS_MOVE] an open dropdown's popup has the keys:
