@@ -718,7 +718,7 @@ namespace interface
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
 //   client's log only); `local kit = require("buildat/module/kit")`,
-//   [KIT_API_1] these 15 names of the client's Kit and no others (another
+//   [KIT_API_1] these 16 names of the client's Kit and no others (another
 //   is nil; module.lua's, controls.lua's and input.lua's heads say more):
 //   kit.pointed(origin, dir, reach) and kit.use(id), kit.body_state() this
 //   client's predicted body, kit.body_pos(), kit.seated(), kit.ui_keys()
@@ -726,7 +726,10 @@ namespace interface
 //   kit.press_action(name, down) (a game action, a type's `actions`,
 //   pressed or let go as by its key), kit.key_down(id) (a key action held),
 //   kit.key_name(id) (its key's name) and kit.key_text(s) (each {key:id}
-//   in s as this client's key, as signs show it), kit.shared, kit.shake,
+//   in s as this client's key, as signs show it), [KIT_MOVE_DRAW]
+//   kit.material(hex, {unlit = bool, texture = name}) (a cached material of
+//   the colour "#rrggbb", lit or unlit, or of a texture drawn as it is, the
+//   colour where it does not load: module.lua's), kit.shared, kit.shake,
 //   kit.effect, kit.mark and kit.clear_marks below. kit.internal is the
 //   whole client module, the editor's too: outside Kit API 1 (it may
 //   change in any release; the apps that host Kit use it, and publishing a
@@ -773,10 +776,22 @@ namespace interface
 //   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
 //   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
 //   its keys none, on the server's steps and the client's prediction alike
-//   (move.lua's header; c:speed(by, 0) stays the freeze). [KIT_BODY_VARS]
+//   (move.lua's header; c:speed(by, 0) stays the freeze: [KIT_MOVE_DRAW]
+//   i.speed is its factor, 1 normally, 0 frozen). [KIT_BODY_VARS]
 //   s.vars: what c:body_var set on the body (read only; nil: none), the
 //   server's in the client's re-steps too: a step decides by the run's
-//   state itself (a finish open) with no rewind. (9) A kit/lobby's
+//   state itself (a finish open) with no rewind. [KIT_MOVE_DRAW] A
+//   movement's draw(s, node, yaw, p): p its parameters (the step's p: a
+//   size both need is a parameter, not a constant in two files); s.vars
+//   another body's public vars (c:body_var's {public = true}); s.pose by
+//   name too where the movement declares pose = {"name"...} (its slots in
+//   order, 8 at most: the step writes s.pose by name or by index, kept and
+//   sent as the numbers); node made anew when the draw function changes
+//   (its client part put again). A put (a teleport, a respawn, a seat)
+//   starts the movement's state afresh on the server and the client: a
+//   step keeping a place of its own starts over from s.pos. A hazard that
+//   must react at once belongs in the step (a surface it meets), not in a
+//   server zone, whose on_enter is a round trip late on the client. (9) A kit/lobby's
 //   keep_own_body: the player's own body stays drawn for them out of play,
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
@@ -1131,7 +1146,9 @@ namespace interface
 // **Places, moves, speed and markers** ([KIT_CTF], any game's):
 //   c.players (a type's `reads_players`): each also has pos {x, y, z} (placed
 //   ones: the world's, their feet's cell's middle, as c.pos is for an
-//   entity), yaw (degrees, their view's last input) and alive (placed,
+//   entity), yaw (degrees, their view's last input), [KIT_MOVE_DRAW]
+//   heading (degrees, their body's own: its movement state's yaw, a car's
+//   nose; else the entity's) and alive (placed,
 //   not waiting to respawn, their health's hp above 0 where they have
 //   one); away true when they are in another scene than the entity (a
 //   placed one's; never on the root's), scene the one they are in.
@@ -1155,8 +1172,9 @@ namespace interface
 //   factor (0...10; 1 as it was) from then on: the server's steps and
 //   their client's prediction ("kit:controls"' parameters) alike. Until
 //   another call, Stop, or their body's going (they leave, another
-//   session). 64 a run.
-//   [KIT_BODY_VARS] c:body_var(player, key, value): a player it reaches
+//   session). 64 a run. A movement's step gets the factor as i.speed
+//   ([KIT_MOVE_DRAW]).
+//   [KIT_BODY_VARS] c:body_var(player, key, value[, opts]): a player it reaches
 //   (an id or a by, as c:speed's), on an app with Kit's controls: their
 //   body's state has s.vars[key] = value from then on (nil clears), which
 //   their movement's step reads on the server's steps and in their
@@ -1172,6 +1190,11 @@ namespace interface
 //   holds itself still on the finish line's polygon (surface "finish")
 //   while s.vars.finish_open. simplified: a value set less than a round
 //   trip before the step that needs it still rewinds the client.
+//   [KIT_MOVE_DRAW] opts {public = true}: the value is also in every
+//   client's draw of that body (s.vars, the other players' clients too):
+//   on its node, sent once a change to the clients that see it, a client
+//   that comes later given the current ones. Each call says it again (one
+//   without public makes the key private). A rider's style, a car's paint.
 //   c:attach(player, {bone = name, offset = {x, y, z}})
 //   ([KIT_CARRY_ATTACH]): its own entity on a player it reaches (an id or
 //   a by), placed and in its scene: every client draws its look at the

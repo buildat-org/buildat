@@ -1,31 +1,19 @@
 -- Crag Trial's bike drawn by the movement's draw hook (Kit's players.lua):
 -- the frame, the wheels and the rider as boxes under the body's node, posed
--- from s.pose (crag_bike.lua's: its angle, its facing, the wheels from the
--- feet and their turns), this client's own as predicted, the others' as the
--- server's last step left them
+-- from s.pose (crag_bike.lua's, by name: its angle, its facing, the wheels
+-- from the feet and their turns), this client's own as predicted, the
+-- others' as the server's last step left them; sized by the movement's
+-- params (p: wheel, wheelbase, height)
 local magic = require("buildat/extension/urho3d")
+local kit = require("buildat/module/kit")
 local log = buildat.Logger("crag_bike")
-local LIFT, R = 0.74, 0.36 -- crag_bike.lua's: the middle over the feet, a wheel's radius
-local mats = {}
 local said = false
-
-local function mat(hex)
-	if not mats[hex] then
-		local m = magic.Material:new()
-		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/NoTexture.xml"))
-		m:SetShaderParameter("MatDiffColor", magic.Color(tonumber(hex:sub(2, 3), 16) / 255,
-				tonumber(hex:sub(4, 5), 16) / 255, tonumber(hex:sub(6, 7), 16) / 255))
-		mats[hex] = m
-	end
-	return mats[hex]
-end
 
 local function part(root, name, model, color)
 	local n = root:CreateChild(name)
 	local m = n:CreateComponent("StaticModel")
 	m.model = magic.cache:GetResource("Model", "Models/" .. model .. ".mdl")
-	m.material = mat(color)
+	m.material = kit.material(color)
 	m.castShadows = true
 	return n
 end
@@ -42,14 +30,9 @@ local function build(node)
 	local b = node:CreateChild("crag_bike")
 	for _, k in ipairs({"wl", "wr"}) do
 		local wh = b:CreateChild(k)
-		local tyre = part(wh, "tyre", "Cylinder", "#26282b")
-		tyre.rotation = magic.Quaternion(90, 0, 0)
-		tyre.scale = magic.Vector3(2 * R, 0.16, 2 * R)
-		local hub = part(wh, "hub", "Cylinder", "#b8bcc0")
-		hub.rotation = magic.Quaternion(90, 0, 0)
-		hub.scale = magic.Vector3(1.3 * R, 0.17, 1.3 * R)
-		local spoke = part(wh, "spoke", "Box", "#3a3d42")
-		spoke.scale = magic.Vector3(1.5 * R, 0.06, 0.18)
+		part(wh, "tyre", "Cylinder", "#26282b").rotation = magic.Quaternion(90, 0, 0)
+		part(wh, "hub", "Cylinder", "#b8bcc0").rotation = magic.Quaternion(90, 0, 0)
+		part(wh, "spoke", "Box", "#3a3d42")
 	end
 	for _, k in ipairs({"back", "down", "fork", "tank"}) do
 		part(b, k, "Box", "#2a9d8f")
@@ -64,9 +47,10 @@ local function build(node)
 end
 
 return {
-	draw = function(s, node)
-		local p = type(s.pose) == "table" and s.pose or {}
-		local a, dir = tonumber(p[1]) or 0, tonumber(p[2]) or 1
+	draw = function(s, node, _, p)
+		local R, LIFT, AX = p.wheel, p.height, p.wheelbase / 2
+		local q = type(s.pose) == "table" and s.pose or {}
+		local a, dir = tonumber(q.a) or 0, tonumber(q.dir) or 1
 		local dead = dir > 1 or dir < -1
 		dir = dir < 0 and -1 or 1
 		local b = node:GetChild("crag_bike", false) or build(node)
@@ -80,12 +64,17 @@ return {
 			x = x * dir
 			return {x * ca - y * sa, LIFT + x * sa + y * ca}
 		end
-		local wl, wr = {tonumber(p[3]) or -0.62, tonumber(p[4]) or 0.38},
-			{tonumber(p[5]) or 0.62, tonumber(p[6]) or 0.38}
+		-- (no pose yet: the wheels at rest)
+		local wl, wr = {tonumber(q.lx) or -AX, tonumber(q.ly) or R},
+			{tonumber(q.rx) or AX, tonumber(q.ry) or R}
 		for k, wp in pairs({wl = wl, wr = wr}) do
 			local n = b:GetChild(k, false)
 			n.position = magic.Vector3(wp[1], wp[2], 0)
-			n.rotation = magic.Quaternion(0, 0, math.deg(tonumber(p[k == "wl" and 7 or 8]) or 0))
+			n.rotation = magic.Quaternion(0, 0, math.deg(tonumber(q[k == "wl" and "tl" or "tr"]) or 0))
+			-- (sized each frame: a set_param in play shows at once)
+			n:GetChild("tyre", false).scale = magic.Vector3(2 * R, 0.16, 2 * R)
+			n:GetChild("hub", false).scale = magic.Vector3(1.3 * R, 0.17, 1.3 * R)
+			n:GetChild("spoke", false).scale = magic.Vector3(1.5 * R, 0.06, 0.18)
 		end
 		-- The wheels as the frame faces: the back one driven
 		local back, front = dir > 0 and wl or wr, dir > 0 and wr or wl

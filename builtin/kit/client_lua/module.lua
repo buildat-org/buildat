@@ -171,7 +171,7 @@ end
 --   on_add(e), on_state(e, key) (a shared state changed: e.state[key]),
 --   on_update(e, dt) (each frame), on_use(e) (this player used it, before
 --   the server hears of it), on_remove(e); [KIT_PLANE] stage 4: a movement's
---   draw(s, node, yaw) draws the players' bodies (move.lua's top)
+--   draw(s, node, yaw, p) draws the players' bodies (move.lua's top)
 --   [KIT_CLIENT_REACT] (1) on_enter(e), on_leave(e): this player's own
 --   predicted body met its zone or left it, by this client's own test
 --   (update_zones below), before the server's on_enter hears of it
@@ -189,6 +189,7 @@ end
 --   kit.shake(a) (controls.lua's head), kit.effect{...}, kit.mark{...},
 --   kit.clear_marks() (effects.lua), kit.ui_keys() (ui.lua),
 --   kit.press_action, kit.key_down, kit.key_name, kit.key_text (input.lua),
+--   [KIT_MOVE_DRAW] kit.material (below),
 --   also from a movement's draw; kit.internal (this module) is outside Kit
 --   API 1; a handler that errs is off for that
 --   entity here, its first failure sent (call() below). api.h's client
@@ -3346,7 +3347,51 @@ magic.SubscribeToEvent("command_seq:kit_parallax", function(_, data)
 	end
 end)
 
--- [KIT_API_1] (item 3) What require("buildat/module/kit") gives: the 15
+-- [KIT_MOVE_DRAW] kit.material(hex, {unlit = bool, texture = name}): a plain
+-- material of the colour "#rrggbb" (lit; unlit: its own colour whatever the
+-- light), or with a texture (a resource name: a put_texture's "kit/up/..."), drawn
+-- as it is, pixels kept sharp; a texture that does not load here is the plain
+-- colour. One material for the same arguments, shared by every part (put on as
+-- many models as wanted; changing it changes them all).
+-- simplified: 1024 kept at most, any more made anew each call
+local MATS, MATS_N = {}, 0
+function M.material(hex, opts)
+	local c = color(hex)
+	if not c then
+		error("kit.material: a colour \"#rrggbb\", not " .. tostring(hex), 2)
+	end
+	if opts ~= nil and type(opts) ~= "table" then
+		error("kit.material: options are {unlit = bool, texture = name}", 2)
+	end
+	local unlit = opts and opts.unlit == true
+	local tex_name = opts and type(opts.texture) == "string" and opts.texture ~= "" and
+			opts.texture or nil
+	local key = hex:lower() .. (unlit and " u" or "") .. (tex_name and " " .. tex_name or "")
+	if MATS[key] then
+		return MATS[key]
+	end
+	local tex = tex_name and magic.cache:GetResource("Texture2D", tex_name)
+	local m = magic.Material:new()
+	if tex then
+		tex.filterMode = magic.FILTER_NEAREST
+		m:SetTechnique(0, magic.cache:GetResource("Technique", unlit and
+				"Techniques/DiffUnlit.xml" or "Techniques/Diff.xml"))
+		m:SetTexture(magic.TU_DIFFUSE, tex)
+	else
+		if tex_name then
+			log:info("kit: kit.material: no texture " .. tex_name .. ", the colour " .. hex)
+		end
+		m:SetTechnique(0, magic.cache:GetResource("Technique", unlit and
+				"Techniques/NoTextureUnlit.xml" or "Techniques/NoTexture.xml"))
+		m:SetShaderParameter("MatDiffColor", c)
+	end
+	if MATS_N < 1024 then
+		MATS[key], MATS_N = m, MATS_N + 1
+	end
+	return m
+end
+
+-- [KIT_API_1] (item 3) What require("buildat/module/kit") gives: the 16
 -- names of Kit API 1 for client parts and a movement's draw, and
 -- `internal`, this whole module, outside the promise. The apps that host
 -- Kit (Workbench, sample_kit, skeldat) take .internal; a game's part that
@@ -3359,7 +3404,7 @@ end)
 local API = {internal = M}
 for _, k in ipairs({"shared", "pointed", "use", "body_state", "body_pos",
 		"seated", "shake", "effect", "mark", "clear_marks", "ui_keys",
-		"press_action", "key_down", "key_name", "key_text"}) do
+		"press_action", "key_down", "key_name", "key_text", "material"}) do
 	API[k] = assert(M[k], "kit: no " .. k)
 end
 return API

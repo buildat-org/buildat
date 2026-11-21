@@ -37,7 +37,8 @@
 **                        teleport_entity = id, [KIT_CTF] move = {x, y,
 **                        z, fall} (c:move), speed = {{player, factor}...}
 **                        (c:speed), [KIT_BODY_VARS] body_var = {{player,
-**                        key, value (none: cleared)}...} (c:body_var),
+**                        key, value (none: cleared)[, true: public,
+**                        [KIT_MOVE_DRAW]]}...} (c:body_var),
 **                        [KIT_CARRY_ATTACH] attach = {player,
 **                        bone, x, y, z} | false (c:attach, c:detach);
 **                        the request's regions = {{id, team,
@@ -678,13 +679,16 @@ static const char PRELUDE[] =
 "		fx.speed = s\n"
 "	end\n"
 "	-- [KIT_BODY_VARS] a value in a player's body's state, s.vars.<key> in its steps\n"
-"	function c:body_var(player, key, value)\n"
+"	-- ([KIT_MOVE_DRAW] opts.public: in every client's draw too)\n"
+"	function c:body_var(player, key, value, opts)\n"
 "		if type(key) ~= 'string' or #key > 32 or not key:match('^[%a_][%w_]*$') then error('body_var: a key of 1 to 32 letters, digits or _', 2) end\n"
 "		local t = type(value)\n"
 "		if not (value == nil or t == 'boolean' or (t == 'number' and value - value == 0) or (t == 'string' and #value <= 64)) then error('body_var: a value is a number, a boolean, a string of at most 64 bytes, or nil', 2) end\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('body_var: options are {public = true}', 2) end\n"
 "		local s = fx.body_var or {}\n"
 "		if #s >= 64 then error('body_var: 64 a run at most', 2) end\n"
-"		s[#s + 1] = {type(player) == 'string' and player or tonumber(player) or 0, key, value}\n"
+"		local who = type(player) == 'string' and player or tonumber(player) or 0\n"
+"		s[#s + 1] = value ~= nil and opts and opts.public == true and {who, key, value, true} or {who, key, value}\n"
 "		fx.body_var = s\n"
 "	end\n"
 "	-- [KIT_VEHICLE_MOVEMENTS] a parameter of a component it reaches, play's\n"

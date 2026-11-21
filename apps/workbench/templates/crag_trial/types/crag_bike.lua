@@ -11,19 +11,19 @@
 -- (radians, counter-clockwise), s.av its turn, s.dir 1 facing +x or -1, s.wl
 -- and s.wr the wheels {x, y, vx, vy, spin (the tyre's speed, m/s), turn},
 -- s.dead the crash's seconds left, s.start; s.pose what the clients draw
--- (crag_bike.client.lua): {a, dir (2 * dir crashed), the wheels from the feet
--- (lx, ly, rx, ry), their turns}. s.pos is the frame's middle less LIFT;
--- s.spheres the wheels and the head from it, as the zones (the gems) meet it.
--- The suspension: params stiffness and damping (the springs').
+-- (crag_bike.client.lua), by its names (movement.pose): a the angle, dir
+-- (2 * dir crashed), the wheels from the feet (lx, ly, rx, ry), their turns
+-- (tl, tr). s.pos is the frame's middle less the param height; s.spheres the
+-- wheels and the head from it, as the zones (the gems) meet it.
+-- The suspension: params stiffness and damping (the springs'); its shape:
+-- wheel (a wheel's radius), wheelbase, height (the frame's middle over the
+-- feet), which the client part draws by too (its draw's p).
 -- [KIT_BODY_VARS] The finish: a wheel on the finish line (a kit/polygon whose
 -- surface is "finish") while s.vars.finish_open (crag_run's c:body_var, set
 -- with the rider's last gem) holds the bike still there (s.done) till the run
 -- puts it back: its own step's, on the server and in the client's prediction
 -- alike, so no freeze from the server and no rewind. Without every gem it
 -- rides over the line.
-local R = 0.36 -- a wheel's radius
-local AX, AY = 0.62, -0.36 -- the wheels' springs on the frame, from its middle
-local LIFT = R - AY + 0.02 -- the middle over the feet
 local HX, HY, HR = -0.08, 0.86, 0.22 -- the head, facing +x
 local MC, MW, IC = 2, 0.5, 0.7 -- the frame's mass, a wheel's, the frame's inertia
 local REACT = 0.06 -- the motor's turn back on the frame
@@ -33,8 +33,16 @@ local function wheel(x, y)
 	return {x, y, 0, 0, 0, 0}
 end
 
+-- The shape from the params: a wheel's radius, the springs on the frame from
+-- its middle (AX either side, AY down), the middle over the feet
+local function shape(p)
+	local R, LIFT = p.wheel or 0.36, p.height or 0.74
+	return R, (p.wheelbase or 1.24) / 2, R + 0.02 - LIFT, LIFT
+end
+
 -- Back where it started, at rest
-local function reset(s)
+local function reset(s, p)
+	local _, AX, AY, LIFT = shape(p)
 	local x, y = s.start[1], s.start[2]
 	local cx, cy = x, y + LIFT
 	s.c = {cx, cy, 0, 0}
@@ -44,7 +52,7 @@ end
 
 -- A wheel's spring to its place on the frame: the force on it, the frame
 -- pulled back (and turned)
-local function spring(s, wh, lx, ca, sa, dt, K, D)
+local function spring(s, wh, lx, AY, ca, sa, dt, K, D)
 	local c = s.c
 	local ox, oy = lx * ca - AY * sa, lx * sa + AY * ca
 	local px, py = c[1] + ox, c[2] + oy
@@ -59,7 +67,7 @@ end
 -- A wheel against the world: out of what it is in, its speed into it gone,
 -- its tyre gripping (the friction a share of the push); true and whether a
 -- finish line is among what it met
-local function ground(wh, w, dt)
+local function ground(wh, w, R)
 	local touched, finish = false, false
 	for k, h in ipairs(w:circle(wh[1], wh[2], R)) do
 		if k > 3 then
@@ -99,6 +107,9 @@ return {
 			lean = "How fast A and D turn the bike, radians/s^2.",
 			stiffness = "The wheels' springs' stiffness.",
 			damping = "The wheels' springs' damping.",
+			wheel = "A wheel's radius, m (the client part draws it so).",
+			wheelbase = "The wheels' springs apart on the frame, m.",
+			height = "The frame's middle over the wheels' bottom at rest, m.",
 			rate = "Inputs a second; Kit draws the bike between them.",
 			substeps = "Physics steps an input.",
 		},
@@ -115,7 +126,9 @@ return {
 			{"{key:left}/{key:right}", "lean", "r"},
 			{"{key:jump}", "turn round", "jump"}},
 		touch_help = {{"Gas/Brake", "ride", "f"}, {"Stick", "lean", "r"},
-			{"Turn", "turn round", "jump"}}},
+			{"Turn", "turn round", "jump"}},
+		-- s.pose's slots by name (the client part's draw reads them so)
+		pose = {"a", "dir", "lx", "ly", "rx", "ry", "tl", "tr"}},
 	params = {
 		gravity = {cat = "physics", type = "number", default = 14, min = 0,
 			max = 100},
@@ -129,6 +142,12 @@ return {
 			max = 3000},
 		damping = {cat = "physics", type = "number", default = 30, min = 0,
 			max = 200},
+		wheel = {cat = "physics", type = "number", default = 0.36, min = 0.15,
+			max = 0.6},
+		wheelbase = {cat = "physics", type = "number", default = 1.24, min = 0.6,
+			max = 2.4},
+		height = {cat = "physics", type = "number", default = 0.74, min = 0.4,
+			max = 1.2},
 		rate = {cat = "advanced", type = "number", default = 60, min = 10,
 			max = 120},
 		substeps = {cat = "advanced", type = "number", default = 4, min = 1,
@@ -139,8 +158,9 @@ return {
 			local pos = type(s.pos) == "table" and s.pos or {0, 0, 0}
 			s.start = {pos[1], pos[2]}
 			s.dir = (tonumber(s.yaw) or 90) > 180 and -1 or 1
-			reset(s)
+			reset(s, p)
 		end
+		local R, AX, AY, LIFT = shape(p)
 		local c, wl, wr = s.c, s.wl, s.wr
 		local open = type(s.vars) == "table" and s.vars.finish_open
 		if not open then
@@ -151,7 +171,7 @@ return {
 		elseif s.dead then
 			s.dead = s.dead - dt
 			if s.dead <= 0 then
-				reset(s)
+				reset(s, p)
 				c, wl, wr = s.c, s.wl, s.wr
 			end
 		else
@@ -166,8 +186,8 @@ return {
 			wl[4], wr[4] = wl[4] - g * dt, wr[4] - g * dt
 			local ca, sa = math.cos(s.a), math.sin(s.a)
 			local K, D = p.stiffness or 300, p.damping or 30
-			spring(s, wl, -AX, ca, sa, dt, K, D)
-			spring(s, wr, AX, ca, sa, dt, K, D)
+			spring(s, wl, -AX, AY, ca, sa, dt, K, D)
+			spring(s, wr, AX, AY, ca, sa, dt, K, D)
 			-- The motor on the back wheel, the brake on both
 			local back = s.dir > 0 and wl or wr
 			if f > 0 then
@@ -199,7 +219,7 @@ return {
 			local finish = false
 			for _, wh in ipairs({wl, wr}) do
 				wh[1], wh[2] = wh[1] + wh[3] * dt, wh[2] + wh[4] * dt
-				local _, f = ground(wh, w, dt)
+				local _, f = ground(wh, w, R)
 				finish = finish or f
 				wh[6] = math.fmod(wh[6] - wh[5] / R * dt, 2 * math.pi)
 			end
@@ -227,8 +247,9 @@ return {
 		s.pos = {c[1], c[2] - LIFT, z}
 		s.vel = {c[3], c[4], 0}
 		s.yaw = s.dir > 0 and 90 or 270
-		s.pose = {s.a, s.dead and 2 * s.dir or s.dir, wl[1] - c[1], wl[2] - c[2] + LIFT,
-			wr[1] - c[1], wr[2] - c[2] + LIFT, wl[6], wr[6]}
+		s.pose = {a = s.a, dir = s.dead and 2 * s.dir or s.dir, lx = wl[1] - c[1],
+			ly = wl[2] - c[2] + LIFT, rx = wr[1] - c[1], ry = wr[2] - c[2] + LIFT,
+			tl = wl[6], tr = wr[6]}
 		-- The wheels and the head as the zones meet them (a gem taken by a
 		-- wheel), from s.pos
 		local ca, sa = math.cos(s.a), math.sin(s.a)

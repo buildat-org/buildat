@@ -421,14 +421,16 @@ end
 -- simplified: by the clock after the step (no count hook in the client's
 -- sandbox); one that never returns is the watchdog's (app.cpp)
 local SLOW_US = 50000
-local function step(s, input, w)
+local function step(s, i, w)
 	local m = move()
 	if not C.def or not m or C.slow then
 		return
 	end
+	-- [KIT_MOVE_DRAW] c:speed's factor now, as the server's batch has it
+	i.speed = tonumber(m.speed) or 1
 	local sub = math.max(1, math.min(8, tonumber(m.params.substeps) or 1))
 	local t0 = buildat.get_time_us()
-	local ok, err = pcall(MV.steps, C.def, s, {input}, 1 / rate(), sub, w,
+	local ok, err = pcall(MV.steps, C.def, s, {i}, 1 / rate(), sub, w,
 			m.params)
 	local us = buildat.get_time_us() - t0
 	C.slow_n = ok and us > SLOW_US * sub and (C.slow_n or 0) + 1 or 0
@@ -3176,7 +3178,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 end)
 
 -- [KIT_PLANE] stage 4: the movement's draw hook (its client part's draw(s,
--- node, yaw): players.lua calls it for each body) and this body's state as
+-- node, yaw, p): players.lua calls it for each body) and this body's state as
 -- predicted, for it; [KIT_DRAWN_YAW] its yaw as drawn (degrees), between its
 -- last two steps as its place is
 function M.movement_draw()
@@ -3185,6 +3187,15 @@ function M.movement_draw()
 end
 function M.body_state()
 	return C.s
+end
+-- [KIT_MOVE_DRAW] the draw's p: the movement's parameters (the step's); the
+-- pose's slot names (movement.pose, nil: none)
+function M.movement_params()
+	local m = move()
+	return m and type(m.params) == "table" and m.params or {}
+end
+function M.movement_pose_names()
+	return MV.pose_names(decl().pose)
 end
 function M.drawn_yaw()
 	return C.draw_yaw

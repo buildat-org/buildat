@@ -1,11 +1,12 @@
 -- Brimstone Speedway's car drawn by the movement's draw hook (Kit's
 -- players.lua): a classic American car seen from above, made of flat
 -- polygons extruded up (one CustomGeometry, a geometry a colour): a long
--- hood, the cabin, tail fins, chrome bumpers, two-tone paint (s.pose[2]:
+-- hood, the cabin, tail fins, chrome bumpers, two-tone paint (s.pose.paint:
 -- the race's paint for the player, 1...6), headlights and tail lights, four
--- wheels where the movement's tyres are, the front ones steered. Wrecked
--- (pose flag 2) it is charred black. Facing +z, turned by the pose's
--- heading. Its effects from the pose (brim_car.lua's head): exhaust smoke
+-- wheels where the movement's tyres are (its params track, front and rear:
+-- the draw's p), the front ones steered. Wrecked (pose flag 2) it is
+-- charred black. Facing +z, turned by the pose's heading. Its effects from
+-- the pose (brim_car.lua's head, its slots by name): exhaust smoke
 -- (more on the throttle), road dust by the floor and the speed, sparks
 -- where it scrapes a wall, flames out of the back boosted, tyre marks
 -- where a tyre slips much (coloured by the floor), and on this player's own
@@ -14,7 +15,6 @@ local magic = require("buildat/extension/urho3d")
 local kit = require("buildat/module/kit")
 local log = buildat.Logger("brim_car")
 local said = false
-local mats = {}
 
 -- Paint: {body, the top's second tone}
 local PAINTS = {
@@ -30,18 +30,6 @@ local CHAR = "#2a2420"
 -- The pose's floor (brim_car.lua's SURF): dust and marks
 local DUST = {"#9a7a52", "#5a4630", nil, "#8a8478", "#9a7a52", "#8c8984"}
 local MARK = {"#2e2216", "#1e1610", "#0a0a0c", "#151515", "#2e2216", "#3a3732"}
-
-local function mat(hex)
-	if not mats[hex] then
-		local m = magic.Material:new()
-		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/NoTexture.xml"))
-		m:SetShaderParameter("MatDiffColor", magic.Color(tonumber(hex:sub(2, 3), 16) / 255,
-				tonumber(hex:sub(4, 5), 16) / 255, tonumber(hex:sub(6, 7), 16) / 255))
-		mats[hex] = m
-	end
-	return mats[hex]
-end
 
 -- The parts: a convex outline {x, z...} (x right, z ahead), its bottom and
 -- top (m), its colour's role: "a" the paint, "b" the second tone, else a
@@ -72,9 +60,11 @@ local PARTS = {
 	{{0.9, -2.2, 1.1, -2.36, 1.08, -2.42, 0.88, -2.26}, 0.6, 1.0, "#ff2a14"},
 	{{-0.9, -2.2, -0.88, -2.26, -1.08, -2.42, -1.1, -2.36}, 0.6, 1.0, "#ff2a14"},
 }
--- The wheels: x, z, front
-local WHEELS = {{0.92, 1.3, true}, {-0.92, 1.3, true}, {0.92, -1.25},
-	{-0.92, -1.25}}
+-- The wheels: x, z (the movement's tyres: its params), the first two steered
+local function wheels(p)
+	local x, f, b = p.track, p.front, -p.rear
+	return {{x, f}, {-x, f}, {x, b}, {-x, b}}
+end
 
 local function tri(cg, a, b, c, n)
 	local e1x, e1y, e1z = b[1] - a[1], b[2] - a[2], b[3] - a[3]
@@ -142,15 +132,14 @@ local function build(node, paint, wrecked)
 	end
 	cg:Commit()
 	for g, part in ipairs(PARTS) do
-		cg:SetMaterial(g - 1, mat(col(part[4])))
+		cg:SetMaterial(g - 1, kit.material(col(part[4])))
 	end
 	cg.castShadows = true
-	for k, wh in ipairs(WHEELS) do
+	for k = 1, 4 do
 		local n = body:CreateChild("wheel" .. k)
-		n.position = magic.Vector3(wh[1], 0.34, wh[2])
 		local m = n:CreateComponent("StaticModel")
 		m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-		m.material = mat(TYRE)
+		m.material = kit.material(TYRE)
 		n.scale = magic.Vector3(0.3, 0.66, 0.78)
 	end
 	return b
@@ -229,7 +218,7 @@ end
 -- simplified: never dropped (the sandbox has no weak tables): a few numbers
 -- for each body this client has drawn
 local fx = {}
-local function effects(s, node, p, h, flags)
+local function effects(s, node, q, h, flags, p)
 	local now = buildat.get_time_us() / 1e6
 	local e = fx[node]
 	if not e then
@@ -238,8 +227,8 @@ local function effects(s, node, p, h, flags)
 	end
 	local dt = math.min(0.1, now - e.t)
 	e.t = now
-	-- (this player's own car's: the others' poses stop at 8 numbers)
-	local run = tonumber(p[9])
+	-- (this player's own car's: its state has its body vars)
+	local run = type(s.vars) == "table" and tonumber(s.vars.run) or nil
 	if run and e.run and e.run ~= run then
 		kit.clear_marks()
 	end
@@ -250,8 +239,8 @@ local function effects(s, node, p, h, flags)
 	local function world(lx, lz)
 		return x + lx * ch + lz * sh, z - lx * sh + lz * ch
 	end
-	local speed = tonumber(p[5]) or 0
-	local surf = math.floor(tonumber(p[6]) or 1)
+	local speed = tonumber(q.speed) or 0
+	local surf = math.floor(tonumber(q.floor) or 1)
 	-- (a burst a tenth of a second at most, each short-lived: Kit keeps 64
 	-- client part bursts alive)
 	-- Exhaust smoke out of the tail pipe, thicker on the throttle
@@ -283,8 +272,8 @@ local function effects(s, node, p, h, flags)
 	end
 	-- Marks: each slipping tyre's from where its last ended, 0.7 m on or
 	-- more (a jump past 4 m, a teleport, starts anew)
-	local slips = math.floor(tonumber(p[7]) or 0)
-	for k, wh in ipairs(WHEELS) do
+	local slips = math.floor(tonumber(q.slips) or 0)
+	for k, wh in ipairs(wheels(p)) do
 		local px, pz = world(wh[1], wh[2])
 		local last = e.tyres[k]
 		if not bit(slips, 2 ^ (k - 1)) then
@@ -309,14 +298,14 @@ local function effects(s, node, p, h, flags)
 end
 
 return {
-	draw = function(s, node, yaw)
-		local p = type(s.pose) == "table" and s.pose or {}
+	draw = function(s, node, yaw, p)
+		local q = type(s.pose) == "table" and s.pose or {}
 		-- (this player's own car turned as drawn between its steps: Kit's yaw)
-		local h = tonumber(yaw) and yaw * math.pi / 180 or tonumber(p[1]) or 0
-		local paint = math.floor(tonumber(p[2]) or 1)
+		local h = tonumber(yaw) and yaw * math.pi / 180 or tonumber(q.h) or 0
+		local paint = math.floor(tonumber(q.paint) or 1)
 		paint = PAINTS[paint] and paint or 1
-		local steer = (tonumber(p[3]) or 0) * 180 / math.pi
-		local flags = math.floor(tonumber(p[4]) or 0)
+		local steer = (tonumber(q.steer) or 0) * 180 / math.pi
+		local flags = math.floor(tonumber(q.flags) or 0)
 		local wrecked = math.floor(flags / 2) % 2 == 1
 		local look = paint * 10 + (wrecked and 1 or 0)
 		-- (its look by its child's name: another paint or the wreck built anew)
@@ -338,9 +327,14 @@ return {
 		end
 		local body = b:GetChild("body", false)
 		body.rotation = magic.Quaternion(0, h * 180 / math.pi, 0)
-		for k = 1, 2 do
-			body:GetChild("wheel" .. k, false).rotation = magic.Quaternion(0, steer, 0)
+		-- (placed each frame: a set_param in play shows at once)
+		for k, wh in ipairs(wheels(p)) do
+			local n = body:GetChild("wheel" .. k, false)
+			n.position = magic.Vector3(wh[1], 0.34, wh[2])
+			if k <= 2 then
+				n.rotation = magic.Quaternion(0, steer, 0)
+			end
 		end
-		effects(s, node, p, h, flags)
+		effects(s, node, q, h, flags, p)
 	end,
 }

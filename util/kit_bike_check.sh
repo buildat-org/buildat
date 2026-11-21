@@ -249,7 +249,7 @@ step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: controls: camera side, pointer [a-z]+, movement local/crag_bike, plane z 1"
 await "$CL" 0 10 "crag_bike: the draw hook draws a bike"
 # ([KIT_PLAY_HINTS] the movement's hints, none of the walker's)
-await "$CL" 0 10 'workbench: the hint "\[W\]/\[S\]: gas, brake  \[A\]/\[D\]: lean  \[Space\]: turn round"'
+await "$CL" 0 10 'workbench: the hint "W/S: gas, brake  A/D: lean  Space: turn round"'
 await "$CL" 0 10 "kit: player [0-9]+'s body drawn by its movement"
 # [KIT_LOBBY] In the lobby (a full screen: its chat, its view, the tracks),
 # the run's clock still; [KIT_SCENE_PACKAGES] the root's track list, The
@@ -315,7 +315,7 @@ for i in $(seq 20); do
 	cmd "delay 200"
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the bike not back at the start after the crash: $bx ($CL)"
-seen "$CL" 0 'workbench: the hint "\[Space\]: turn round"' || fail "the used hints not gone ($CL)"
+seen "$CL" 0 'workbench: the hint "Space: turn round"' || fail "the used hints not gone ($CL)"
 echo "ok: throttle up the ramp's polygon, the crash an output (the run's line), back at the start; W and A's hints gone"
 # 3. A heavy step: refused, the old version kept
 python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_bike.lua" > "$t/heavy.cmd" <<'PY'
@@ -435,6 +435,108 @@ for i in $(seq 25); do
 	sleep 0.2
 done
 [ -n "$two" ] || fail "kitbob's body not drawn by the hook on kitboss's screen ($CL)"
+# [KIT_MOVE_DRAW] A check-only version of the bike (put over kit:type, its
+# client part logging what its draw gets): its input probe sets a public
+# body var (flag) and a private one (secret) on every rider and c:speed 0,
+# its step writes the named pose's tr slot as i.speed. Each client's draw
+# gets the other rider's flag, not their secret; i.speed 0 in the own
+# prediction and the server's steps (the other's pose, by name and as [8]);
+# p the movement's params; the public vars set on a node once, not per
+# tick; c.players' heading the bike's facing. Then a second version: its
+# draw on a node made anew (the first's child gone); then the template's own
+probe() # <version> <letter>: the probe's put as a kit_type event
+{
+	python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_bike.lua" \
+			"$here/apps/workbench/templates/crag_trial/types/crag_bike.client.lua" "$1" "$2" <<'PY'
+import json, sys
+s, cl, v, x = open(sys.argv[1]).read(), open(sys.argv[2]).read(), sys.argv[3], sys.argv[4]
+s = s.replace("version = 1,", "version = %s," % v, 1)
+if x != "-":
+    assert "root = true,\n" in s and "tl = wl[6], tr = wr[6]}" in s
+    s = s.replace("root = true,\n", """root = true,
+	reads_players = true,
+	inputs = {probe = "number"},
+	on_input = function(c, input, v, by)
+		for _, pl in ipairs(c.players) do
+			c:log("probe: " .. pl.name .. " heading " .. tostring(pl.heading))
+			c:body_var(pl.by, "flag", v ~= 0 and v or nil, {public = true})
+			c:body_var(pl.by, "secret", v ~= 0 and v or nil)
+			c:speed(pl.by, v ~= 0 and 0 or 1)
+		end
+	end,
+""", 1).replace("tl = wl[6], tr = wr[6]}", "tl = wl[6], tr = i.speed}", 1)
+    a = cl.rindex("\nreturn {")
+    cl = cl[:a] + "\nlocal T = {" + cl[a + 9:] + """
+local inner, said = T.draw, {}
+T.draw = function(s, node, yaw, p)
+	inner(s, node, yaw, p)
+	if not node:GetChild("probe_%s", false) then
+		node:CreateChild("probe_%s")
+	end
+	local q, v = s.pose, type(s.vars) == "table" and s.vars or {}
+	local who = s.c and "own" or "other"
+	local line = string.format("crag_bike probe %s: %%s tr %%s [8] %%s flag %%s secret %%s wheel %%s children%%s%%s",
+		who, tostring(q.tr), tostring(q[8]), tostring(v.flag), tostring(v.secret),
+		tostring(p.wheel), node:GetChild("probe_a", false) and " probe_a" or "",
+		node:GetChild("probe_b", false) and " probe_b" or "")
+	if said[who] ~= line then
+		said[who] = line
+		log:info(line)
+	end
+end
+return T
+""" % (x, x, x)
+print("event kit_type " + json.dumps({"op": "put", "name": "crag_bike", "source": s, "client": cl}))
+PY
+}
+put_bike() # <version> <letter|->
+{
+	local m
+	m=$(mark "$SL")
+	cmd "$(probe "$1" "$2")"
+	await "$SL" "$m" 10 "A type put \((local/)?crag_bike\) by peer [0-9]+ done"
+}
+pv() { grep -ac "Entity $1's public body vars: " "$SL"; } # <entity id>
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+mb=$(mark "$t/bob.log")
+put_bike 2 a
+m=$(mark "$SL")
+mc=$(mark "$CL")
+cmd 'event kit_edit {"op": "try", "id": 6, "comp": 0, "input": "probe", "value": 1}'
+for who in kitboss kitbob; do
+	await "$SL" "$m" 5 "$who's body var flag = 1 \(public\)"
+	await "$SL" "$m" 5 "$who's body var secret = 1$"
+done
+grep -aoP "local/crag_bike 6: probe: \K.*" "$SL" | tail -2 > "$t/headings"
+grep -aqE "^kitboss heading 270$" "$t/headings" && grep -aqE "^kitbob heading 90$" "$t/headings" ||
+	fail "c.players' heading not the bikes' facing (kitboss turned round): $(cat "$t/headings") ($SL)"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+await "$CL" "$mc" 5 "crag_bike probe a: own tr 0 \[8\] 0 flag 1 secret 1 wheel 0.36"
+await "$CL" "$mc" 5 "crag_bike probe a: other tr 0 \[8\] 0 flag 1 secret nil wheel 0.36"
+await "$t/bob.log" "$mb" 5 "crag_bike probe a: other tr 0 \[8\] 0 flag 1 secret nil wheel 0.36"
+# (the public vars on each node once; none again over a second of ticks)
+ids=$(grep -aoP "Entity \K[0-9]+(?='s public body vars: \{\"flag\":1\})" "$SL" | sort -u)
+[ "$(echo $ids | wc -w)" = 2 ] || fail "the public vars not on both riders' nodes: $ids ($SL)"
+n0=$(for i in $ids; do pv $i; done)
+cmd "frames 60"
+sleep 1
+n1=$(for i in $ids; do pv $i; done)
+[ "$n0" = "$n1" ] || fail "the public vars set again with nothing changed: $n0 -> $n1 ($SL)"
+echo "ok: a public body var in the other rider's draw (not the private one), i.speed 0 frozen on both sides, the named pose and p in draw, c.players' heading; the vars set once"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+m=$(mark "$SL")
+mc=$(mark "$CL")
+cmd 'event kit_edit {"op": "try", "id": 6, "comp": 0, "input": "probe", "value": 0}'
+await "$SL" "$m" 5 "kitbob's body var flag = nil"
+put_bike 3 b
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+await "$CL" "$mc" 10 "kit: player [0-9]+'s movement node made anew \(its draw changed\)"
+await "$CL" "$mc" 10 "crag_bike probe b: other tr 1 \[8\] 1 flag nil secret nil wheel 0.36 children probe_b$"
+await "$CL" "$mc" 10 "crag_bike probe b: own tr 1 \[8\] 1 flag nil secret nil wheel 0.36 children probe_b$"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+put_bike 4 -
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+echo "ok: a client part put again: its draw on a fresh node; the template's own bike back"
 as bob
 for i in 1 2 3; do
 	m=$(mark "$CL")

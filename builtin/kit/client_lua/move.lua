@@ -35,7 +35,12 @@
 --     MAX_EVENTS a batch): the server's steps' are outputs of the movement's
 --     component on the app root (its `outputs`), as by the body's player; the
 --     client's own steps set them too, for its draw to show them at once
---   s.pose = {n...} (8 at most): what the other clients' draw gets of it
+--   s.pose = {n...} (8 at most): what the other clients' draw gets of it;
+--     [KIT_MOVE_DRAW] movement.pose = {"name"...} (8 at most, in slot order)
+--     names the slots: a step may then write s.pose by name ({a = 1, dir =
+--     -1}) or by index, kept as the numbers in slot order (a slot left out 0;
+--     the next step reads it back by index), the wire's as ever; a draw reads
+--     s.pose by name and by index alike (M.pose_view)
 -- [KIT_ZONE_SHAPES] How the server's zones (a type's zone: on_enter, on_leave,
 -- who is in it) meet the body, any movement's:
 --   s.spheres = {{x, y, z, r}...} set by a step (kept in the state as the rest):
@@ -52,16 +57,31 @@
 --     put_type steps a new version once (an empty world) and refuses it so,
 --     the version before kept. Three client steps past 50 ms in a row turn
 --     its prediction off
---   draw = function(s, node, yaw) in its .client.lua: each frame, each body
+--   draw = function(s, node, yaw, p) in its .client.lua: each frame, each body
 --     drawn (players.lua): node at its feet as drawn (no turn; its children
---     the hook's), s this client's predicted state or another's {pos, pose},
---     yaw the own body's as drawn between its steps (degrees); the humanoid
---     not drawn
+--     the hook's), s this client's predicted state or another's {pos, pose,
+--     vars}, yaw the own body's as drawn between its steps (degrees); the
+--     humanoid not drawn. [KIT_MOVE_DRAW] p the movement's parameters (the
+--     step's p: a wheel's size is a parameter, never a constant copied into
+--     the client part); s.vars an other's public body vars (c:body_var's
+--     {public = true}; this client's own body has all its own); node made
+--     anew when the draw function changes (the client part put again): what
+--     an older version made under it is gone, no versioned child names
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; [KIT_BODY_VARS] s.vars (nil: none) the values
 -- the server's components set on this body (c:body_var(by, key, value)), read
 -- only: in the state the server sends, so the client's re-steps have the
 -- server's (a step's change to them is undone at the server's next state);
+-- [KIT_MOVE_DRAW] one set {public = true} is in every client's draw too (s.vars,
+-- the others' bodies' as well: on the body's node, sent as it changes);
+-- A put (a teleport, a respawn, a seat taken or left, out of the world) starts
+-- the state afresh on the server and the client alike: s holds pos and yaw
+-- (and vars), its own fields gone, so a step keeping a place of its own (a
+-- bike's frame) starts over from s.pos; a knock back and a change of its
+-- parameters (c:speed, c:set_param) keep it. A hazard that must react at once
+-- belongs in the step (a surface it meets: w:circle's, w:under's info), not in
+-- a server zone: a zone's on_enter is the server's, a round trip late on the
+-- client, which then rewinds;
 -- i this step's input: f (forward, -1...1),
 -- r (right), yaw (the camera's, degrees from +z toward +x), jump (0/1),
 -- go (0/1: a target), tx, ty, tz (where to go), [KIT_CLIENT_REACT] (10)
@@ -69,7 +89,10 @@
 -- respawn, in a kit/lobby's lobby or result; its keys none then; nil in play;
 -- c:speed(by, 0) stays the freeze), [KIT_AUTO_JUMP] auto (1 while the
 -- movement's auto_jump param is on for this client: w:walk's auto, up a
--- one-voxel step without Jump; else nil); dt seconds; p its
+-- one-voxel step without Jump; else nil), [KIT_MOVE_DRAW] speed (c:speed's
+-- factor for the body as it is now: 1, 0 frozen; a seated player's theirs, a
+-- steered vehicle's 1, a driving bot's its own; the `speed` param is scaled
+-- by it on the body's own movement, not a seat's); dt seconds; p its
 -- parameters; w the world. [KIT_API_1] (item 4) Kit API 1's w is these 10
 -- methods, w:cell, w:walk, w:move, w:ray, w:down, w:under, w:contacts,
 -- w:circle, w:segment and w:unbury, and the fields w.sin, w.cos, w.atan2,
@@ -2692,8 +2715,61 @@ end
 -- after them (MAX_EVENTS at most); guard(true) and guard(false) round each
 -- def.step: the box's per-step cap
 M.MAX_EVENTS = 16
+-- [KIT_MOVE_DRAW] movement.pose = {"name"...}: the slots' names (8 at most,
+-- the rest and a name that is no plain string or is a slot's number left
+-- out); nil: none
+function M.pose_names(d)
+	if type(d) ~= "table" then
+		return nil
+	end
+	local names = {}
+	for k = 1, 8 do
+		local n = d[k]
+		if type(n) ~= "string" or not n:match("^[%a_][%w_]*$") then
+			break
+		end
+		names[k] = n
+	end
+	return #names > 0 and names or nil
+end
+-- s.pose after a step, written by name or by index, as the numbers in slot
+-- order (what is kept, sent and stepped on: the wire's as ever); a slot it
+-- left out 0, the indices past the names as they were
+local function pose_slots(names, s)
+	local p = s.pose
+	if type(p) ~= "table" then
+		return
+	end
+	local out = {}
+	for k, n in ipairs(names) do
+		local v = p[n]
+		if v == nil then
+			v = p[k]
+		end
+		out[k] = v == nil and 0 or v
+	end
+	local k = #names + 1
+	while p[k] ~= nil do
+		out[k] = p[k]
+		k = k + 1
+	end
+	s.pose = out
+end
+-- What a draw gets of a pose (the numbers in slot order): the slots by index
+-- and by name alike
+function M.pose_view(names, pose)
+	local v = {}
+	for k, x in ipairs(type(pose) == "table" and pose or {}) do
+		v[k] = x
+	end
+	for k, n in ipairs(names or {}) do
+		v[n] = v[k]
+	end
+	return v
+end
 function M.steps(def, s, inputs, dt, sub, w, p, guard)
 	sub = sub or 1
+	local names = M.pose_names(type(def.movement) == "table" and def.movement.pose)
 	local events = nil
 	for _, i in ipairs(inputs) do
 		for n = 1, sub do
@@ -2707,6 +2783,9 @@ function M.steps(def, s, inputs, dt, sub, w, p, guard)
 			def.step(s, i, dt / sub, w, p)
 			if guard then
 				guard(false)
+			end
+			if names then
+				pose_slots(names, s)
 			end
 			if type(s.events) == "table" then
 				events = events or {}
