@@ -521,6 +521,7 @@ type kit/arena param ready | {"default": 0, "kind": "number", "max": 1, "min": 0
 type kit/arena param results | {"default": 5, "kind": "number", "max": 60, "min": 0}
 type kit/arena param score_to_win | {"default": 0, "kind": "number", "max": 1000000, "min": 0}
 type kit/arena param size | {"default": [4, 3, 4], "kind": "position"}
+type kit/arena param status_line | {"choices": ["full", "time_scores", "scores", "time", "none"], "default": "full", "kind": "string"}
 type kit/arena param time_up | {"choices": ["draw", "most"], "default": "draw", "kind": "string"}
 type kit/arena input end | none
 type kit/arena input next_map | none

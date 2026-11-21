@@ -44,6 +44,13 @@
 -- many points wins the round (checked each second), whichever of it and
 -- the round's time comes first; a tie at the time up under "most" is
 -- overtime still.
+-- [KIT_ARENA_STATUS_LINE] `status_line`, what the HUD's line shows: "full"
+-- (the time left, "Overtime" or the result, the scores, " (to N)" after
+-- them with a score_to_win), "time_scores" (those without the score to
+-- win), "scores" (the scores; the result at the round's end too), "time"
+-- (the time, "Overtime" or the result) or "none" (no line, the lobby's
+-- neither). Output `status` and the `status` state are the full line
+-- whatever it is.
 -- [KIT_ARENA_INSTANT_ROUND] `after_round`: after a round's end the next
 -- countdown lasts at least this many seconds (0: `countdown` alone), so
 -- the round's players, back in the lobby, have time to step into the
@@ -207,7 +214,8 @@ local function lobby_status(c)
 	end
 	c.state.status = s
 	c.state.value = s
-	c.state.shown = q > 0 or n > 0 or c.state.last ~= "" or nx ~= nil
+	c.state.shown = c.params.status_line ~= "none" and
+			(q > 0 or n > 0 or c.state.last ~= "" or nx ~= nil)
 end
 
 local function start(c)
@@ -336,28 +344,39 @@ local function scores(teams)
 	return table.concat(t, " : ")
 end
 
+-- Two parts of a line, "|" between them when both are there
+local function line(a, b)
+	return a .. ((a ~= "" and b ~= "") and "|" or "") .. b
+end
+
 local function round_status(c)
 	local teams = teams_of(c)
-	local s = c.state.result ~= "" and
-			(c.state.result .. "|" .. c.state.ended) or
+	local over = c.state.result ~= ""
+	local head = over and (c.state.result .. "|" .. c.state.ended) or
 			(c.state.overtime and "Overtime" or
 			c.params.duration > 0 and clock(c.state.left) .. " left" or
 			"Round")
-	if #teams > 0 then
-		s = s .. "|" .. scores(teams)
-	end
-	if s ~= c.state.value then
+	local sc = #teams > 0 and scores(teams) or ""
+	local to = sc ~= "" and c.params.score_to_win > 0 and
+			(" (to " .. c.params.score_to_win .. ")") or ""
+	-- [KIT_ARENA_STATUS_LINE] the output and `status` the full line, the
+	-- HUD's by status_line
+	local s = line(head, sc .. to)
+	local hud = ({time_scores = line(head, sc),
+		scores = line(over and head or "", sc), time = head,
+		none = ""})[c.params.status_line] or s
+	if s ~= c.state.status then
 		c:emit("status", s)
 	end
 	c.state.status = s
-	c.state.value = s
-	c.state.shown = true
+	c.state.value = hud
+	c.state.shown = hud ~= ""
 	local own, names = {}, {}
 	for _, t in ipairs(teams) do
 		names[t.id] = t.name
 	end
-	for pid, tid in pairs(c.state.assigned) do
-		own[pid] = {value = "Team " .. tostring(names[tid]) .. "|" .. s}
+	for pid, tid in pairs(hud ~= "" and c.state.assigned or {}) do
+		own[pid] = {value = "Team " .. tostring(names[tid]) .. "|" .. hud}
 	end
 	c.state.own = own
 end
@@ -440,6 +459,8 @@ return {
 			choices = {"draw", "most"}},
 		score_to_win = {type = "number", default = 0, min = 0,
 			max = 1000000},
+		status_line = {type = "string", default = "full",
+			choices = {"full", "time_scores", "scores", "time", "none"}},
 		after_round = {type = "number", default = 10, min = 0, max = 600},
 		late_join = {type = "string", default = "queue",
 			choices = {"queue", "join", "parallel", "join_or_parallel"}},
@@ -506,7 +527,7 @@ return {
 			ended = "A round ended. Value: its session's id.",
 			result = "The players are back in the lobby after a round. Value: the winner's name; \"\" for a draw.",
 			won = "The round's result is shown, its players still in it. Value: the winner's name.",
-			status = "The round's status line changed. Value: its text: the time left, the scores, the result.",
+			status = "The round's status line changed. Value: its text: the time left, the scores and the score to win, the result (the full line, whatever status_line is).",
 		},
 	},
 	inputs = {["end"] = "none", win = "any", next_map = "none",
