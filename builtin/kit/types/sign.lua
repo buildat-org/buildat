@@ -1,7 +1,7 @@
 -- A sign ([KIT] stage 4l): text on a board, written by the builders (its
 -- `text`, a parameter: edited in edit mode only). In the text, {value} is
--- the last signal's value on "value" (nothing until one comes), and | a
--- new line. Flat on the board's front (-z, the side it faces) or facing
+-- the last signal's value on "value" (nothing until one comes), | a new
+-- line and {key:<action>} each player's key for it ([KIT_TEXT_PLACEHOLDER]). Flat on the board's front (-z, the side it faces) or facing
 -- the camera; its letters `size` cells high, in `color`, on a board of
 -- `background` ("none": no board, the letters alone). both_sides: flat
 -- text on the back (+z) too, read from there

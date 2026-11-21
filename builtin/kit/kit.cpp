@@ -1252,6 +1252,33 @@ static bool name_ok(const ss_ &s)
 static const char *SIGNAL_TYPES[] = {"any", "none", "number", "bool",
 	"string", "entity", "position"};
 
+// [KIT_TEXT_PLACEHOLDER] {<word>:...} in a text a client draws is Kit's
+// (Kit API 1 reserves it): these words have a meaning (input.lua's
+// {key:<action>}, ui.lua's {value:time} and {value:int}); any other is
+// drawn as written, warned (placeholder_warnings()), and a later Kit may
+// give it one
+static const char *TEXT_PLACEHOLDERS[] = {"key", "value"};
+
+// The words of the {<word>:...} in s that Kit has no meaning for, each once
+static sv_<ss_> unknown_placeholders(const ss_ &s)
+{
+	sv_<ss_> out;
+	for(size_t i = s.find('{'); i != ss_::npos; i = s.find('{', i + 1)){
+		size_t j = i + 1;
+		while(j < s.size() && (isalnum((unsigned char)s[j]) || s[j] == '_'))
+			j++;
+		if(j == i + 1 || j >= s.size() || s[j] != ':')
+			continue;
+		const ss_ w = s.substr(i + 1, j - i - 1);
+		bool known = false;
+		for(const char *k : TEXT_PLACEHOLDERS)
+			known = known || w == k;
+		if(!known && std::find(out.begin(), out.end(), w) == out.end())
+			out.push_back(w);
+	}
+	return out;
+}
+
 // A type's inputs or outputs as its file gives them, {"a", b = "number"}
 // (an array, or an object whose number keys are names of type "any"):
 // the names, each one's type; the declaration's key made the array of the
@@ -34522,7 +34549,10 @@ struct Module: public interface::Module, public Interface
 				"output or to an input that at least 3 in 4 of their type have "
 				"(of 4 or more); in a side view (kit/controls camera side), "
 				"scenery wholly in front of the plane by more than side_clip "
-				"(lower z, the foreground), which is never drawn.",
+				"(lower z, the foreground), which is never drawn; a text's "
+				"{<word>:...} of a word Kit has no meaning for (drawn as "
+				"written: {<word>:...} is reserved, Kit has {key:<action>} and "
+				"{value:time}, {value:int}).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "
@@ -39509,6 +39539,34 @@ struct Module: public interface::Module, public Interface
 					std::round(clips[c.first] * 100) / 100).stringify()+": the "
 					"plane less kit/controls' side_clip), never drawn; lower z is "
 					"the foreground: "+ids(c.second));
+		for(const ss_ &w : placeholder_warnings())
+			out.append(w);
+	}
+
+	// [KIT_TEXT_PLACEHOLDER] The authored texts' {<word>:...} of a word Kit
+	// has no meaning for: drawn as written, the word Kit's to give one later.
+	// At Play, in get_goal_warnings and (only: those) after an edit.
+	// simplified: every string parameter read as a text, drawn or not
+	sv_<ss_> placeholder_warnings(const std::set<uint64_t> *only = nullptr)
+	{
+		ss_ known;
+		for(const char *k : TEXT_PLACEHOLDERS)
+			known += ss_(known.empty() ? "" : ", ")+"{"+k+":...}";
+		sv_<ss_> out;
+		for(auto &x : m_entities){
+			if(!authored(x.second) || (only && !only->count(x.first)))
+				continue;
+			for(const Instance &in : x.second.comps)
+				for(json::Iterator it(in.params); it; ++it)
+					if((*it).is_string())
+						for(const ss_ &w : unknown_placeholders(
+								(*it).as_string()))
+							out.push_back("entity "+itos(x.first)+"'s "+in.type+
+									" "+it.key()+": {"+w+":...} is no text "
+									"placeholder of Kit's, shown as written ("
+									"{<word>:...} is reserved; Kit has "+known+")");
+		}
+		return out;
 	}
 
 	// The guide: how a composition is built and run, then the palette's
@@ -42670,6 +42728,9 @@ struct Module: public interface::Module, public Interface
 								": no voxel "+v+" (drawn grey)");
 				}
 			}
+		// [KIT_TEXT_PLACEHOLDER] a text's {<word>:...} Kit does not know
+		for(const ss_ &w : placeholder_warnings())
+			warn(w);
 		// Each player told first, then through the round's start
 		session_changed(false, by);
 		sv_<size_t> peers;
@@ -43919,6 +43980,16 @@ struct Module: public interface::Module, public Interface
 		if(!clipped.empty()){
 			log_i(MODULE, "%s: %s", cs(p.name), cs(clipped));
 			tell(peer, clipped);
+		}
+		// [KIT_TEXT_PLACEHOLDER] a text's {<word>:...} Kit does not know
+		{
+			std::set<uint64_t> ids;
+			for(const auto &c : change)
+				ids.insert(c.first);
+			for(const ss_ &w : placeholder_warnings(&ids)){
+				log_w(MODULE, "%s's edit: %s", cs(p.name), cs(w));
+				tell(peer, w);
+			}
 		}
 		// (commit() sent the state before the World changed: its surface,
 		// [KIT_NO_WORLD]'s none, the editor's tools go by)

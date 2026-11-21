@@ -19,8 +19,11 @@
 --     ([KIT_UI_KEYS] both false while a screen of Kit's UI has the keys,
 --     kit.ui_keys(), but for Edit mode's key)
 --   kit.key_name(id) -> the action's key ("" unbound; nil: no such action)
---   kit.key_text(s) -> s with each "[id]" of an action "[its key]" (a
---     touchscreen: its button's label), as signs and the HUD show it
+--   kit.key_text(s) -> s with each "[id]" of an action "[its key]" and
+--     ([KIT_TEXT_PLACEHOLDER]) each "{key:id}" its key bare, "(unbound)"
+--     with none (a touchscreen: the on-screen control's label for both,
+--     kit.touch_label), as signs and the HUD show it, every frame: a
+--     rebind shows at once. An id no action has stays as written
 --   kit.world_actions() -> {{name =, key =, label =}...}, the world's
 --   kit.press_action(name, down): a world action pressed (true) or let go,
 --     sent to the server (its keys, its touch button, a gamepad's; a UI's)
@@ -221,20 +224,35 @@ function M.key_name(id)
 end
 
 function M.key_text(s)
-	if type(s) ~= "string" or not s:find("[", 1, true) then
+	if type(s) ~= "string" or not s:find("[[{]") then
 		return s
 	end
-	return (s:gsub("%[([%w_]+)%]", function(id)
+	-- (a touchscreen: the on-screen control's label, controls.lua's)
+	local function touch(id)
+		return TOUCH and M.touch_label and M.touch_label(id) or nil
+	end
+	s = s:gsub("%[([%w_]+)%]", function(id)
 		local k = S.by_id[id]
 		if not k then
 			return nil
 		end
 		if TOUCH then
-			return "[" .. (k.mouse and "Tap" or
+			return "[" .. (touch(id) or k.mouse and "Tap" or
 					k.label:match("^This world: (.*)$") or k.label) .. "]"
 		end
 		return "[" .. (S.name[id] ~= "" and S.name[id] or k.mouse or
 				"no key") .. "]"
+	end)
+	-- [KIT_TEXT_PLACEHOLDER] {key:<action>}: its key, bare; "(unbound)";
+	-- an unknown action as written. After "[id]": a key named "[" is not
+	-- read as one's start
+	return (s:gsub("{key:([%w_]+)}", function(id)
+		local k = S.by_id[id]
+		if not k then
+			return nil
+		end
+		return touch(id) or (S.name[id] ~= "" and S.name[id]) or k.mouse or
+				"(unbound)"
 	end))
 end
 

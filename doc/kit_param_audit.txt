@@ -5,7 +5,8 @@ interesting parameter changed in the editor, played, and looked at
 (screenshots on a headless weston, the logs' lines). Verdicts: pass (as
 a builder would expect), FIXED (a Kit fault, fixed with the audit),
 fault (a Kit fault left), proposal (a template or Kit improvement; works
-as written, could be clearer). util/kit_param_audit_check.sh keeps the
+as written, could be clearer), done (a proposal carried out after the
+audit: [KIT_TEXT_PLACEHOLDER], kit_plan 4z37x). util/kit_param_audit_check.sh keeps the
 first five Brimstone rows and its ground's; util/kit_racer_check.sh step 6 the chase
 camera, util/kit_symmetry_check.sh the symmetry fit.
 
@@ -59,9 +60,10 @@ Puzzle room (walker, first person)
 lighting physical (env placed) | shadows, shade bluer      | (102,96,90) b/r 0.88 vs (151,135,118) 0.78;| pass
                                |                           | sign text in shade low in contrast         | proposal
 camera chase                   | behind the walker         | behind it; with chase_follow it follows    | pass
-camera top_down                | playable from above       | the body hidden behind the south wall near | proposal
-                               |                           | spawn: a cutaway, or angle ~80 in the      |
-                               |                           | template's hint                            |
+camera top_down                | playable from above       | the body hidden behind the south wall near | done
+                               |                           | spawn. The template's kit/controls (camera |
+                               |                           | first_person as before) now has angle 80:  |
+                               |                           | top_down sees over the walls. No cutaway   |
 camera side                    | a side view               | understandable                             | pass
 movement click_to_move +       | walks to the click        | walks there                                | pass
   top_down                     |                           |                                            |
@@ -69,9 +71,10 @@ terrain flat -> noise          | hills under the room      | ground -6..1 with s
                                |                           | flooded, the player underwater; the parts  |
                                |                           | stay at the old level. Now flatten (on by  |
                                |                           | default): flat round 33 parts, the room on |
-                               |                           | level 0 and dry, ground -5..1 round it,    |
-                               |                           | water below 0 outside. A lower sea_level   |
-                               |                           | (or level) gives dry hills                 |
+                               |                           | level 0 and dry, ground -5..1 round it.    |
+                               |                           | The template's sea_level now -13, under    |
+                               |                           | noise's level - height (-12): dry hills    |
+                               |                           | outside too (done)                         |
 noise -> flat (undo)           | the room as before        | the body stayed buried 4.5 m down (unbury  | FIXED
                                |                           | reached 2.7 m): unbury now lifts up to     |
                                |                           | 64 m with the body's middle in known solid |
@@ -84,13 +87,18 @@ arena duration 90              | HUD "1:30 left", round    | "1:30 left"; at 0 "
                                | ends                      |                                            |
 duplicate red team (a third),  | three teams in the HUD    | "Red 0 : Blue 0 : Green 0"                 | pass
   named Green                  |                           |                                            |
-  the copy's guide goals       | its own                   | the guide goals are scene-level: a copied  | proposal
-                               |                           | team gets none; its children keep red      |
-                               |                           | names. Goals under the team entity         |
-signs/hints' rules text        | follows duration/score    | hard-coded "First to 3 points ... 3        | proposal
+  the copy's guide goals       | its own                   | the guide goals were scene-level: a copied | done
+                               |                           | team got none. Now under the team whose    |
+                               |                           | "joined" activates them, "their base" a    |
+                               |                           | reach goal round the other team (target):  |
+                               |                           | a copy has its own. Its children keep red  |
+                               |                           | names (no renaming on duplicate)           |
+signs/hints' rules text        | follows duration/score    | hard-coded "First to 3 points ... 3        | done
                                |                           | minutes", "Two teams": stale after an edit.|
-                               |                           | Kit: a text placeholder for a param, or    |
-                               |                           | the arena publishing its rules             |
+                               |                           | Now no numbers or team count ("Score the   |
+                               |                           | most points before time runs out"); the    |
+                               |                           | HUD has the time left and the scores (not  |
+                               |                           | score_to_win)                              |
 undo (after end_rounds)        | exact                     | exact; refused while a round runs (says so)| pass
 
 Capture the flag
@@ -106,7 +114,11 @@ symmetry slices quadrants      | four slices (4 teams)     | refused for the old
 arena duration 120             | HUD "2:00 left"           | "2:00 left | Red 0 : Blue 0"               | pass
 bots' spawner max 2, 3 spawns  | 2 bots                    | 2 spawned, then a round: bots on Red and   | pass
                                |                           | Blue beside the player                     |
-signs' "10 minutes"            | follows duration          | hard-coded (as arena)                      | proposal
+signs' "10 minutes"            | follows duration          | hard-coded (as arena); now no numbers (as  | done
+                               |                           | arena; "every 10 s" gone too). The guide   |
+                               |                           | goals stay scene-level: autostart, own_team|
+                               |                           | and their_team picks, every team's already;|
+                               |                           | under a team the symmetry copy doubled them|
 
 Crag Trial (side-view bike)
 ---------------------------

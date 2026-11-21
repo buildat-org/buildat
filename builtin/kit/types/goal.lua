@@ -4,7 +4,7 @@
 -- `target` (its use range and who-may-use rules as ever). "signal": only the
 -- input "complete" does it (a counter's reached, a boss's death).
 -- It does nothing until activated: "activate" or `autostart` (from the round's
--- start). Active, its `text` is a HUD line ([<action>] each player's key; ""
+-- start). Active, its `text` is a HUD line ({key:<action>} each player's key; ""
 -- none; lines of one anchor and place stack, a hidden one leaving no gap) and
 -- with `marker` it is pointed out over the world (at the box's middle, at
 -- `target` for a use, at its own place for a signal; through walls, an arrow

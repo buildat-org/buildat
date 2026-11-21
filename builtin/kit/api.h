@@ -89,6 +89,17 @@ namespace interface
 // its old name as an alias until API 2. A Kit that meets a game made with a
 // newer one refuses it with a message saying which Buildat to use, and
 // never loads it half-way. Its inventory, name by name: doc/kit_api1.txt.
+// [KIT_TEXT_PLACEHOLDER] **A text's placeholders**: in a text a client
+// draws (a kit/sign's, a kit/ui_text's, a kit/goal's line, any HUD text)
+// {<word>:...} is Kit's. API 1 has {key:<action>}, this player's key for
+// the action (bare; "(unbound)" with none; on a touchscreen the on-screen
+// control's label; drawn anew as the player rebinds; an action nobody
+// declares as written), and {value:time} and {value:int} (with {value},
+// a kit/ui_text's or kit/ui_bar's value). Any other word is drawn as
+// written, and an edit setting it, Play and get_goal_warnings warn of it
+// (kit.cpp's placeholder_warnings()): a later Kit may give
+// it a meaning, so a game must not use it for one of its own. ("[<action>]",
+// from before, stays: "[its key]", "[no key]" with none.)
 // Outside the promise (any release may change them):
 // - what is marked experimental: generators (on_build, c:child, c:link,
 //   c:voxel_box, c.entities, c.move_lib, c:generate, the "points" keys `values`
@@ -698,8 +709,8 @@ namespace interface
 //   (true while a UI page has the keys: play gets none),
 //   kit.press_action(name, down) (a game action, a type's `actions`,
 //   pressed or let go as by its key), kit.key_down(id) (a key action held),
-//   kit.key_name(id) (its key's name) and kit.key_text(s) (each "[id]" in s
-//   as this client's key, as signs show it), kit.shared, kit.shake,
+//   kit.key_name(id) (its key's name) and kit.key_text(s) (each "[id]" and
+//   {key:id} in s as this client's key, as signs show it), kit.shared, kit.shake,
 //   kit.effect, kit.mark and kit.clear_marks below. kit.internal is the
 //   whole client module, the editor's too: outside Kit API 1 (it may
 //   change in any release; the apps that host Kit use it, and publishing a
