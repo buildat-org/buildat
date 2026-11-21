@@ -208,6 +208,10 @@ keypress <key>
 mouse_pos <x> <y>
     Set the client's mouse position to window pixel coordinates (backbuffer). For UI.
 
+mouse_pos <type> "<label>" [x y]
+    The mouse where `click <type> "<label>" [x y]` would click, with no
+    click: a hover over a row that moves with the layout.
+
 mouse_move <dx> <dy>
     Relative motion in pixels (GetMouseMove). Does not move the OS cursor.
 

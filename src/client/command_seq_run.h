@@ -513,10 +513,15 @@
 			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
 			break;
 		case Type::MousePos:
-			ok = client::command_seq::inject_mouse_pos(input,
-					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
-					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
-					&err);
+			{
+				// By label: where the click by label would go
+				int x = c.x, y = c.y;
+				ok = (c.s.empty() || command_seq_find_click(c, &x, &y, &err)) &&
+						client::command_seq::inject_mouse_pos(input,
+						logical_mode() ? (int)(m_logical_ox + x * m_logical_scale) : x,
+						logical_mode() ? (int)(m_logical_oy + y * m_logical_scale) : y,
+						&err);
+			}
 			break;
 		case Type::MouseMove:
 			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);

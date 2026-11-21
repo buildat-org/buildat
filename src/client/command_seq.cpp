@@ -291,7 +291,7 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.s = rest;
 			if(c.s.empty())
 				return fail("keypress <key>");
-		} else if(cmd == "mouse_pos"){
+		} else if(cmd == "mouse_pos" && rest.find('"') == ss_::npos){
 			c.type = Type::MousePos;
 			if(!parse_xy(rest, &c.x, &c.y, error))
 				return fail(*error);
@@ -311,11 +311,13 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::MouseClick;
 			if(!parse_button(rest, &c.x, error))
 				return fail(*error);
-		} else if(cmd == "click" || (cmd == "tap" &&
+		} else if(cmd == "click" || ((cmd == "tap" || cmd == "mouse_pos") &&
 				rest.find('"') != ss_::npos)){
 			// simplified: the label has no escapes; a " cannot be in it.
-			// A tap by label is a finger where the click would go
-			c.type = cmd == "tap" ? Type::Tap : Type::Click;
+			// A tap by label is a finger where the click would go, a
+			// mouse_pos by label the mouse there with no click
+			c.type = cmd == "tap" ? Type::Tap : cmd == "mouse_pos" ?
+					Type::MousePos : Type::Click;
 			size_t q0 = rest.find('"');
 			size_t q1 = q0 == ss_::npos ? q0 : rest.find('"', q0 + 1);
 			c.s = trim_copy(rest.substr(0, q0));
@@ -516,6 +518,10 @@ static void self_check()
 			cs[0].param != "Menu" || cs[0].n != 0 || cs[1].type != Type::Tap ||
 			!cs[1].s.empty() || cs[1].y != 6)
 		throw Exception("command_seq self_check tap");
+	if(!parse_body("mouse_pos Button \"Row\"\n", &cs, &err) ||
+			cs.size() != 1 || cs[0].type != Type::MousePos ||
+			cs[0].s != "Button" || cs[0].param != "Row" || cs[0].n != 0)
+		throw Exception("command_seq self_check mouse_pos by label");
 	if(!parse_body("finger_down 2 Button \"kit/button\"\n", &cs, &err) ||
 			cs.size() != 1 || cs[0].type != Type::Finger || cs[0].n != 2 ||
 			cs[0].param != "down" || cs[0].s != "Button \"kit/button\"" ||
@@ -586,6 +592,9 @@ ss_ dump_command(const Command &c)
 		return "click "+c.s+" \""+c.param+"\""+
 				(c.n ? " "+itos(c.x)+" "+itos(c.y) : "");
 	case Type::MousePos:
+		if(!c.s.empty())
+			return "mouse_pos "+c.s+" \""+c.param+"\""+
+					(c.n ? " "+itos(c.x)+" "+itos(c.y) : "");
 		return "mouse_pos "+itos(c.x)+" "+itos(c.y);
 	case Type::MouseMove:
 		return "mouse_move "+itos(c.x)+" "+itos(c.y);
