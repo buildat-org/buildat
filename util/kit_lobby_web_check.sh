@@ -101,7 +101,7 @@ cat > "$t/phone.json" <<'J'
 	["tap", "Button", "The Loop*"],
 	["waitlog", "kit: ui list 47 row 2 pressed", 10],
 	["waitlog", "player physics enabled", 20],
-	["waitlog", "kit: ui 61 text .* shown: \"Time ", 20], ["frames", 10],
+	["waitlog", "kit: ui 102 text .* shown: \"Time ", 20], ["frames", 10],
 	["shot", "${OUT}/loop.png"],
 	["event", "kit_edit {\"op\": \"mode\", \"on\": true}"],
 	["waitlog", "kit editor: edit mode on", 10],

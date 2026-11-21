@@ -1256,7 +1256,8 @@ static const char *SIGNAL_TYPES[] = {"any", "none", "number", "bool",
 
 // [KIT_TEXT_PLACEHOLDER] {<word>:...} in a text a client draws is Kit's
 // (Kit API 1 reserves it): these words have a meaning (input.lua's
-// {key:<action>}, ui.lua's {value:time} and {value:int}); any other is
+// {key:<action>}, ui.lua's {value:time}, {value:time1} and {value:int});
+// any other is
 // drawn as written, warned (placeholder_warnings()), and a later Kit may
 // give it one
 static const char *TEXT_PLACEHOLDERS[] = {"key", "value"};
@@ -17979,6 +17980,13 @@ struct Module: public interface::Module, public Interface
 		// [KIT_MINIGAMES_FIX] the entity whose run started it (0: none, a
 		// draft's)
 		o += ",session="+itos(m_active);
+		// [KIT_RECORDS] c.now: the round's clock, the shared time the
+		// clients have (kit:clock), in seconds
+		{
+			char now[32];
+			snprintf(now, sizeof now, ",now=%.6f", motion_t());
+			o += now;
+		}
 		if(GameSession *gs = active_session())
 			o += ",session_maker="+itos(gs->maker)+",session_players="+
 					itos(gs->start_players);
@@ -34822,7 +34830,7 @@ struct Module: public interface::Module, public Interface
 				"(lower z, the foreground), which is never drawn; a text's "
 				"{<word>:...} of a word Kit has no meaning for (drawn as "
 				"written: {<word>:...} is reserved, Kit has {key:<action>} and "
-				"{value:time}, {value:int}).",
+				"{value:time}, {value:time1}, {value:int}).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "

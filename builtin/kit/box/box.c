@@ -775,6 +775,8 @@ static const char PRELUDE[] =
 "	-- [KIT_SESSIONS_1] Sessions: the one it runs in (0: the default), and\n"
 "	-- what it asks of them (the host checks the players and the sessions)\n"
 "	c.session = req.session or 0\n"
+"	-- [KIT_RECORDS] the round's clock (s), as the run began\n"
+"	c.now = req.now or 0\n"
 "	-- [KIT_MINIGAMES_FIX] the entity whose run started the session (0:\n"
 "	-- none), and whether the player who set it off is out of its scene\n"
 "	c.session_maker = req.session_maker or 0\n"

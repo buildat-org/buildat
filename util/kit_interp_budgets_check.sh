@@ -139,7 +139,7 @@ m=$(mark "$SL")
 mc=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-await "$CL" "$mc" 30 '"Lap 1/[0-9]+   Time [0-9.]+   GO!'
+await "$CL" "$mc" 30 'text .*: "GO!"'
 body
 x0=$bx z0=$bz
 TARGET=40,-58 python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 6 NEVER > "$t/drive.log" 2>&1

@@ -161,7 +161,7 @@ await "$CL" "$mc" 10 "kit: controls: camera first_person, pointer [a-z]+, moveme
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-await "$CL" "$mc" 10 'shown: "Lap 1/2 '
+await "$CL" "$mc" 10 'shown: "Lap 1/2"'
 echo "ok: trial_laps 2: the HUD reads \"Lap 1/2\""
 mc=$(mark "$CL")
 SHOTS="30,-58,$t/fp_east.png 35,-34,$t/fp_west.png" \

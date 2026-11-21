@@ -489,15 +489,15 @@ mc=$(mark "$CL")
 mr=$mc
 cmd "frames 3" 'click Button "Retry"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   3"'
+await "$CL" "$mc" 10 'text .*: "3"'
 mc=$(mark "$CL")
 echo "ok: the pause menu's Retry in the trial: started again"
-await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   GO!'
+await "$CL" "$mc" 10 'text .*: "GO!"'
 # [MUSIC_SYNTH] (4z37i) none in the Retry's countdown, the race's song from
 # its GO (its countdown 3 s)
 await "$CL" "$mc" 5 'kit: music [0-9]+ "Scrap Heat" from '
 why=$(quiet "$CL" "$mc" '"Scrap Heat" from' 1) || fail "music in the trial's countdown: $why ($CL)"
-r=$(song_at_go "$CL" "$mr" '"Lap 1/1   Time [0-9.]+   3"' 2) || fail "the trial's song not from its GO: $r ($CL)"
+r=$(song_at_go "$CL" "$mr" 'text .*: "3"' 2) || fail "the trial's song not from its GO: $r ($CL)"
 echo "ok: the music: none in the trial's countdown, the race's song from its GO: $r"
 mc=$(mark "$CL")
 step 5 "kit: body replayed" "event kit_looks" "event kit_body"

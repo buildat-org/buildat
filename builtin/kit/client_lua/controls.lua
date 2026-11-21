@@ -855,6 +855,12 @@ local function shared_time()
 	return (C.clock_off or 0) + buildat.get_time_us() / 1e6 * (C.clock_rate or 1)
 end
 
+-- [KIT_RECORDS] (ui.lua's running kit/stopwatch times) nil before the first
+-- kit:clock
+function M.shared_time()
+	return C.clock_off and shared_time()
+end
+
 -- [KIT_AIRSHIPS] The free object a ray meets first, where it is drawn now: {id,
 -- t, cell, normal, dir} (move.lua's W:ray_objects, in its frame), centre (the
 -- cell's middle in the world, a Vector3) and rot (its turn, a Quaternion); nil none
