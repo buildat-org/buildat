@@ -4,6 +4,8 @@
 # covers: client/core/starport/init.lua builtin/accounts/client_lua/accounts.lua
 # [ID_AUTO_JOIN]: a local Starport and a Hearth listed on it, an admin
 # made there first; a client with a Starport ID signed in.
+#   0. (0a84) Escape on the ID's name prompt, as a tap beside it, is its
+#      Cancel: the login page shown again.
 #   1. The first join shows the dialog; Return signs in with the ID (the
 #      community's name asked once), and the client marks the server.
 #   2. The second join signs in with the ID by itself: no key pressed.
@@ -87,6 +89,14 @@ printf '{"starports": ["http://127.0.0.1:%s"],\n "ids": {"http://127.0.0.1:%s": 
 	$SP $SP "$session" > "$t/u/starport.json"
 printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","Starport","%s","%s","","",""\n' \
 	$SP $(date +%s) $(date +%s) > "$t/u/network_addresses.csv"
+
+# 0. (0a84) Escape on the name prompt (a tap beside it is the same Escape)
+# is its Cancel: the login page again (the callback was dropped: nothing)
+join "$t/u" "$t/j0.log" "wait_log_any 30000 accounts: the login page shown\nframes 3\nkeypress Return\nwait_log 20000 ID name prompt:\nframes 3\nkeypress Escape\nframes 10\nquit\n" ||
+	fail "the drive ($t/j0.log)"
+[ "$(grep -ac "I accounts: accounts: the login page shown" "$t/j0.log")" = 2 ] ||
+	fail "Escape on the name prompt: no login page after it ($t/j0.log)"
+echo "ok: Escape on the name prompt was its Cancel"
 
 # 1. The dialog, Return, the name asked once. The 2 s after a join
 # are the screenshot's settle
