@@ -2877,6 +2877,9 @@ struct Module: public interface::Module, public Interface
 		ss_ input;
 		json::Value vars = json::object();
 		double speed = 1;
+		// [KIT_MOVE_DRAW] as a Body's
+		json::Value pub = json::object();
+		ss_ mvars_sent;
 	};
 	std::map<uint64_t, BotBody> m_bot_bodies;
 	std::map<uint64_t, json::Value> m_motions;
@@ -17746,6 +17749,12 @@ struct Module: public interface::Module, public Interface
 					auto bi = m_bodies.find(peer_of_player(pl.second));
 					j.set("yaw", bi != m_bodies.end() ? bi->second.look_yaw :
 							it->second.yaw);
+					// [KIT_MOVE_DRAW] the body's own heading: its movement state's
+					// yaw (a car's nose, a bike's facing), else the entity's
+					const json::Value &hy = bi != m_bodies.end() ?
+							bi->second.state.get("yaw") : json::Value();
+					j.set("heading", hy.is_number() && std::isfinite(hy.as_number()) ?
+							hy.as_number() : it->second.yaw);
 					ss_ ps;
 					scene_of(it->second, &ps);
 					if(!own_scene.empty() && ps != own_scene)
@@ -17779,6 +17788,12 @@ struct Module: public interface::Module, public Interface
 				world_of(b, w, &wq);
 				j.set("pos", point(w));
 				j.set("yaw", wq.yaw());
+				// ([KIT_MOVE_DRAW] a driving bot's its drive's state's)
+				auto di = m_drives.find(b.id);
+				const json::Value &hy = di != m_drives.end() ?
+						di->second.state.get("yaw") : json::Value();
+				j.set("heading", hy.is_number() && std::isfinite(hy.as_number()) ?
+						hy.as_number() : wq.yaw());
 				ss_ ps;
 				scene_of(b, &ps);
 				if(!own_scene.empty() && ps != own_scene)
@@ -22690,7 +22705,9 @@ struct Module: public interface::Module, public Interface
 	// call (nil clears), Stop or the body's going; kept over a put. A player it
 	// reaches, as c:speed's. Bounded: MAX_BODY_VARS keys of 1 to 32 letters,
 	// digits or _ (not a digit first), each a number, a boolean or a string of
-	// at most 64 bytes. s is {player, key[, value]}
+	// at most 64 bytes. s is {player, key[, value[, public]]}: [KIT_MOVE_DRAW]
+	// c:body_var(by, key, value, {public = true}) also in every client's draw
+	// (s.vars, other players' too: public_vars()); each call says it again
 	static const size_t MAX_BODY_VARS = 16;
 	void body_var_fx(const Entity &e, size_t comp, const ss_ &by,
 			const json::Value &s)
@@ -22706,6 +22723,7 @@ struct Module: public interface::Module, public Interface
 			key_ok = key_ok && (ch == '_' || (ch >= 'a' && ch <= 'z') ||
 					(ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'));
 		const bool clear = v.is_undefined() || v.is_null();
+		const bool pub = !clear && s.at(3u).is_true();
 		auto pi = m_entities.find(pid);
 		// [KIT_BOT_DRIVE] a driving bot's (step_drives() puts them in its state)
 		const Entity *bot = who.is_string() ? bot_of(who.as_string()) : nullptr;
@@ -22734,18 +22752,58 @@ struct Module: public interface::Module, public Interface
 					itos(pid))+" "+key.substr(0, 32)+" refused: "+why);
 			return;
 		}
+		json::Value &pubs = b ? b->pub : m_bot_bodies[bot->id].pub;
 		const json::Value &was = vars->get(key);
-		if(clear ? was.is_undefined() :
-				(!was.is_undefined() && was.stringify() == v.stringify()))
+		if((clear ? was.is_undefined() :
+				(!was.is_undefined() && was.stringify() == v.stringify())) &&
+				pubs.get(key).is_true() == pub)
 			return;
 		if(clear)
 			vars->del_key(key);
 		else
 			vars->set(key, v.deepcopy());
-		log_i(MODULE, "%s's body var %s = %s", cs(bot ? bot_name(*bot) : pi->second.name),
-				cs(key), cs(clear ? ss_("nil") : v.stringify()));
+		if(pub)
+			pubs.set(key, true);
+		else if(!pubs.get(key).is_undefined())
+			pubs.del_key(key);
+		log_i(MODULE, "%s's body var %s = %s%s", cs(bot ? bot_name(*bot) : pi->second.name),
+				cs(key), cs(clear ? ss_("nil") : v.stringify()), pub ? " (public)" : "");
 		if(b)
 			with_vars(*b);
+		if(bot)
+			public_vars(*bot, *vars, pubs, m_bot_bodies[bot->id].mvars_sent);
+		else
+			public_vars(pi->second, *vars, pubs, b->mvars_sent);
+	}
+
+	// [KIT_MOVE_DRAW] A body's public vars (c:body_var's {public = true}) on its
+	// entity's node as "kit_mvars" (JSON, "" none) as they change: replicated to
+	// the clients that have the node once a change (a node var goes when it is
+	// set), a client that comes later gets it with the node. Every client's draw
+	// reads them (players.lua's hooked()). Called on a change and with each pose
+	// (a node made anew: another scene)
+	void public_vars(const Entity &e, const json::Value &vars, const json::Value &pub,
+			ss_ &sent)
+	{
+		if(!e.node)
+			return;
+		json::Value o = json::object();
+		for(json::Iterator it(pub); it; ++it)
+			if(!vars.get(it.key()).is_undefined())
+				o.set(it.key(), vars.get(it.key()));
+		const ss_ js = o.size() ? o.stringify() : ss_();
+		const ss_ now = itos(e.node)+"|"+js;
+		if(now == sent)
+			return;
+		sent = now;
+		log_i(MODULE, "Entity %s's public body vars: %s", cs(itos(e.id)),
+				js.empty() ? "none" : cs(js));
+		main_context::access(m_server, scene_of(e),
+				[&](magic::Scene *sc){
+			magic::Node *n = sc->GetNode(e.node);
+			if(n)
+				n->SetVar(magic::StringHash("kit_mvars"), magic::Variant(js.c_str()));
+		});
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] c:set_param(id, type, param, value): a parameter of an
@@ -25042,6 +25100,10 @@ struct Module: public interface::Module, public Interface
 		double speed = 1;
 		// [KIT_BODY_VARS] c:body_var's values: the state's `vars` (with_vars())
 		json::Value vars = json::object();
+		// [KIT_MOVE_DRAW] the keys set {public = true} (key: true), every
+		// client's draw's s.vars; on the player's node as "kit_mvars" as last set
+		json::Value pub = json::object();
+		ss_ mvars_sent;
 		// [KIT_PLAYER_MODEL] the last input's view pitch (degrees, down
 		// positive), the client's count of its swings and its digging (1)
 		// or not; the pose last set on the player's node
@@ -25129,7 +25191,7 @@ struct Module: public interface::Module, public Interface
 		o += ",state={pos={0,0,0},yaw=0},dt=1/60,sub=1,inputs={";
 		for(int i = 0; i < BATCH; i++)
 			o += ss_("{f=1,r=")+(i % 2 ? "1" : "0")+",yaw=0,jump="+(i == 4 ? "1" : "0")+
-					",go=0,tx=0,ty=0,tz=0},";
+					",go=0,tx=0,ty=0,tz=0,speed=1},";
 		o += "},world={}}";
 		ss_ answer, err;
 		bool runaway = false;
@@ -25454,6 +25516,8 @@ struct Module: public interface::Module, public Interface
 			m.set("src", m_sources[b.type]);
 			m.set("params", b.params);
 			m.set("decl", m_types[b.type].decl.get("movement"));
+			// [KIT_MOVE_DRAW] c:speed's factor: the prediction's i.speed
+			m.set("speed", b.speed);
 			c.set("move", m);
 			c.set("seat", (int64_t)b.seat);
 			// [KIT_PLANE] the z it is held at, the client predicting as the box steps
@@ -26054,8 +26118,10 @@ struct Module: public interface::Module, public Interface
 		if(pi == m_peers.end() || !pi->second.player)
 			return;
 		auto ei = m_entities.find(pi->second.player);
-		if(ei != m_entities.end())
+		if(ei != m_entities.end()){
 			movement_pose(ei->second, b.state, b.mpose_sent);
+			public_vars(ei->second, b.vars, b.pub, b.mvars_sent);
+		}
 	}
 	// (on an entity's node: a player's, [KIT_BOT_DRIVE] a driving bot's)
 	void movement_pose(const Entity &e, const json::Value &state, ss_ &mpose_sent)
@@ -26688,9 +26754,15 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(dt), o);
 			o += ",sub="+itos((int64_t)num(d.params, "substeps", 1, 1, 8));
 			o += ",inputs={";
+			// [KIT_MOVE_DRAW] i.speed: a driving bot's c:speed factor, else 1
+			ss_ spd = "1";
+			if(bb){
+				spd.clear();
+				lua_lit(json::Value(bb->speed), spd);
+			}
 			for(int k = 0; k < n; k++)
 				o += in.substr(0, in.size() - 1)+",t="+
-						itos((int64_t)std::floor((d.t + k * dt) * 1000))+"},";
+						itos((int64_t)std::floor((d.t + k * dt) * 1000))+",speed="+spd+"},";
 			o += "},world=";
 			double v2 = 0;
 			const json::Value &sv = d.state.get("vel");
@@ -26745,6 +26817,7 @@ struct Module: public interface::Module, public Interface
 				if(ev.is_array() && ev.size())
 					movement_events(d.type, "bot:"+itos(e.id), d.scene, ev);
 				movement_pose(e, d.state, d.mpose_sent);
+				public_vars(e, bb->vars, bb->pub, bb->mvars_sent);
 			}
 			// [KIT_SHIP] a gun's shots (kit/turret's): its holder's, at most a few a tick
 			if(held)
@@ -29167,9 +29240,14 @@ struct Module: public interface::Module, public Interface
 				o += ",inputs={";
 				uint32_t last = b.ack;
 				int n_in = 0;
+				// [KIT_MOVE_DRAW] i.speed: c:speed's factor as it is now (the
+				// client's prediction takes "kit:controls"' move.speed alike)
+				ss_ spd;
+				lua_lit(json::Value(b.speed), spd);
 				for(; n_in < BATCH && !b.inputs.empty() &&
 						b.allowance >= 1; n_in++){
-					o += b.inputs.front().second+",";
+					const ss_ &in = b.inputs.front().second;
+					o += in.substr(0, in.size() - 1)+",speed="+spd+"},";
 					last = b.inputs.front().first;
 					b.inputs.pop_front();
 					b.allowance -= 1;
@@ -29437,7 +29515,9 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CTF] c:speed's factors gone, [KIT_BODY_VARS] c:body_var's
 			bp.second.speed = 1;
 			bp.second.vars = json::object();
+			bp.second.pub = json::object();
 			with_vars(bp.second);
+			movement_pose(bp.first, bp.second);
 		}
 		for(auto &h : m_seat_home){
 			auto it = m_entities.find(h.first);
@@ -35166,10 +35246,12 @@ struct Module: public interface::Module, public Interface
 				"between steps; s.vars what a component's c:body_var(by, key, "
 				"value) set on the body: a number, boolean or short string, 16 "
 				"keys, read only, the server's on both sides: a step reacts to "
-				"the run's state, such as an open finish), i the input (i.f, i.r "
-				"forward and right -1...1, i.jump 1 when held, i.yaw degrees, "
-				"i.out_of_play true while out of play: dead waiting, a "
-				"kit/lobby's lobby or result), w the world (w:move({x, y, z, r, "
+				"the run's state, such as an open finish; set {public = true} "
+				"also in every client's draw, other players' too), i the input "
+				"(i.f, i.r forward and right -1...1, i.jump 1 when held, i.yaw "
+				"degrees, i.out_of_play true while out of play: dead waiting, a "
+				"kit/lobby's lobby or result, i.speed c:speed's factor: 1, 0 "
+				"frozen), w the world (w:move({x, y, z, r, "
 				"h}, dx, dy, dz, step_up) -> mx, my, mz, hits; w.sin, w.cos, "
 				"w.sqrt, w.PI; Kit API 1's methods: w:cell, walk, move, ray, "
 				"down, under, contacts, circle, segment, unbury, the rest "
@@ -35195,7 +35277,10 @@ struct Module: public interface::Module, public Interface
 				"max, sin, cos, atan, atan2; no random). s.events = {\"name\" | "
 				"{\"name\", value}...} set in a step: outputs of its component "
 				"on the app root (declare them), as by the player; s.pose = "
-				"{n...} (8): what the other clients draw by. s.spheres = {{x, y, "
+				"{n...} (8): what the other clients draw by (movement.pose = "
+				"{\"a\", \"dir\"...} names the slots: s.pose.a written and "
+				"read by name or index). A put (a teleport, a respawn) starts s "
+				"afresh. s.spheres = {{x, y, "
 				"z, r}...} (8; from s.pos along the world's axes, within 16, r "
 				"0.01 to 8): the body's shape the zones meet (a bike's wheels "
 				"and head; get_state's and play_input's shape); none: "
@@ -35223,12 +35308,14 @@ struct Module: public interface::Module, public Interface
 				"type's name); no node:GetScene(), no globals set in a handler; "
 				"a handler that errs is off for that entity on that client, its "
 				"first failure in get_log (get_guide: all a client part "
-				"reaches); a movement's draw(s, node, yaw) draws each player's "
-				"body (node at its feet, s its state; another's {pos, pose}; yaw "
-				"the own body's as drawn between its steps, degrees; scenery is "
+				"reaches); a movement's draw(s, node, yaw, p) draws each player's "
+				"body (node at its feet, made anew when the part is put again; s "
+				"its state; another's {pos, pose, vars: the public ones}; yaw "
+				"the own body's as drawn between its steps, degrees; p the "
+				"params, so no size is copied from the step; scenery is "
 				"kit/parallax's, not a client part's; kit.shake(a), "
-				"kit.effect{at, ...} and kit.mark{at, yaw, size, color} "
-				"from any of them: get_guide); with client left out, the type's "
+				"kit.effect{at, ...}, kit.mark{at, yaw, size, color} and "
+				"kit.material(hex, {unlit, texture}) from any of them: get_guide); with client left out, the type's "
 				"client part stays as it is; \"\" takes it away. A few lines "
 				"changed: edit_type.",
 				R"J({"type": "object", "properties": {
@@ -41389,7 +41476,7 @@ struct Module: public interface::Module, public Interface
 			"get_type reads a type's file (Kit's are examples), "
 			"delete_type removes one. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
-			"its client part's draw(s, node, yaw) draws them (the Crag Trial "
+			"its client part's draw(s, node, yaw, p) draws them (the Crag Trial "
 			"template's local/crag_bike). State with kept = true (best "
 			"times) outlives Stop and restarts (a game session's its own); "
 			"clear_kept clears it.\n"
@@ -41534,6 +41621,9 @@ struct Module: public interface::Module, public Interface
 				"surface \"finish\") while crag_run's finish_open, set with the "
 				"last gem: no freeze from the server, no rewind (simplified: a "
 				"value set under a round trip before it is needed still rewinds). "
+				"c:body_var(by, key, value, {public = true}): also in every "
+				"client's draw (s.vars, the other riders' too; sent as it "
+				"changes): a rider's style or paint. "
 				"The lobby's keep_own_body keeps the player's own body "
 				"drawn for them, the camera on it, hidden from the others. "
 				"A client part's on_enter(e) and on_leave(e) run on the "
@@ -41554,9 +41644,9 @@ struct Module: public interface::Module, public Interface
 				"per_player state this player's own), e:predict(key, v, secs), "
 				"e.mine, e.you, e:near(d), e:log(text) (that client's own log, "
 				"not get_log). local kit = require(\"buildat/module/kit\") has "
-				"15 names: shared, pointed, use, body_state, body_pos, seated, "
+				"16 names: shared, pointed, use, body_state, body_pos, seated, "
 				"shake, effect, mark, clear_marks, ui_keys, press_action, "
-				"key_down, key_name and key_text (any other is nil; "
+				"key_down, key_name, key_text and material (any other is nil; "
 				"kit.internal, the whole client module, is outside Kit API 1 "
 				"and may change in any release). "
 				"kit.shared is one table all client parts on that client share "
@@ -41564,7 +41654,7 @@ struct Module: public interface::Module, public Interface
 				"scene switch, Play and Stop keep it; clear your keys in "
 				"on_remove), kit.body_state() is this client's predicted body. "
 				// [RACER_FEEL] (2), (3)
-				"From a handler or a movement's draw(s, node, yaw), on that client "
+				"From a handler or a movement's draw(s, node, yaw, p), on that client "
 				"alone, at once: kit.shake(amount) shakes the camera (0 to 5, "
 				"decaying at kit/controls' shake_decay; a crash felt the frame "
 				"it is predicted); kit.effect{at = {x, y, z}, count, ...} a "

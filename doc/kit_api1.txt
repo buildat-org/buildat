@@ -132,7 +132,7 @@ server c:add | (item, n, ext)
 server c:after | (seconds, name, opts)
 server c:app | (what, value)
 server c:attach | (player, opts)
-server c:body_var | (player, key, value)
+server c:body_var | (player, key, value, opts)
 server c:child | (t) [experimental]
 server c:count | (item, ext)
 server c:detach | ()
@@ -373,6 +373,7 @@ client kit.key_down | (id)
 client kit.key_name | (id)
 client kit.key_text | (s)
 client kit.mark | (t)
+client kit.material | (hex, opts)
 client kit.pointed | (origin, dir, reach)
 client kit.press_action | (name, down)
 client kit.seated | ()
@@ -387,6 +388,7 @@ move i.go
 move i.jump
 move i.out_of_play
 move i.r
+move i.speed
 move i.t
 move i.tx
 move i.ty
@@ -401,6 +403,7 @@ move movement.click
 move movement.eye
 move movement.h
 move movement.help
+move movement.pose
 move movement.r
 move movement.raw_keys
 move movement.station

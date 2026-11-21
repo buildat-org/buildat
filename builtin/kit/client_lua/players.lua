@@ -340,16 +340,26 @@ end
 -- car stepped 30 times a second turned in steps at 60 frames); the others' nil
 -- simplified: the others by this client's movement (kit/controls' one: a seat's
 -- body is not drawn), their pose as it came (not 0.1 s back as their place)
+-- [KIT_MOVE_DRAW] p the movement's parameters (this client's, as the step's);
+-- s.pose by its slots' names too (movement.pose), s.vars the others' public
+-- body vars (their node's "kit_mvars"; this player's own state has all its
+-- own); the node made anew when the draw function changes (a client part put
+-- again: nothing an older version made stays under it)
 local function hooked(b, id, n, at, draw, shown)
-	if not draw then
-		if b.mnode then
-			b.mnode:Remove()
-			b.mnode = nil
+	if b.mnode and b.mdraw ~= draw then
+		b.mnode:Remove()
+		b.mnode = nil
+		if draw then
+			log:info("kit: player " .. id .. "'s movement node made anew (its draw changed)")
 		end
+	end
+	b.mdraw = draw
+	if not draw then
 		return false
 	end
 	if not b.mnode then
 		b.mnode = O.scene:CreateChild("kit_movement_body")
+		b.mfailed = nil
 		log:info("kit: player " .. id .. "'s body drawn by its movement")
 	end
 	b.mnode.position = at
@@ -360,16 +370,34 @@ local function hooked(b, id, n, at, draw, shown)
 	if not shown then
 		return true
 	end
-	local s = id == P.you and M.body_state()
-	if not s then
+	local own = id == P.you and M.body_state()
+	local names = M.movement_pose_names()
+	local s
+	if own then
+		-- (a copy: the pose's names are the draw's, not the state's)
+		s = {}
+		for k, v in pairs(own) do
+			s[k] = v
+		end
+		s.pose = M.move_lib.pose_view(names, own.pose)
+	else
 		local v = n.node:GetVar("kit_mpose")
 		local pose = {}
 		for x in (v:IsEmpty() and "" or v:GetString()):gmatch("%S+") do
 			pose[#pose + 1] = tonumber(x) or 0
 		end
-		s = {pos = {at.x, at.y, at.z}, pose = pose}
+		local mv = n.node:GetVar("kit_mvars")
+		local raw = mv:IsEmpty() and "" or mv:GetString()
+		if raw ~= b.mvars_raw then
+			b.mvars_raw = raw
+			b.mvars = raw ~= "" and network.parse_json(raw) or nil
+			b.mvars = type(b.mvars) == "table" and b.mvars or nil
+		end
+		s = {pos = {at.x, at.y, at.z}, pose = M.move_lib.pose_view(names, pose),
+			vars = b.mvars}
 	end
-	local ok, err = pcall(draw, s, b.mnode, id == P.you and M.drawn_yaw() or nil)
+	local ok, err = pcall(draw, s, b.mnode, id == P.you and M.drawn_yaw() or nil,
+			M.movement_params())
 	if not ok and not b.mfailed then
 		b.mfailed = true
 		log:warning("kit: the movement's draw: " .. tostring(err))

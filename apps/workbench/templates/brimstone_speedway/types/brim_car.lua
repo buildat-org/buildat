@@ -27,7 +27,9 @@
 --   paint: its colour variant (1...6), drawn by brim_car.client.lua;
 --   ghost: a time trial's car, meeting no other car;
 --   fire: the race's count of its fire key's presses: a new one is the
---     event "fire" with the heading (the race's action has no heading).
+--     event "fire" with the heading (the race's action has no heading);
+--   run: the race's count of the player's runs: a new one clears the tyre
+--     marks (brim_car.client.lua, its own car's state's s.vars).
 -- [KIT_TOP_DOWN] (8) Two circles along the body meet the walls, one round
 -- its middle (BODY.r) the other cars (movement.bodies: w:circle's hits with
 -- info.body and info.vel); a hit is an impulse at the circle, so a corner
@@ -45,13 +47,15 @@
 -- +x, kit's yaw), s.w its yaw rate, s.st the steering angle, s.bumps the
 -- hard wall hits so far and s.bump_v the last one's speed (its client's
 -- draw shakes on a new one), s.pose what the
--- clients draw: {heading, paint, steering, flags (1 boosting, 2 wrecked, 4
--- a tyre slipping much, 8 braking, 16 handbrake, 32 throttle, 64 and 128
--- the front and the back scraping a wall), speed, the floor (SURF's
--- index), the tyres slipping much (bits 1 2 4 8: TYRES' order), its hard
--- hits, its run (body var run, the race's: a new one clears the tyre
--- marks; past Kit's 8 for the others, so its own client's alone)}. s.spheres two circles, front and back, as the zones (checkpoints,
--- crates, mines) meet it.
+-- clients draw, by its names (movement.pose): h the heading, paint, steer
+-- the steering, flags (1 boosting, 2 wrecked, 4 a tyre slipping much, 8
+-- braking, 16 handbrake, 32 throttle, 64 and 128 the front and the back
+-- scraping a wall), speed, floor (SURF's index), slips (the tyres slipping
+-- much, bits 1 2 4 8: the tyres' order), bumps (its hard hits). s.spheres
+-- two circles, front and back, as the zones (checkpoints, crates, mines)
+-- meet it. The tyres' places are params (track, front, rear), the client
+-- part's draw's p too. The grid's freeze (the race's c:speed(by, 0)): i.speed
+-- 0, held where it is.
 local R = 1.05 -- the circles against walls (m)
 local AX = 1.35 -- their offset ahead and behind the middle
 -- (its r the circle round the middle the other cars meet, as they see it:
@@ -59,8 +63,12 @@ local AX = 1.35 -- their offset ahead and behind the middle
 -- nose to tail overlap a little and side by side keep a little apart)
 local BODY = {r = 1.4, h = 1.3, eye = 1}
 -- The tyres: x right, z ahead of the middle (the mass's), the first two
--- steered, the last two driven (EDGM's 1.1 ahead, 0.7 behind, scaled)
-local TYRES = {{0.92, 1.3}, {-0.92, 1.3}, {0.92, -1.25}, {-0.92, -1.25}}
+-- steered, the last two driven (EDGM's 1.1 ahead, 0.7 behind, scaled): the
+-- params track (either side), front and rear
+local function tyres(p)
+	local x, f, b = p.track or 0.92, p.front or 1.3, -(p.rear or 1.25)
+	return {{x, f}, {-x, f}, {x, b}, {-x, b}}
+end
 -- The yaw inertia over the mass (m^2: a 4.8 by 2 m box's, a little more)
 local RG2 = 1.5
 -- The floor: {grip (a share of p.grip), drag (m/s^2 on the car, its four
@@ -134,6 +142,9 @@ return {
 			steer = "The front tyres' widest steering angle, degrees.",
 			grip = "Each tyre's grip on asphalt, m/s^2 (EDGM's impulse_base).",
 			boost = "The top speed's factor while the ram boost is on.",
+			track = "Each tyre's distance from the middle sideways, m (the client part draws them there).",
+			front = "The front tyres ahead of the middle, m.",
+			rear = "The rear tyres behind the middle, m.",
 			rate = "Inputs a second; Kit draws the car between them.",
 			substeps = "Physics steps an input; 120 a second as at 60 and 2.",
 		},
@@ -151,7 +162,9 @@ return {
 			{"{key:jump}", "handbrake", "jump"},
 			{"{key:fire}/Left click", "fire"}},
 		touch_help = {{"Gas/Brake", "drive", "f"}, {"Stick", "steer", "r"},
-			{"Handbrake", "slide", "jump"}}},
+			{"Handbrake", "slide", "jump"}},
+		-- s.pose's slots by name (the client part's draw reads them so)
+		pose = {"h", "paint", "steer", "flags", "speed", "floor", "slips", "bumps"}},
 	params = {
 		speed = {cat = "physics", type = "number", default = 28, min = 1,
 			max = 80},
@@ -162,6 +175,12 @@ return {
 		grip = {cat = "physics", type = "number", default = 7, min = 0.1,
 			max = 40},
 		boost = {cat = "physics", type = "number", default = 1.45, min = 1,
+			max = 3},
+		track = {cat = "physics", type = "number", default = 0.92, min = 0.3,
+			max = 2},
+		front = {cat = "physics", type = "number", default = 1.3, min = 0.3,
+			max = 3},
+		rear = {cat = "physics", type = "number", default = 1.25, min = 0.3,
 			max = 3},
 		-- (substeps: the tyres' grip is a share of the speed across them
 		-- each)
@@ -194,7 +213,7 @@ return {
 		local speed = math.sqrt(vr * vr + vf * vf)
 		local flags = 0
 		-- (c:speed(by, 0), the grid's freeze: held where it is)
-		local frozen = top < 0.01
+		local frozen = i.speed == 0
 		if frozen then
 			f, r, hb = 0, 0, false
 			m[1], m[2], m[3] = 0, 0, 0
@@ -255,6 +274,7 @@ return {
 		-- (turning right the left wheel is the outer one, turned less)
 		local turned_l = st > 0 and outer(st) or st
 		local turned_r = st < 0 and outer(st) or st
+		local TYRES = tyres(p)
 		for k = 1, 4 do
 			local t = TYRES[k]
 			local lx, lz = t[1], t[2]
@@ -450,9 +470,9 @@ return {
 		if v.wreck then
 			flags = flags + 2
 		end
-		s.pose = {s.h, tonumber(v.paint) or 1, st, flags,
-			math.floor(speed * 10 + 0.5) / 10, SURF[surf] or 1, slips,
-			tonumber(s.bumps) or 0, tonumber(v.run) or 0}
+		s.pose = {h = s.h, paint = tonumber(v.paint) or 1, steer = st, flags = flags,
+			speed = math.floor(speed * 10 + 0.5) / 10, floor = SURF[surf] or 1,
+			slips = slips, bumps = tonumber(s.bumps) or 0}
 		s.spheres = {{sh * AX, 0.5, ch * AX, 0.9}, {-sh * AX, 0.5, -ch * AX, 0.9}}
 	end,
 }
