@@ -624,7 +624,11 @@ Aitta, the registry
 apps/aitta is a buildat app. An author joins it (its accounts: a local
 account, or a Starport ID where its admin set that up), and binds an
 author name to the public key keygen printed; the name and the key do
-not change after. A published release is checked -- the signature by a
+not change after. An account may bind up to 8 author names, each to a
+key of its own (a person's own and their servers'); a name is unique on
+the Aitta and a key bound once. The account's rights over its releases
+go by any of its names; its "me" lists them ({authors: [{author, key}],
+authors_max}). A published release is checked -- the signature by a
 bound key, the hash, the manifest, its author being the key's, the
 licences against the instance's list (free ones by default, in its
 settings), the size -- and listed, unreviewed. The admin can delist and

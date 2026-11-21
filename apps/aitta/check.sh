@@ -16,7 +16,13 @@
 #   3. a licence the instance does not take, and a manifest whose author
 #      is not the key's, are refused;
 #   4. the admin delists it: off the list, and its archive not served;
-#   5. a network's reads past 240 a minute are refused.
+#   5. [AITTA_AUTHORS] the admin's account binds seven more author names,
+#      a key each, a ninth refused; me lists the eight, and
+#      tester2 publishes with its key;
+#   6. an account an older Aitta bound (its owners row one plain name,
+#      written in while the Aitta is down) is listed by me, publishes,
+#      and binds a second name;
+#   7. a network's reads past 240 a minute are refused.
 #
 #   apps/aitta/check.sh
 set -u
@@ -293,9 +299,104 @@ sys.exit(0 if any(r["name"] == "demo" and r["version"] == "1.0.0"
 	"http://127.0.0.1:$P/api/v1/aitta/archive/$sha.zip")" = 404 ] ||
 	fail "a delisted release's archive is served"
 
-# 5. 240 reads a minute a network ([REWORK_FIXES]): 490 cannot all fit in
+# Each "ai: {...}" answer in a client's log, by its id, as JSON
+answers(){ # log -> python's res
+python3 -c 'import json, sys
+res = {}
+for line in open(sys.argv[1], errors="replace"):
+	i = line.find("ai: {")
+	if i >= 0:
+		r = json.JSONDecoder().raw_decode(line[i + 4:])[0]
+		res[r["id"]] = r
+print(json.dumps(res))' "$1"
+}
+fake(){ printf '04%0128d' "$1"; } # a key's form, for a bind only
+
+# 5. [AITTA_AUTHORS] One account binds up to 8 author names, a key each:
+# tester2 (with its own key) beside tester, then six more; a ninth is
+# refused. "me" lists them, first bound first, and each publishes with
+# its own key. The admin adds olduser for 6.
+"$b" aitta keygen "$t/key2" > "$t/pub2" 2>/dev/null || fail "keygen tester2"
+reqs="{\"cmd\":\"bind\",\"author\":\"tester2\",\"key\":\"$(cat "$t/pub2")\"}"
+for i in 3 4 5 6 7 8 9; do
+	reqs="$reqs
+{\"cmd\":\"bind\",\"author\":\"tester$i\",\"key\":\"$(fake $i)\"}"
+done
+reqs="$reqs
+{\"cmd\":\"me\"}"
+printf 'wait_log_any 30000 admin script: done\nwait_log_any 30000 "id":9,"ok":\nquit\n' > "$t/cmds5"
+BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+BUILDAT_AITTA_CODE=$code BUILDAT_AITTA_ADMIN="add olduser oldpass1234" \
+BUILDAT_AITTA_REQS="$reqs" \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	-c @"$t/cmds5" > "$t/cl5.log" 2>&1
+answers "$t/cl5.log" | python3 -c 'import json, sys
+res = json.load(sys.stdin)
+k1, k2 = sys.argv[1:]
+for i in range(1, 8):
+	assert res[str(i)]["ok"], res[str(i)]
+assert not res["8"]["ok"] and "8 author names" in res["8"]["error"], res["8"]
+a = res["9"]["result"]
+assert a["authors_max"] == 8, a
+want = [["tester", k1], ["tester2", k2]] + [["tester%d" % i, "04%0128d" % i] for i in range(3, 9)]
+assert [[x["author"], x["key"]] for x in a["authors"]] == want, a["authors"]' \
+	"$(cat "$t/pub")" "$(cat "$t/pub2")" ||
+	fail "eight names bound, the ninth refused, me listing them ($(grep -a 'ai: ' "$t/cl5.log" | cut -c1-300))"
+manifest tester2 1.0.0 MIT
+zip=$("$b" aitta pack "$t/app" "$t/key2" "$t/out" 2>/dev/null) || fail "pack tester2"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester2/demo/1.0.0" || fail "publish as tester2: $out"
+manifest tester 2.0.0 MIT
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 2.0.0"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester/demo/2.0.0" || fail "publish as tester beside tester2: $out"
+
+# 6. An account an older Aitta bound: its owners row the name alone,
+# written into the save while the Aitta is down. "me" lists the name, it
+# publishes, and the account binds a second name beside it.
+"$b" aitta keygen "$t/oldkey" > "$t/oldpub" 2>/dev/null || fail "keygen oldie"
+kill $pid
+for _ in $(seq 100); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+python3 - "$t/srv/apps/aitta/saves/aitta/save.sqlite" "$(cat "$t/oldpub")" <<'PY' ||
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+key = sys.argv[2]
+rows = [("owners", "olduser", "oldie"), ("keys", key, "oldie"),
+	("authors", "oldie", json.dumps({"author": "oldie", "key": key,
+	"account": "olduser", "time": 1760000000}))]
+for s, k, v in rows:
+	db.execute("insert into store (store, key, value) values (?, ?, ?)",
+		(s, k, v.encode()))
+db.commit()
+PY
+	fail "the old rows"
+start_server "$t/srv2.log" "setup code|Listening at" 120 $P \
+	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
+	fail "Aitta did not start again"
+pid=$SERVER_PID
+printf 'wait_log_any 30000 "id":3,"ok":\nquit\n' > "$t/cmds6"
+BUILDAT_AITTA_NAME=olduser BUILDAT_AITTA_PASSWORD=oldpass1234 \
+BUILDAT_AITTA_REQS="{\"cmd\":\"me\"}
+{\"cmd\":\"bind\",\"author\":\"oldie2\",\"key\":\"$(fake 10)\"}
+{\"cmd\":\"me\"}" \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl_old" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	-c @"$t/cmds6" > "$t/cl6.log" 2>&1
+answers "$t/cl6.log" | python3 -c 'import json, sys
+res = json.load(sys.stdin)
+k = sys.argv[1]
+names = lambda i: [[x["author"], x["key"]] for x in res[i]["result"]["authors"]]
+assert names("1") == [["oldie", k]], res["1"]
+assert res["2"]["ok"], res["2"]
+assert names("3") == [["oldie", k], ["oldie2", "04%0128d" % 10]], res["3"]' "$(cat "$t/oldpub")" ||
+	fail "the old row's account in me and its second bind ($(grep -a 'ai: ' "$t/cl6.log" | cut -c1-300))"
+manifest oldie 1.0.0 MIT
+zip=$("$b" aitta pack "$t/app" "$t/oldkey" "$t/out" 2>/dev/null) || fail "pack oldie"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: oldie/demo/1.0.0" || fail "publish as oldie: $out"
+
+# 7. 240 reads a minute a network ([REWORK_FIXES]): 490 cannot all fit in
 # the minutes they span, whichever minute boundary falls among them
 curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/v1/aitta/info"; done) |
 	grep -q "too many requests from your network" ||
 	fail "490 reads in a row were not limited"
-echo "PASS: bound, published, listed, installed; a newer key kept; an alpha's packages listed whole, apart on the pages and not in Apps from Aitta; an unbound key, an app of 25000 files, a licence, another author refused; delisted; reads limited"
+echo "PASS: bound, published, listed, installed; a newer key kept; an alpha's packages listed whole, apart on the pages and not in Apps from Aitta; an unbound key, an app of 25000 files, a licence, another author refused; delisted; eight names an account, the ninth refused, an old one-name account kept; reads limited"
