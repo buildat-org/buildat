@@ -355,7 +355,9 @@ EOF
 	echo "delay 2200"
 	use "$3"
 	echo "delay 2200"
-	use "$3"
+	# (no sync after the last: the win can come within it, and wait_log sees
+	# only the lines after it starts)
+	echo "event kit_use $3"
 	echo "wait_log 20000 Blue wins!"
 	shot "a_$1_won"
 	echo "wait_log 30000 Last round: Blue won"
