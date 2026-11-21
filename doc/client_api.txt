@@ -1853,6 +1853,13 @@ wants_clicks(window)
 clicks_wanted() -> bool
 - Whether such a window is up: a game with a mouse look of its own leaves
   the pointer to it (skeldat).
+dim_behind(window, name)
+- [UI_MODAL_DIM] The rest of the screen shaded black (alpha 0.4) under a
+  Window the user is not to click off: a dialog, a context menu, a pause
+  menu, whose click off it closes it or is eaten. The Window draws the
+  shade itself (its modalShadeColor, modal or not), so it goes with the
+  window and covers the root at any size; it takes no clicks. name is
+  logged ("dim behind: <name>").
 show_notification(text, duration_s)
 - A small non-modal notice in the top right corner, gone after duration_s
   (2 seconds by default)
@@ -3336,7 +3343,7 @@ magic.Viewport: GetCamera, GetScene, SetRect, new, rect, renderPath
 magic.WM_CLAMP: 
 magic.WM_LOOP: 
 magic.WM_ONCE: 
-magic.Window: 
+magic.Window: modalShadeColor
 magic.XMLElement: GetAttribute, GetBool, GetChild, GetColor, GetDouble, GetFile, GetFloat, GetInt, GetIntVector2, GetName, GetNext, GetNumAttributes, GetParent, GetUInt, GetValue, GetVector2, GetVector3, HasAttribute, HasChild, IsNull, NotNull
 magic.XMLFile: GetRoot, ToString
 magic.Zone: ambientColor, ambientGradient, boundingBox, fogColor, fogEnd, fogStart, heightFog, override, priority, zoneTexture
@@ -3348,7 +3355,7 @@ extension.jam: editor, play, song
 extension.launch_console: show
 extension.pause_menu: new
 extension.serverlist: fetch, refresh, servers
-extension.ui_utils: add_paged, bind_button_menu, check_setting, clicks_wanted, close_dropdowns, close_glyph, close_notification, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, selectable, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu, wants_clicks
+extension.ui_utils: add_paged, bind_button_menu, check_setting, clicks_wanted, close_dropdowns, close_glyph, close_notification, copy, db_text, dim_behind, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, selectable, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu, wants_clicks
 extension.weave: design, from_name, image, mutate, name, pack, params, preset, presets, random, self_check, texture, unpack
 ---- end of the generated listing ----
 

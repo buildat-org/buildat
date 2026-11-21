@@ -85,19 +85,22 @@ void Window::RegisterObject(Context* context)
 
 void Window::GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor)
 {
+    // Buildat [UI_MODAL_DIM]: the shade under a window that is not modal too,
+    // drawn where the window is drawn: what is under it shaded, what is over
+    // it (a tooltip, a notice) not. A window with a shade colour is a menu
+    // that takes the clicks off it itself (ui_utils.dim_behind)
+    if (modalShadeColor_ != Color::TRANSPARENT)
+    {
+        UIElement* rootElement = GetRoot();
+        const IntVector2& rootSize = rootElement->GetSize();
+        UIBatch batch(rootElement, BLEND_ALPHA, IntRect(0, 0, rootSize.x_, rootSize.y_), 0, &vertexData);
+        batch.SetColor(modalShadeColor_);
+        batch.AddQuad(0, 0, rootSize.x_, rootSize.y_, 0, 0);
+        UIBatch::AddOrMerge(batch, batches);
+    }
+
     if (modal_)
     {
-        // Modal shade
-        if (modalShadeColor_ != Color::TRANSPARENT)
-        {
-            UIElement* rootElement = GetRoot();
-            const IntVector2& rootSize = rootElement->GetSize();
-            UIBatch batch(rootElement, BLEND_ALPHA, IntRect(0, 0, rootSize.x_, rootSize.y_), 0, &vertexData);
-            batch.SetColor(modalShadeColor_);
-            batch.AddQuad(0, 0, rootSize.x_, rootSize.y_, 0, 0);
-            UIBatch::AddOrMerge(batch, batches);
-        }
-
         // Modal frame
         if (modalFrameColor_ != Color::TRANSPARENT && modalFrameSize_ != IntVector2::ZERO)
         {

@@ -3670,20 +3670,14 @@ function M.server_window(key, on_close, on_exit)
 			free_sub = magic.SubscribeToEvent("Update", free_pointer)
 		end
 	end
-	-- **Black behind a window a game opened** (user, 2026-10-07), 25 UI
-	-- pixels round it: told apart from the game's UI under it
-	if on_close and not sw.backdrop then
-		local b = magic.ui.root:CreateChild("BorderImage")
-		b.color = magic.Color(0, 0, 0, 1)
-		-- Over the game's own windows (100), the window over it
-		b.priority = 101
+	-- **A window a game opened shades the game** ([UI_MODAL_DIM]; a solid
+	-- black border round it since 2026-10-07): told apart from the game's UI
+	-- under it, which a click off it closes it over
+	if on_close then
+		-- Over the game's own windows (100)
 		sw.frame.priority = 102
-		b.width = sw.frame.width + 50
-		b.height = sw.frame.height + 50
-		b.horizontalAlignment = magic.HA_CENTER
-		b.verticalAlignment = magic.VA_CENTER
-		b:SetPosition(0, 0)
-		sw.backdrop = b
+		local dim = (ui_utils.safe or ui_utils).dim_behind
+		dim(sw.frame, "server window")
 	end
 	ask_hello()
 	-- A game's instance asks for its hello just now: the page is drawn before
@@ -3717,9 +3711,6 @@ server_close = function(silent)
 	end
 	if sw.help then
 		sw.help:Remove()
-	end
-	if sw.backdrop then
-		sw.backdrop:Remove()
 	end
 	if sw.hid_cursor and not web then
 		magic.input:SetMouseVisible(false, "the Server window closed")
