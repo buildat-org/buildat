@@ -363,8 +363,9 @@ return function(game, declare_keys)
 		root = uistack.main:push({desc = "intro"})
 		-- [SKELDAT_TOUCH_HOW_TO_PLAY] As wide as a wide screen has room
 		-- for, so as short: at the touch UI size one column of 440 was
-		-- taller than a 1200x800 window
-		local width = math.max(440, math.min(760, magic.ui.root.width - 60))
+		-- taller than a 1200x800 window; on a phone its width less a margin
+		-- ([UI_SERVER_NARROW]: 440 ran off a 390 one)
+		local width = math.min(760, magic.ui.root.width - 60)
 		local menu = ui_utils.vertical_menu(root, {min_width = width + 20})
 		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		ui_utils.dim_behind(menu.window, "how to play")
@@ -394,7 +395,9 @@ return function(game, declare_keys)
 	local function scores_page(title, rows, back)
 		close()
 		root = uistack.main:push({desc = "scores"})
-		local menu = ui_utils.vertical_menu(root, {min_width = 460})
+		-- (on a phone its width less a margin, [UI_SERVER_NARROW])
+		local menu = ui_utils.vertical_menu(root, {min_width =
+				math.min(460, magic.ui.root.width - 40)})
 		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		ui_utils.dim_behind(menu.window, "scores")
 		local t = menu.window:CreateChild("Text")
@@ -406,7 +409,7 @@ return function(game, declare_keys)
 			else
 				local l = menu.window:CreateChild("Text")
 				l:SetStyleAuto()
-				l:SetFixedWidth(440)
+				l:SetFixedWidth(math.min(440, magic.ui.root.width - 60))
 				l:SetWordwrap(true)
 				l:SetText(r[1])
 			end

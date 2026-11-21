@@ -1820,6 +1820,10 @@ close_glyph(parent, window [, on_close])
   the Starport's windows have it, except the first screen; a screen with it has
   no Back or Close that only closes it, and a vertical menu of buttons
   keeps its Back and has none.
+close_button(parent, window [, on_close])
+- The same × as close_glyph, a child of parent where parent's layout puts
+  it, nothing keeping it at a corner: for a window's own header row, its
+  title and the × in one fixed row ([UI_SERVER_NARROW]; the Server window).
 copy(text)
 - Puts text on the OS clipboard, on the user's own key or click (the system's
   clipboard turned on, as SetClipboardText alone does not).
@@ -3355,7 +3359,7 @@ extension.jam: editor, play, song
 extension.launch_console: show
 extension.pause_menu: new
 extension.serverlist: fetch, refresh, servers
-extension.ui_utils: add_paged, bind_button_menu, check_setting, clicks_wanted, close_dropdowns, close_glyph, close_notification, copy, db_text, dim_behind, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, selectable, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu, wants_clicks
+extension.ui_utils: add_paged, bind_button_menu, check_setting, clicks_wanted, close_button, close_dropdowns, close_glyph, close_notification, copy, db_text, dim_behind, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, selectable, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu, wants_clicks
 extension.weave: design, from_name, image, mutate, name, pack, params, preset, presets, random, self_check, texture, unpack
 ---- end of the generated listing ----
 

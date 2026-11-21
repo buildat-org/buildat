@@ -29,12 +29,12 @@ wait_log 5000 Pause menu shown
 click Button "Client settings..."
 wait_log 5000 Game settings shown
 delay 500
-click DropDownList "▼" 668 240
+click DropDownList "▼" 668 150
 wait_log 3000 dropdown_
 frames 3
 click Text "45 deg"
 frames 3
-click DropDownList "▼" 668 240
+click DropDownList "▼" 668 150
 wait_log 3000 dropdown_
 frames 3
 click Text "45 deg"

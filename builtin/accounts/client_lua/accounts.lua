@@ -144,6 +144,7 @@ local ban_page
 local sw = {}
 local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local draw_sidebar, server_element, server_close, sidebar_need, server_entries
+local server_head
 local health_page, health_capture, updates_page
 -- The Starport panel open: "starports", "listing" or "ids"
 local starport_page, sp_panel
@@ -1395,8 +1396,19 @@ function M.close_page()
 	end
 end
 
+-- Nothing at the top of a Server window that is the app's own
+local function go_back()
+	local back = page_back
+	if back then
+		drop_page()
+		M.message = nil
+		back()
+	end
+end
+
 -- `help`, a function, puts a Help button at the title's right; a nil
--- title puts none. `top`: page_window's.
+-- title puts none. `top`: page_window's. In the Server window the title
+-- and Help go into its header row (server_head).
 local function open_page(kind, title, back, width, help, top)
 	drop_page()
 	page_kind, page_back = kind, back
@@ -1405,7 +1417,9 @@ local function open_page(kind, title, back, width, help, top)
 	-- is drawn into
 	M.page = sw.frame and server_element() or M.page_parent and
 			M.page_parent(width or 560) or page_window(width or 560, top)
-	if not title then
+	if sw.frame then
+		server_head(kind, title, back, go_back, help)
+	elseif not title then
 	elseif help then
 		local r = M.page:CreateChild("UIElement")
 		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
@@ -1421,13 +1435,12 @@ local function open_page(kind, title, back, width, help, top)
 	return M.page
 end
 
--- Nothing at the top of a Server window that is the app's own
-local function go_back()
-	local back = page_back
-	if back then
-		drop_page()
-		M.message = nil
-		back()
+-- **A page's Back** ([UI_SERVER_NARROW]): none in the Server window on a
+-- page of the sidebar's, where it would only go to the sidebar or close
+-- the window: its header row's "< Server" and × do that
+local function back_button(parent)
+	if page_back and not (sw.frame and not sw.nested) then
+		return button(parent, "Back", go_back)
 	end
 end
 -- [ESC_ACCOUNT]: My account, in the Server window, as the top right
@@ -1468,7 +1481,7 @@ passwd_page = function(back, message)
 	new2 = field(w, "New again", true, change)
 	local r = row(w)
 	button(r, "Change", change)
-	button(r, "Back", go_back)
+	back_button(r)
 	old:SetFocus(true)
 end
 M.password_page = function(back) passwd_page(back) end
@@ -1533,7 +1546,7 @@ totp_page = function(back)
 			buildat.send_packet("accounts:totp", cereal.binary_output(
 					{cmd = "confirm", code = code:GetText()}, TOTP_REQ))
 		end)
-		button(r, "Back", go_back)
+		back_button(r)
 		return
 	end
 	page_text(w, st.on == 1 and "On: logging in asks for a code from your " ..
@@ -1546,14 +1559,14 @@ totp_page = function(back)
 			buildat.send_packet("accounts:totp", cereal.binary_output(
 					{cmd = "off", code = code:GetText()}, TOTP_REQ))
 		end)
-		button(r, "Back", go_back)
+		back_button(r)
 	else
 		local r = row(w)
 		button(r, "Turn on...", function()
 			buildat.send_packet("accounts:totp", cereal.binary_output(
 					{cmd = "begin", code = ""}, TOTP_REQ))
 		end)
-		button(r, "Back", go_back)
+		back_button(r)
 	end
 end
 M.totp_page = function(back)
@@ -1612,9 +1625,7 @@ ntfy_page = function(back)
 		page_text(w, st.note, WARN)
 	end
 	if st.may ~= "1" then
-		if back then
-			button(w, "Back", go_back)
-		end
+		back_button(w)
 		return
 	end
 	page_text(w, st.url ~= "" and "On: reports and server problems are " ..
@@ -1650,9 +1661,7 @@ ntfy_page = function(back)
 		button(r, "Test", function() ntfy_send("test") end)
 		button(r, "Turn off", function() ntfy_send("set", "") end)
 	end
-	if back then
-		button(r, "Back", go_back)
-	end
+	back_button(r)
 end
 M.ntfy_page = function(back)
 	ntfy_state.note = ""
@@ -1752,9 +1761,7 @@ account_page = function(back, message)
 		end)
 	end
 	button(w, "Log out", M.logout)
-	if back then
-		button(w, "Back", go_back)
-	end
+	back_button(w)
 end
 -- A game's "My account...": the Server window at it; `back` is what
 -- closing the window goes back to
@@ -1781,7 +1788,7 @@ local BAN_REASONS = {
 	{"other", "Breaking this server's rules", false},
 }
 ban_page = function(name, back)
-	local w = open_page("ask", "Ban " .. name, back)
+	local w = open_page("ask", "Ban " .. name, function() users_page(back) end)
 	local reason, report = nil, false
 	local rb = nil
 	local function draw()
@@ -1807,7 +1814,7 @@ ban_page = function(name, back)
 		M.admin("ban", name, reason or "other", report)
 		users_page(back)
 	end)
-	button(r, "Back", function() users_page(back) end)
+	button(r, "Back", go_back)
 end
 
 -- [STARPORT_DEFAULT_URL]: "https://host[:port]", the address the admin
@@ -1922,7 +1929,7 @@ function ag.draw()
 	end
 	if not r then
 		page_text(w, "Waiting for the server...")
-		button(w, "Back", go_back)
+		back_button(w)
 		return
 	end
 	if ag.token then
@@ -2029,7 +2036,7 @@ function ag.draw()
 			end)
 		end)
 	end
-	button(w, "Back", go_back)
+	back_button(w)
 end
 function M.agents_page(back)
 	ag.back, ag.res, ag.token, ag.error, ag.shown = back, nil, nil, nil, nil
@@ -2041,8 +2048,8 @@ end
 -- A page of fields under the users page: a password for an account, or a
 -- new account's name and password
 local function ask_page(title, labels, on_done)
-	local w = open_page("ask", title, page_back)
 	local back = page_back
+	local w = open_page("ask", title, function() users_page(back) end)
 	local es = {}
 	local function done()
 		local v = {}
@@ -2063,7 +2070,7 @@ local function ask_page(title, labels, on_done)
 	end
 	local r = row(w)
 	button(r, "OK", done)
-	button(r, "Back", function() users_page(back) end)
+	button(r, "Back", go_back)
 	es[1]:SetFocus(true)
 end
 
@@ -2096,9 +2103,7 @@ users_page = function(back)
 	local u = M.users
 	if not u then
 		page_text(w, "Waiting for the server...")
-		if back then
-			button(w, "Back", go_back)
-		end
+		back_button(w)
 		return
 	end
 	-- [STARPORT] 10g: admins that all log in by a Starport ID only are
@@ -2196,13 +2201,14 @@ users_page = function(back)
 			end)
 			button(r, "Delete...", function()
 				local w2 = open_page("ask", "Delete the account " .. user.name ..
-						"? Their session ends.", back)
+						"? Their session ends.",
+						function() users_page(back) end)
 				local r2 = row(w2)
 				button(r2, "Delete", function()
 					M.admin("delete", user.name)
 					users_page(back)
 				end)
-				button(r2, "Back", function() users_page(back) end)
+				button(r2, "Back", go_back)
 			end)
 		end
 	end
@@ -2263,9 +2269,7 @@ users_page = function(back)
 			end)
 		end
 	end
-	if back then
-		button(w, "Back", go_back)
-	end
+	back_button(w)
 end
 --
 -- **The server's Starport page** ([STARPORT] 10g): starport.json, which
@@ -2520,9 +2524,7 @@ starport_page = function(back, panel, confirm_remove)
 	local w = open_page("starport", "Starport: " .. PANELS[panel], back, 840,
 			starport_help)
 	local function back_row()
-		if back then
-			button(w, "Back", go_back)
-		end
+		back_button(w)
 	end
 	if panel == "ids" then
 		local u = M.users
@@ -2755,9 +2757,7 @@ starport_page = function(back, panel, confirm_remove)
 		end
 		save()
 	end)
-	if back then
-		button(r3, "Back", go_back)
-	end
+	back_button(r3)
 end
 M.starport_page = function(back, panel)
 	starport_info = nil
@@ -3243,9 +3243,7 @@ health_page = function(back)
 		page_text(w, "None since the server started.", DIM)
 	end
 	list.viewPosition = magic.IntVector2(0, 1000000)
-	if back then
-		button(w, "Back", go_back)
-	end
+	back_button(w)
 end
 M.health_page = function(back)
 	M.admin("health")
@@ -3309,17 +3307,16 @@ updates_page = function(back)
 	if M.message and M.message ~= "" then
 		page_text(w, M.message, WARN)
 	end
-	if back then
-		button(w, "Back", go_back)
-	end
+	back_button(w)
 end
 
 --
 -- **The Server window** ([SERVER_ADMIN_PAGE]; user, 2026-10-07): Starport's
 -- window ([STARPORT_UI]) made builtin's. A sidebar of entries under grey
 -- headers, each with a count of what waits on it; the page beside it,
--- scrolling inside the window, which keeps its size; under 560 px the
--- sidebar is a screen of its own ([STARPORT_UI_KEYS] for the keys).
+-- scrolling inside the window, which keeps its size; under 544 px wide
+-- the sidebar is a screen of its own ([STARPORT_UI_KEYS] for the keys).
+-- Over them a fixed header row: the page's title and the × (draw_head).
 -- builtin's entries are Mine / Account and an admin's Admin / Accounts,
 -- the Starport panels (a server with starport_announce: never a Starport)
 -- and Health. An app puts its own first:
@@ -3327,7 +3324,7 @@ end
 --       add(header or nil, label, key, draw, count)
 --   end
 -- a header of the same name shared. Opened with on_close (a game's "My
--- account...") it has Close, its top page's Back closes it, and
+-- account...") its header has the ×, Escape at a top page closes it, and
 -- M.close_page() closes it too; without, it is the app's own UI.
 -- M.server_open(title, back) is an app's page in it, M.server_show(key)
 -- an entry, M.server_sidebar() the sidebar drawn again, M.frame the
@@ -3335,20 +3332,27 @@ end
 --
 M.server_menu = nil
 
+local draw_head
 local function show_sidebar()
 	drop_page()
 	sw.app_back = nil
 	sw.sidebar.visible = true
 	sw.view.visible = false
+	draw_head()
+end
+
+local function close_back()
+	server_close()
 end
 
 -- What Back does at a page's top: the sidebar on a narrow screen; closing
--- a window a game opened
+-- a window a game opened. Either is a page of the sidebar's, not nested
+-- (server_head)
 local function top_back()
 	if sw.narrow then
 		return show_sidebar
 	end
-	return sw.on_close and function() server_close() end or nil
+	return sw.on_close and close_back or nil
 end
 
 server_entries = function()
@@ -3448,9 +3452,12 @@ end
 
 -- simplified: a count is "any waiting", in the highlight colour; per-item
 -- seen times are the upgrade
--- The height the sidebar's entries take, and the window's margins
+-- The header row's height, and the gap under it
+local HEAD_H, HEAD_GAP = 36, 4
+-- The height the sidebar's entries take, and the window's margins (and the
+-- header row over it on a narrow window)
 sidebar_need = function()
-	local h, n = 16, 0
+	local h, n = 16 + (sw.narrow and HEAD_H + HEAD_GAP or 0), 0
 	for i = 0, sw.sidebar:GetNumChildren() - 1 do
 		local c = sw.sidebar:GetChild(i)
 		if c then
@@ -3528,34 +3535,162 @@ draw_sidebar = function()
 end
 M.server_sidebar = function() draw_sidebar() end
 
+-- `t` (a Text that does not wrap) showing `s`, cut with ".." at its end
+-- to at most `w` wide
+local function cut_text(t, s, w)
+	t:SetText(s)
+	while t.minWidth > w and s ~= "" do
+		-- (a whole UTF-8 character off the end)
+		local shorter = s:gsub("[%z\1-\127\192-\255][\128-\191]*$", "")
+		if shorter == s then
+			break
+		end
+		s = shorter
+		t:SetText(s .. "..")
+	end
+end
+
+-- **The header row** ([UI_SERVER_NARROW]; the user's pick, a window
+-- manager's title bar): fixed atop the window, the page's title in it
+-- rather than in the page that scrolls, and the × at its right with
+-- nothing under it (it was over the page's top right). A narrow window's
+-- page has "< Server" at its left, which shows the sidebar; a page under
+-- another has "< <its parent>" instead, wide or narrow. On a wide window
+-- the row is over the page only, beside the sidebar. The sidebar's own
+-- (narrow) is "Server".
+draw_head = function()
+	local hd = sw.head
+	if not hd then
+		return
+	end
+	hd:RemoveAllChildren()
+	local t = sw.trail or {}
+	local cur = sw.view.visible and t[#t] or nil
+	local back, label
+	if cur and cur.back then
+		back, label = cur.back, t[#t - 1] and t[#t - 1].title or "Back"
+	elseif cur and sw.narrow then
+		back, label = show_sidebar, "Server"
+	end
+	-- What is left of the row for the title: the rest less a gap each
+	local room = sw.frame.width - 16 - (sw.narrow and 0 or 158)
+	if back then
+		local b = button(hd, "", back)
+		cut_text(b:GetChild(0), "< " .. label, math.floor(room * 0.45))
+		b:SetFixedWidth(b:GetChild(0).minWidth + 24)
+		room = room - b.width - 4
+	end
+	local tt = hd:CreateChild("Text")
+	tt:SetStyleAuto()
+	tt:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	local help = cur and cur.help
+	local hb = help and button(hd, "Help", help)
+	if hb then
+		hb:SetFixedWidth(hb.minWidth)
+		room = room - hb.width - 4
+	end
+	local close = sw.on_close and close_back or sw.on_exit
+	if close then
+		-- An app's own window: the × is its on_exit ([STARPORT_CLOSE]). An
+		-- older client's ui_utils has no close_button: its close_glyph,
+		-- kept at the window's corner, the row's end too
+		local u = ui_utils.safe or ui_utils
+		local x = (u.close_button or u.close_glyph)(hd, sw.frame,
+				function() close() end)
+		x:SetFixedSize(HEAD_H, HEAD_H)
+		room = room - HEAD_H - 4
+	end
+	local title = cur and cur.title or "Server"
+	cut_text(tt, title, room)
+	tt:SetFixedWidth(math.max(0, room))
+	-- What a check reads: the scan has the rectangles
+	local said = (back and "< " .. label or "-") .. " | " .. title ..
+			(close and " | ×" or "")
+	if said ~= sw.head_said then
+		sw.head_said = said
+		log:info("server window: the header " .. said)
+	end
+end
+
+-- The page shown is `key`'s, `title` its title: a page of the sidebar's
+-- when `back` is what top_back() gives, else under the one shown before
+-- (the trail goes back to `key` when it is on it, as a page drawn again)
+-- and `on_back` is what its "< <parent>" does
+server_head = function(key, title, back, on_back, help)
+	local nested = back ~= nil and back ~= show_sidebar and back ~= close_back
+	local t = nested and sw.trail or {}
+	for i = #t, 1, -1 do
+		if t[i].key == key then
+			for j = #t, i, -1 do
+				t[j] = nil
+			end
+			break
+		end
+	end
+	t[#t + 1] = {key = key, title = title or "",
+		back = nested and on_back or nil, help = help}
+	sw.trail, sw.nested = t, nested
+	draw_head()
+end
+
 local function build_frame()
 	local root = magic.ui.root
 	local f = page_window(880)
-	f:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
 	sw.frame = f
 	M.frame = f
+	-- **Its size** ([UI_SERVER_NARROW]; the user: "On small screens, the
+	-- server menu should take the entire screen or at least most of it"):
+	-- on a phone either way up (the UI's root under 600 wide or 500 high)
+	-- the screen less 4 each side; else up to 1000 wide (was 880: the
+	-- Starport listing's rows were cut at the page's right; a line of text
+	-- is some 115 characters, so no wider) and 90 % of the height (was 80).
+	-- simplified: no safe-area insets (nothing in the client reads them);
+	-- a notch's phone in landscape may cover a corner
+	local small = root.width < 600 or root.height < 500
+	local m = small and 4 or 8
+	f:SetFixedWidth(small and root.width - 2 * m or
+			math.min(1000, root.width - 2 * m))
+	-- Narrow: the header row over the sidebar or the page, whichever is
+	-- shown; wide: over the page only, the sidebar the window's height
+	sw.narrow = f.width < 544
+	f:SetLayout(sw.narrow and magic.LM_VERTICAL or magic.LM_HORIZONTAL,
+			sw.narrow and HEAD_GAP or 8, magic.IntRect(8, 8, 8, 8))
+	local function head(parent)
+		sw.head = parent:CreateChild("UIElement")
+		sw.head:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+		sw.head:SetFixedHeight(HEAD_H)
+	end
+	if sw.narrow then
+		head(f)
+	end
 	sw.sidebar = f:CreateChild("UIElement")
 	sw.sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 	sw.building = true
 	draw_sidebar()
 	sw.building = nil
+	local h = math.max(small and root.height - 2 * m or
+			math.floor(root.height * 0.9), sidebar_need())
+	f:SetFixedHeight(h)
 	-- **As tall as its sidebar** (user, 2026-10-09): on a phone turned or
 	-- at a big UI size the entries ran off the screen's bottom. Taller
 	-- than the screen, the client's fit (update_ui_fit) brings the UI's
 	-- scale down for it, and the window takes the width that frees: the
-	-- screen's shape at its height, less the black round it (50) and a
-	-- margin. A scale does not change that shape, so the fit has nothing
-	-- of its own to follow.
-	local h = math.max(math.floor(root.height * 0.8), sidebar_need())
-	f:SetFixedHeight(h)
-	if h + 50 > root.height * 0.98 then
-		f:SetFixedWidth(math.max(f.width, math.floor((h + 50) *
-				root.width / root.height * 0.96) - 50))
+	-- screen's shape at its height, less the margin. A scale does not
+	-- change that shape, so the fit has nothing of its own to follow.
+	if h > root.height - 2 * m then
+		f:SetFixedWidth(math.max(f.width, math.floor((h + 2 * m) *
+				root.width / root.height) - 2 * m))
 	end
 	local inner = f.width - 16
-	sw.narrow = f.width < 544
 	sw.sidebar:SetFixedWidth(sw.narrow and inner or 150)
-	sw.view = f:CreateChild("ScrollView")
+	local col = f
+	if not sw.narrow then
+		col = f:CreateChild("UIElement")
+		col:SetLayout(magic.LM_VERTICAL, HEAD_GAP, magic.IntRect(0, 0, 0, 0))
+		col:SetFixedWidth(inner - 150 - 8)
+		head(col)
+	end
+	sw.view = col:CreateChild("ScrollView")
 	sw.view:SetStyleAuto()
 	sw.view:SetFixedWidth(sw.narrow and inner or inner - 150 - 8)
 	sw.view.scrollBarsAutoVisible = true
@@ -3568,14 +3703,7 @@ local function build_frame()
 	if sw.narrow then
 		sw.view.visible = false
 	end
-	-- Not on the stack, so its own on_close ([CLOSE_GLYPH])
-	local glyph = (ui_utils.safe or ui_utils).close_glyph
-	if sw.on_close then
-		glyph(root, f, function() server_close() end)
-	elseif sw.on_exit then
-		-- An app's own window: the × is its on_exit ([STARPORT_CLOSE])
-		glyph(root, f, function() sw.on_exit() end)
-	end
+	draw_head()
 end
 
 -- The page's element in the window's right side, the last one gone
@@ -3597,17 +3725,13 @@ server_element = function()
 	return p
 end
 
--- An app's page in the window: a Back over its title when there is
--- somewhere to go back to (`back`, a step inside the app's page)
+-- An app's page in the window, its title in the header row; `back`, a
+-- step inside the app's page, is the header's "< <the page before>"
 function M.server_open(title, back)
 	drop_page()
 	local w = server_element()
-	local b = back or top_back()
-	sw.app_back = b
-	if b then
-		button(row(w), "Back", b)
-	end
-	page_text(w, title)
+	sw.app_back = back or top_back()
+	server_head(title, title, back, back)
 	return w
 end
 
@@ -3700,6 +3824,23 @@ function M.server_window(key, on_close, on_exit)
 		M.server_show(server_entries()[1].items[1].key)
 	end
 end
+
+-- A check's `event scan <label>` reads this window too
+-- ([UI_SERVER_NARROW]): the stack's scan reads its top screen, which this
+-- is not on. The window's own line, then ui_utils.scan_ui's under it.
+magic.SubscribeToEvent("command_seq:scan", function(_, data)
+	if not sw.frame then
+		return
+	end
+	local u = ui_utils.safe or ui_utils
+	local label = (data:GetString("Param") or ""):match("^%d*%s*(%S+)") or
+			"scan"
+	local at = sw.frame.screenPosition
+	local out = {string.format("scan %s: server window at %d,%d size %dx%d",
+			label, u.scan_pixels(at.x, at.y, sw.frame.width, sw.frame.height))}
+	u.scan_ui(label, sw.frame, 1, out)
+	log:info(table.concat(out, "\n"))
+end)
 
 -- silent: not going back to what opened it (the game closes it itself)
 server_close = function(silent)

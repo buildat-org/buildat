@@ -36,11 +36,12 @@ echo '{"render_mode": "pbr", "view_range": "90", "distant_detail": "half"}' > "$
 mkdir -p "$d/apps/vanilla/client"
 printf unlit > "$d/apps/vanilla/client/view_render_mode"
 # mode <m>: View's render mode one step down, from the pause menu (at
-# 1100x600, the row vanilla_player_settings_check found); 15 s in the
+# 1100x600 at the automatic UI size, 56 %: the first row of the settings
+# window, 90 % of the root high since [UI_SERVER_NARROW]); 15 s in the
 # game after, past the old server's 10 s stop ([REJOIN_KILLS_SERVER]).
 # The 500 ms after the drop-down's click is its list opening: nothing
 # logs it
-mode(){ printf 'keypress Escape\nwait_log 5000 pause: the menu shown\ndelay 500\nclick Button "Settings..."\nwait_log 5000 Game settings shown\ndelay 1000\nclick DropDownList "▼" 668 120\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 60000 drawing the world %s\ndelay 15000\n' "$1"; }
+mode(){ printf 'keypress Escape\nwait_log 5000 pause: the menu shown\ndelay 500\nclick Button "Settings..."\nwait_log 5000 Game settings shown\ndelay 1000\nclick DropDownList "▼" 668 92\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 60000 drawing the world %s\ndelay 15000\n' "$1"; }
 json(){ python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$F" "$1"; }
 
 # 1.
