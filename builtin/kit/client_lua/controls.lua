@@ -2122,6 +2122,47 @@ local function make_bar(wr)
 			labels(acts) .. (#lefts > 0 and "; the left: " .. labels(lefts) or ""))
 end
 
+-- [KIT_TEXT_PLACEHOLDER] The on-screen control an action is on in play, as
+-- make_bar() labels it (nil: none), for kit.key_text's {key:<action>} and
+-- [<action>] on a touchscreen: the movement's touch_buttons and touch_axes,
+-- Gas and Brake, Jump, Exit, the world's actions; the stick for walking
+function M.touch_label(id)
+	local kind = touch_kind()
+	if id == "use" then
+		return "Tap"
+	elseif id == "exit" then
+		return M.seated() and "Exit" or nil
+	end
+	local tb = touch_buttons()
+	for _, b in ipairs(tb or {}) do
+		if b[2] == id then
+			return b[1]
+		end
+	end
+	if id == "jump" then
+		return not tb and kind ~= "tap" and kind ~= "drive" and "Jump" or nil
+	end
+	local axis = ({forward = {"f", 1}, back = {"f", -1}, right = {"r", 1},
+		left = {"r", -1}})[id]
+	if axis then
+		for _, b in ipairs(touch_axes()) do
+			if b[2] == axis[1] and b[3] * axis[2] > 0 then
+				return b[1]
+			end
+		end
+		if kind == "drive" and axis[1] == "f" then
+			return axis[2] > 0 and "Gas" or "Brake"
+		end
+		return kind ~= "tap" and "the stick" or nil
+	end
+	for _, a in ipairs(M.world_actions()) do
+		if a.name == id then
+			return a.label ~= "" and a.label or a.name
+		end
+	end
+	return nil
+end
+
 -- [KIT_UI_COMPONENTS] Their top (UI y; nil: none): a UI component at the
 -- bottom stays over them; [KIT_TOUCH_THUMBS] with x0, x1 (UI) those over
 -- that stretch only (the stacks stand in the corners)

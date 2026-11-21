@@ -16,6 +16,11 @@ is read from box.c, kit.cpp, client_lua/ and src/interface/aitta.h.
 util/kit_api1_surface_check.sh (`util/api_names.py --kit-check`)
 compares the code with it.
 
+"reserved text {<word>:...}": in a text a client draws, {<word>:...} is
+Kit's ([KIT_TEXT_PLACEHOLDER], api.h's "A text's placeholders"): the
+words listed after it have a meaning, any other is drawn as written and
+warned of, and a later Kit may give it one.
+
 Each line is "<key>" or "<key> | <value>". A value ending in
 [experimental] or [internal] is outside the promise: it may change or go
 in any release (kit.cpp's experimental_names(), a type's
@@ -81,6 +86,9 @@ reserved param own_look | {"default": true, "kind": "bool"}
 reserved param use | {"default": "all", "kind": "string"}
 reserved params.kit_*
 reserved state.kit_*
+reserved text {<word>:...}
+reserved text {key:...}
+reserved text {value:...}
 reserved type_field players | reads_players
 reserved type_field regions | reads_regions
 reserved type_field teams | reads_teams

@@ -469,6 +469,11 @@ def kit_surface():
         srv["reserved ext." + k] = ""
     for k in re.findall(r"k:sub\(1, \d+\) == '(\w+)'", ok_):
         srv["reserved ext.%s*" % k] = ""
+    # [KIT_TEXT_PLACEHOLDER] {<word>:...} in a drawn text: Kit's syntax,
+    # the words it has (kit.cpp's TEXT_PLACEHOLDERS)
+    srv["reserved text {<word>:...}"] = ""
+    for w in cpp_strings(kc, "TEXT_PLACEHOLDERS[] =", "};"):
+        srv["reserved text {%s:...}" % w] = ""
     injected = {}
     for p in re.findall(r'\\"(\w+)\\" is Kit\'s parameter', kc):
         at = kc.index('ps.set("%s", ' % p)

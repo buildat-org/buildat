@@ -2229,7 +2229,8 @@ local function markers()
 				dx, dy = dx * k, dy * k
 			end
 			x, y = math.floor(cx + dx), math.floor(cy + dy)
-			local label = tostring(mk.label == nil and "" or mk.label):sub(1, 64)
+			local label = M.key_text(tostring(mk.label == nil and "" or
+					mk.label):sub(1, 64))
 			-- [KIT_GOALS] the way to it, at the edge
 			if mk.arrow and (behind or k < 1) then
 				label = math.abs(dx) * hh >= math.abs(dy) * hw and
