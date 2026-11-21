@@ -294,8 +294,11 @@ n = {e["id"]: e for e in now["entities"]}
 assert set(o) == set(n), set(o) ^ set(n)
 for i in o:
 	for a, b in zip(o[i].get("components", []), n[i].get("components", [])):
+		# (a parameter added since, e.g. kit/terrain's flatten, is written
+		# back at its default: the old ones as they were)
 		assert a["type"] == b["type"] and a["version"] == b["version"] and \
-			a["params"] == b["params"], (i, a, b)
+			all(b["params"].get(k) == v for k, v in a["params"].items()), \
+			(i, a, b)
 print("ok: alpha.47's Crag Trial save hosted, its %d entities as they were%s" %
 	(len(n), ", written back with \"kit\" 1" if "kit" in now else ""))
 PY
