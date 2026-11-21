@@ -333,6 +333,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 
 	local menu = ui_utils.vertical_menu(root, {min_width = 400})
 	local window = menu.window
+	ui_utils.dim_behind(window, "network permission dialog")
 
 	local function add_text(text)
 		local t = window:CreateChild("Text")
@@ -474,6 +475,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 	root.priority = 1000
 	local width = math.min(560, magic.ui.root.width - 40)
 	local menu = ui_utils.vertical_menu(root, {min_width = width})
+	ui_utils.dim_behind(menu.window, "file picker")
 	local function add_text(text)
 		local t = menu.window:CreateChild("Text")
 		t:SetStyleAuto()

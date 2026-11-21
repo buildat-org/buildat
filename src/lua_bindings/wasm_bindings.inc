@@ -745,6 +745,8 @@ BUILDAT_BINDING("BorderImage.texture:Texture2D", "get", "BorderImage", "texture"
 BUILDAT_BINDING("BorderImage.texture=Texture2D", "set", "BorderImage", "texture")
 BUILDAT_BINDING("BorderImage.tiled:boolean", "get", "BorderImage", "tiled")
 BUILDAT_BINDING("BorderImage.tiled=boolean", "set", "BorderImage", "tiled")
+BUILDAT_BINDING("Window.modalShadeColor:Color", "get", "Window", "modalShadeColor")
+BUILDAT_BINDING("Window.modalShadeColor=Color", "set", "Window", "modalShadeColor")
 BUILDAT_BINDING("View3D:GetViewport():any", "call", "View3D", "GetViewport")
 BUILDAT_BINDING("View3D:QueueUpdate()", "call", "View3D", "QueueUpdate")
 BUILDAT_BINDING("View3D:SetView(Scene,Camera,boolean?):any", "call", "View3D", "SetView")

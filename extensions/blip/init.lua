@@ -841,6 +841,7 @@ local function open_designer(sound, on_save, opts)
 		droot.defaultStyle = root.defaultStyle
 		local dw = droot:CreateChild("Window")
 		dw:SetStyleAuto()
+		ui_utils.dim_behind(dw, "blip import")
 		dw:SetLayout(LM_VERTICAL, 6, magic.IntRect(10, 10, 10, 10))
 		text(dw, "Import a sound")
 		local field = dw:CreateChild("LineEdit")

@@ -4193,6 +4193,10 @@ place.build_window = function()
 	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, S.panel_y or 50,
 			false, "layouts")
 	place.win = w
+	-- (the touch mode's pane is not shaded round: no press off it)
+	if panel.top(w) == w then
+		require("buildat/extension/ui_utils").dim_behind(w, "layouts menu")
+	end
 	local function set(id, fields)
 		send({{op = "set", ent = {id = id, ints = fields.ints,
 				strs = fields.strs}}})

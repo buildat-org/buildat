@@ -4022,6 +4022,16 @@ impl Deref for Window { type Target = BorderImage; fn deref(&self) -> &BorderIma
 impl Window {
 	/// The same object as another class of the list's
 	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// Window.modalShadeColor:Color
+	pub fn modalShadeColor(&self) -> Color {
+		let mut r = call(imports::buildat_c_Window_get_modalShadeColor, &[&H(self.handle()) as &dyn Put]);
+		r.value().as_::<Color>()
+	}
+	/// Window.modalShadeColor=Color
+	pub fn set_modalShadeColor(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Window_set_modalShadeColor, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
 }
 #[repr(transparent)]
 #[derive(Debug)]
@@ -8236,6 +8246,10 @@ mod imports {
 		pub fn buildat_c_BorderImage_get_tiled(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "BorderImage.tiled=boolean"]
 		pub fn buildat_c_BorderImage_set_tiled(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Window.modalShadeColor:Color"]
+		pub fn buildat_c_Window_get_modalShadeColor(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Window.modalShadeColor=Color"]
+		pub fn buildat_c_Window_set_modalShadeColor(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "View3D:GetViewport():any"]
 		pub fn buildat_c_View3D_GetViewport(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "View3D:QueueUpdate()"]

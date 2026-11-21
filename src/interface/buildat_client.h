@@ -703,6 +703,8 @@ BUILDAT_CLIENT_IMPORT("BorderImage.texture:Texture2D", buildat_c_BorderImage_get
 BUILDAT_CLIENT_IMPORT("BorderImage.texture=Texture2D", buildat_c_BorderImage_set_texture)
 BUILDAT_CLIENT_IMPORT("BorderImage.tiled:boolean", buildat_c_BorderImage_get_tiled)
 BUILDAT_CLIENT_IMPORT("BorderImage.tiled=boolean", buildat_c_BorderImage_set_tiled)
+BUILDAT_CLIENT_IMPORT("Window.modalShadeColor:Color", buildat_c_Window_get_modalShadeColor)
+BUILDAT_CLIENT_IMPORT("Window.modalShadeColor=Color", buildat_c_Window_set_modalShadeColor)
 BUILDAT_CLIENT_IMPORT("View3D:GetViewport():any", buildat_c_View3D_GetViewport)
 BUILDAT_CLIENT_IMPORT("View3D:QueueUpdate()", buildat_c_View3D_QueueUpdate)
 BUILDAT_CLIENT_IMPORT("View3D:SetView(Scene,Camera,boolean?):any", buildat_c_View3D_SetView)
@@ -3453,6 +3455,10 @@ class Window: public BorderImage
 public:
 	constexpr Window() {}
 	constexpr explicit Window(unsigned int handle): BorderImage(handle) {}
+	// Window.modalShadeColor:Color
+	::buildat::Color modalShadeColor() const;
+	// Window.modalShadeColor=Color
+	void modalShadeColor(const ::buildat::Color & a1) const;
 };
 class View3D: public Window
 {
@@ -5495,6 +5501,8 @@ inline ::buildat::Texture2D BorderImage::texture() const{ ::buildat::detail::Rep
 inline void BorderImage::texture(const ::buildat::Texture2D & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BorderImage_set_texture, *this, a1); (void)r; }
 inline bool BorderImage::tiled() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BorderImage_get_tiled, *this); return r.boolean(); }
 inline void BorderImage::tiled(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BorderImage_set_tiled, *this, a1); (void)r; }
+inline ::buildat::Color Window::modalShadeColor() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Window_get_modalShadeColor, *this); ::buildat::Color v{}; r.get(v); return v; }
+inline void Window::modalShadeColor(const ::buildat::Color & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Window_set_modalShadeColor, *this, a1); (void)r; }
 inline ::buildat::Value View3D::GetViewport() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_View3D_GetViewport, *this); return r.value(); }
 inline void View3D::QueueUpdate() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_View3D_QueueUpdate, *this); (void)r; }
 inline ::buildat::Value View3D::SetView(const ::buildat::Scene & a1, const ::buildat::Camera & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_View3D_SetView, *this, a1, a2); return r.value(); }

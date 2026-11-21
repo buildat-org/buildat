@@ -424,14 +424,16 @@ local function button_menu_nav(root, options)
 
 	-- The item that is the way back, by its label: "< back", "Back",
 	-- "Cancel", "< back to the launcher" and the like -- what Escape
-	-- presses. nil for a screen with none.
+	-- presses, and a tap beside the screen ([TAP_BACK]). nil for a screen
+	-- with none. ([UI_MODAL_DIM] "Keep": world_menu's delete question's
+	-- cancel, a tap beside it eaten before)
 	function nav:back_item()
 		for _, item in ipairs(items) do
 			local text = item.button:GetChild("ButtonText")
 			local label = text and text.text or ""
 			label = label:lower()
 			if label:sub(1, 1) == "<" or label == "back" or label == "cancel" or
-					label == "ok" or label == "close" then
+					label == "ok" or label == "close" or label == "keep" then
 				return item
 			end
 		end
@@ -2081,6 +2083,21 @@ end
 function M.safe.wants_clicks(window)
 	click_windows[#click_windows + 1] = window
 end
+
+-- [UI_MODAL_DIM] **A menu the user is not to click off shades the rest**
+-- (the user, 2026-11-21): a dialog, a context menu, a window a game opened,
+-- whose click off it closes it or is eaten; not a panel beside the work, nor
+-- a tooltip. The Window draws the shade itself (buildat's Urho3D
+-- Window.cpp), over the whole root just before the window, so it is under
+-- the window and over everything drawn before it, goes with the window
+-- (hidden or removed), follows the root's size and the UI fit, and takes
+-- no clicks. DIM_ALPHA: plain to see, what is under it still legible.
+--   ui_utils.dim_behind(window, name)   window: a Window; name: logged
+local DIM_ALPHA = 0.4
+function M.safe.dim_behind(window, name)
+	window.modalShadeColor = magic.Color(0, 0, 0, DIM_ALPHA)
+	log:info("dim behind: " .. tostring(name))
+end
 function M.safe.clicks_wanted()
 	-- Off the stack, a client screen is gone for good
 	local up = {}
@@ -2334,6 +2351,7 @@ function M.safe.show_message_dialog(message, on_close, copy)
 	window:SetName("show_message_dialog window")
 	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
+	M.safe.dim_behind(window, "message dialog")
 
 	local message_text = window:CreateChild("Text")
 	message_text:SetName("message_text")
@@ -2435,6 +2453,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 	window:SetStyleAuto()
 	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
+	M.safe.dim_behind(window, "confirm dialog")
 
 	local message_text = window:CreateChild("Text")
 	message_text:SetStyleAuto()
@@ -2673,6 +2692,11 @@ function M.safe.scan_ui(label, element, depth, out)
 			end
 			if child.visible == false then
 				line = line .. " hidden"
+			end
+			-- [UI_MODAL_DIM] dim_behind's shade under it
+			if kind == "Window" and select(2, pcall(function()
+						return child.modalShadeColor.a > 0 end)) == true then
+				line = line .. " dimmed"
 			end
 			-- What draws over what among siblings
 			if child.priority ~= 0 then

@@ -1020,6 +1020,7 @@ local function open_structure_menu()
 		end,
 	})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	ui_utils.dim_behind(menu.window, "structures")
 	for _, st in ipairs(STRUCTURES) do
 		local action = function()
 			close_structure_menu()

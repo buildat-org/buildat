@@ -2490,6 +2490,11 @@ function M.define(dst, util)
 
 	util.wc("Window", {
 		inherited_from_by_wrapper = dst.BorderImage,
+		properties = {
+			-- [UI_MODAL_DIM] drawn over the whole root under the window,
+			-- modal or not (buildat's Window.cpp; ui_utils.dim_behind)
+			modalShadeColor = util.simple_property(dst.Color),
+		},
 	})
 
 	-- A UI element that draws a scene of its own. Urho3D renders the scene

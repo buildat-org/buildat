@@ -236,6 +236,7 @@ function SH.more()
 	local w = panel.window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	w.priority = 10
 	w.opacity = 1
+	require("buildat/extension/ui_utils").dim_behind(w, "... menu")
 	-- Hidden until sized and placed (tick): it showed at the top left at the
 	-- text size for a frame (the sweep of 2026-11-12)
 	w.visible = false

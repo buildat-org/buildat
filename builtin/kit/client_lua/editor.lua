@@ -6123,6 +6123,7 @@ function NT.menu(entries, x, y)
 	local w = window(magic.HA_LEFT, magic.VA_TOP, x, y)
 	W.ctx = w
 	w.priority = 10
+	ui_utils.dim_behind(w, "kit menu")
 	for _, en in ipairs(entries) do
 		if type(en) == "string" then
 			text(w, en, DIM)
@@ -6189,6 +6190,7 @@ local function dialog(title, width)
 	w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	ui_utils.dim_behind(w, "kit dialog " .. tostring(title))
 	if width then
 		w:SetFixedWidth(math.min(width, magic.ui.root.width / S.font - 16))
 	end

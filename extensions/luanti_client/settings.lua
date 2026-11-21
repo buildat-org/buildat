@@ -267,6 +267,7 @@ function M.show_pause(o)
 	local root = uistack.main:push({desc = "luanti_client pause"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", "own:ui_utils/res/style.xml")
 	local menu = ui_utils.vertical_menu(root, {min_width = 360})
+	ui_utils.dim_behind(menu.window, "pause menu")
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Paused"

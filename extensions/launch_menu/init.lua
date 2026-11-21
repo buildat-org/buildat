@@ -507,6 +507,7 @@ local function context_menu(e, x, y)
 	log:info("launch_menu: the actions of " .. e.label)
 	local root = uistack.main:push({desc = "the actions of " .. e.label})
 	local menu = ui_utils.vertical_menu(root)
+	ui_utils.dim_behind(menu.window, "the actions of " .. e.label)
 	for _, a in ipairs(e.actions) do
 		menu:add(a.label, function()
 			uistack.main:pop(root)

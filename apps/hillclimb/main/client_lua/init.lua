@@ -1059,6 +1059,7 @@ local function open_hill_menu()
 		min_height = row_h, spacing = values.circuit == 1 and 2 or 4,
 		padding = magic.IntRect(10, 6, 10, 6)})
 	m.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	ui_utils.dim_behind(m.window, "hill menu")
 	local title = m.window:CreateChild("Text")
 	title:SetStyleAuto()
 	local ground = values.page == "ground"

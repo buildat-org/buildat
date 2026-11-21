@@ -148,6 +148,7 @@ function M.safe.new(o)
 		local vm = ui_utils.vertical_menu(root, {min_width = 260})
 		local w = vm.window
 		w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		ui_utils.dim_behind(w, "pause menu")
 		-- [SERVER_VERSION_SHOWN] The server's version on top, small and dim
 		-- (an older client has no server_version: no label)
 		local version = buildat.server_version and buildat.server_version()

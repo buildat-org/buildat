@@ -50,6 +50,7 @@ local function dialog()
 	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	require("buildat/extension/ui_utils").dim_behind(w, "kit dialog prefab")
 	return w
 end
 

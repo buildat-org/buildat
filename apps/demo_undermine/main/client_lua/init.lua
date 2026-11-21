@@ -623,6 +623,7 @@ local function open_structure_menu()
 		end,
 	})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	ui_utils.dim_behind(menu.window, "structures")
 	for _, st in ipairs(STRUCTURES) do
 		menu:add(st.label, function()
 			-- Where the player stands, so a building goes up around them
