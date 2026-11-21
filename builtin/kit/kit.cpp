@@ -9870,7 +9870,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// What the publish form and the Publishing page show: {author, key
-	// (the public half), aittas: [{url, bound: "" or why}], bound (one
+	// (the public half), aittas: [{url, bound: "" or why}], default_aitta
+	// (the official one's origin), bound (one
 	// Aitta binds it), may, last: {name: the version last published}};
 	// an admin's page also people: [{name, admin, builder, publisher}] and
 	// the log
@@ -9897,6 +9898,11 @@ struct Module: public interface::Module, public Interface
 			as.append(o);
 		}
 		j.set("aittas", as);
+		// The page's Add offers it while the list lacks it (a check's
+		// BUILDAT_AITTA_DEFAULT, as client/core/starport/init.lua's)
+		const char *e = getenv("BUILDAT_AITTA_DEFAULT");
+		const ss_ d = interface::aitta::listed_origin(e ? e : "");
+		j.set("default_aitta", d.empty() ? ss_("https://aitta.buildat.org") : d);
 		j.set("bound", bound);
 		const json::Value log = pub_log();
 		for(unsigned i = 0; i < log.size(); i++)

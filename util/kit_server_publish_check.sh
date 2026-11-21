@@ -13,7 +13,9 @@
 #      account); kitbob joins, a builder by set_builder; his server_publish
 #      refused: no right.
 #   2. The Server window's Admin / Publishing: the key made (author
-#      crags; publish.key mode 600), the Aitta listed, not bound; bound on
+#      crags; publish.key mode 600); (4z37zb) the list's Add offering the
+#      default Aitta while unlisted, else https://, a bad address refused,
+#      Remove; the Aitta listed, not bound; bound on
 #      the Aitta (its bind request); Check again: bound; kitbob given the
 #      right (page.png). (4z37i) Games..., the running game's Publish this
 #      game...: the editor's form, as crags (games_publish.png), cancelled.
@@ -345,12 +347,33 @@ pub=$(grep -aoP "the server's key, author crags, its public half \K[0-9a-f]+" "$
 kf=$(find "$t/user" -name publish.key | head -1)
 [ -n "$kf" ] || fail "no publish.key in $t/user"
 [ "$(stat -c %a "$kf")" = 600 ] || fail "$kf is mode $(stat -c %a "$kf")"
+# (4z37zb) The list's Add and Remove: Add offers the server's default Aitta
+# (check_lib's BUILDAT_AITTA_DEFAULT) while the list lacks it, else https://
+D=$(printf %s "${BUILDAT_AITTA_DEFAULT%/}" | tr A-Z a-z)
+DR=$(printf %s "$D" | sed 's/[.]/\\./g')
+P0="kit editor: the Publishing page, key made"
+await "$CL" 0 5 "$P0, 0 Aittas, 0 published, add $DR\s*$"
 m=$(mark "$SL")
-step 10 "kit editor: the Publishing page, key made, 1 Aittas" "frames 3" \
-	'click LineEdit "publishing aittas"' "delay 300" "text $A" "frames 2" \
-	'click Button "publishing save aittas"'
-await "$SL" "$m" 5 "Publishing: kitboss set the Aittas: "
+step 10 "$P0, 1 Aittas, 0 published, add https://\s*$" "frames 3" \
+	'click Button "publishing add aitta button"'
+await "$SL" "$m" 5 "Publishing: kitboss set the Aittas: \[\"$DR\"\]"
+await "$SL" "$m" 10 "Publishing: $DR "
+step 10 "kit editor: publishing: Refused: not an Aitta's address, http\(s\)://host\[:port\]: ftp://nope" \
+	"frames 3" 'click LineEdit "publishing add aitta"' "delay 300" "keydown ctrl" \
+	"keypress a" "keyup ctrl" "text ftp://nope" "frames 2" \
+	'click Button "publishing add aitta button"'
+m=$(mark "$SL")
+step 10 "$P0, 2 Aittas, 0 published, add https://\s*$" "frames 3" \
+	'click LineEdit "publishing add aitta"' "delay 300" "keydown ctrl" \
+	"keypress a" "keyup ctrl" "text $A/" "frames 2" \
+	'click Button "publishing add aitta button"'
+await "$SL" "$m" 5 "Publishing: kitboss set the Aittas: \[\"$DR\",\"$AR\"\]"
 await "$SL" "$m" 10 "Publishing: $AR "
+m2=$(mark "$SL")
+step 10 "$P0, 1 Aittas, 0 published, add $DR\s*$" "frames 3" \
+	"click Button \"publishing remove $D\""
+await "$SL" "$m2" 5 "Publishing: kitboss set the Aittas: \[\"$AR\"\]"
+echo "ok: the Aitta list: Add offered $D on the empty list, https:// once listed; ftp://nope refused; $A/ added as $A; Remove took $D out"
 seen "$SL" "$m" "Publishing: $AR binds" && fail "bound before the bind ($SL)"
 printf 'wait_log_any 20000 ai: {"id":1,\nquit\n' > "$t/bind.cmds"
 DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_AITTA_CREATE=1 \
