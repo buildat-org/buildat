@@ -108,11 +108,8 @@ namespace interface
 // a kit/ui_text's or kit/ui_bar's value). Any other word is drawn as
 // written, and an edit setting it, Play and get_goal_warnings warn of it
 // (kit.cpp's placeholder_warnings()): a later Kit may give
-// it a meaning, so a game must not use it for one of its own.
-// [KIT_DEPRECATE] "[<action>]", from before, still draws "[its key]"
-// ("[no key]" with none) but is deprecated: removable at Kit API level 2
-// (doc/kit_api1.txt's Deprecations). The same warnings name {key:<action>}
-// for it.
+// it a meaning, so a game must not use it for one of its own. A
+// "[<word>]" is drawn as written.
 // Outside the promise (any release may change them):
 // - what is marked experimental: generators (on_build, c:child, c:link,
 //   c:voxel_box, c.entities, c.move_lib, c:generate, the "points" keys `values`
@@ -511,8 +508,7 @@ namespace interface
 // - Damage is `type` everywhere: c:hurt{type}, c:explode{type},
 //   c:died(by, type), on_died(c, player, by, type).
 // - A type field giving read access is reads_*: reads_players,
-//   reads_teams, reads_regions, reads_voxels (players, teams and regions
-//   = true of before are read as them, warned of; put_type refuses them).
+//   reads_teams, reads_regions, reads_voxels.
 // - A label in a signal's type, "string:<label>", is free text the editor
 //   shows ("string:player", "string:team", ...); a link does not read it.
 // Renamed in 4z37j (each type's migrate takes a placed one forward):
@@ -723,8 +719,7 @@ namespace interface
 //   kit.press_action(name, down) (a game action, a type's `actions`,
 //   pressed or let go as by its key), kit.key_down(id) (a key action held),
 //   kit.key_name(id) (its key's name) and kit.key_text(s) (each {key:id}
-//   and the deprecated "[id]" in s as this client's key, as signs show
-//   it), kit.shared, kit.shake,
+//   in s as this client's key, as signs show it), kit.shared, kit.shake,
 //   kit.effect, kit.mark and kit.clear_marks below. kit.internal is the
 //   whole client module, the editor's too: outside Kit API 1 (it may
 //   change in any release; the apps that host Kit use it, and publishing a

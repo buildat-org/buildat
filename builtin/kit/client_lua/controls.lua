@@ -2123,8 +2123,8 @@ local function make_bar(wr)
 end
 
 -- [KIT_TEXT_PLACEHOLDER] The on-screen control an action is on in play, as
--- make_bar() labels it (nil: none), for kit.key_text's {key:<action>} and
--- [<action>] on a touchscreen: the movement's touch_buttons and touch_axes,
+-- make_bar() labels it (nil: none), for kit.key_text's {key:<action>} on
+-- a touchscreen: the movement's touch_buttons and touch_axes,
 -- Gas and Brake, Jump, Exit, the world's actions; the stick for walking
 function M.touch_label(id)
 	local kind = touch_kind()

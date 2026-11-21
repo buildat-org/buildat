@@ -74,18 +74,9 @@ for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships
 			assert "/" not in v or v in known, (name, r["name"], v)
 		key = re.sub(r"\W+", "_", scene(r) + "_" + r["name"])
 		print("%s_%s=%d" % (pre, key, r["id"]))
-# [KIT_DEPRECATE] no template's text has the old key hint [<action>]
-# (kit.cpp's old_key_hints(): {key:<action>} instead)
-import glob
-for f in glob.glob(here + "/apps/workbench/templates/*/composition.json"):
-	for r in json.load(open(f))["entities"]:
-		for c in r.get("components", []):
-			for k, v in c.get("params", {}).items():
-				assert not (isinstance(v, str) and re.search(r"\[[a-z][a-z0-9_]*\]", v)), \
-						(f, r["name"], k, v)
 PY
 . "$t/ids.sh"
-echo "ok: the templates' files (no old key hint [<action>] in their texts)"
+echo "ok: the templates' files"
 
 cd "$here/Build"
 b="$here/Build/bin/buildat"

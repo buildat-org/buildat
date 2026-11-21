@@ -427,10 +427,16 @@ def kit_surface():
     keys |= set(re.findall(r"^\s*e\.(\w+) = ", env[:env.index("\nend")], re.M))
     for g in keys:
         srv["server env " + g] = ""
+    # (the box's Lua 5.1 libs, less the names new_env() sets nil)
+    gone = set()
+    for mm in re.finditer(r"^\s*((?:e\.\w+\.\w+,\s*)*e\.\w+\.\w+) = nil\b",
+            env[:env.index("\nend")], re.M):
+        gone |= set(re.findall(r"e\.(\w+\.\w+)", mm.group(1)))
     for lib, f in (("string", "lstrlib.c"), ("table", "ltablib.c")):
         src = kit_read(KIT + "/box/lua/" + f)
         for n in re.findall(r'\{"(\w+)", \w+\}', src):
-            srv["server env %s.%s" % (lib, n)] = ""
+            if lib + "." + n not in gone:
+                srv["server env %s.%s" % (lib, n)] = ""
     probe = "local function k(t) local r = {} for n in pairs(t) do " \
             "r[#r + 1] = n end table.sort(r) return r end "
     (ok1, a1), (ok2, a2) = kit_box([
@@ -454,15 +460,16 @@ def kit_surface():
         srv["server signal_type " + t] = ""
     # Reserved: kit_ in a type's params and state (type_table_faults()),
     # ext's player and kit_ (box.c's ext_ok()), the parameters Kit puts on
-    # a type (load_type()), the type fields read as their new names
+    # a type (load_type()), the type names read as their new ones
     a = kc.index("static sv_<ss_> type_table_faults(")
     tf = kc[a:kc.index("\n\t}\n", a)]
     pre_k = re.search(r'compare\(0, \d+, "(\w+)"\)', tf).group(1)
     for k in re.search(r"for\(const char \*k : \{([^}]*)\}\)", tf).group(1).split(","):
         srv["reserved %s.%s*" % (k.strip().strip('"'), pre_k)] = ""
-    old_ = re.search(r'if\(([^)]*)\)\n\s*out\.push_back\(k\+" = true is reads_', tf)
-    for old in re.findall(r'k == "(\w+)"', old_.group(1)):
-        srv["reserved type_field " + old] = "reads_" + old
+    # [KIT_WORLD_RENAME] the old type names full_type() reads as the new
+    a = kc.index("ss_ full_type(const ss_ &type)")
+    for old in re.findall(r'type == "(kit/\w+)"', kc[a:kc.index("\n\t}\n", a)]):
+        srv["reserved type " + old] = ""
     ok_ = pre[pre.index("local function ext_ok("):]
     ok_ = ok_[:ok_.index("\n\tend\n")]
     for k in re.findall(r"k == '(\w+)'", ok_):
@@ -474,9 +481,6 @@ def kit_surface():
     srv["reserved text {<word>:...}"] = ""
     for w in cpp_strings(kc, "TEXT_PLACEHOLDERS[] =", "};"):
         srv["reserved text {%s:...}" % w] = ""
-    # [KIT_DEPRECATE] the old key hint, while input.lua's key_text reads it
-    if 's:gsub("%[([%w_]+)%]"' in kit_read(KIT + "/client_lua/input.lua"):
-        srv["reserved text [<action>]"] = ""
     injected = {}
     for p in re.findall(r'\\"(\w+)\\" is Kit\'s parameter', kc):
         at = kc.index('ps.set("%s", ' % p)

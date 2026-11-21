@@ -19,8 +19,7 @@ compares the code with it.
 "reserved text {<word>:...}": in a text a client draws, {<word>:...} is
 Kit's ([KIT_TEXT_PLACEHOLDER], api.h's "A text's placeholders"): the
 words listed after it have a meaning, any other is drawn as written and
-warned of, and a later Kit may give it one. "reserved text [<action>]"
-is the old key hint, deprecated (below).
+warned of, and a later Kit may give it one.
 
 Each line is "<key>" or "<key> | <value>". A value ending in
 [experimental] or [internal] is outside the promise: it may change or go
@@ -57,10 +56,10 @@ src/interface/aitta.h) reaches <level>, the name stays as an alias of
 its replacement; from that level on, it may be removed or changed, and
 the check lets it.
 
-deprecated: reserved text [<action>] | 2 | {key:<action>}
-  ([KIT_DEPRECATE]) kit.key_text's old key hint, "[<action>]" drawn as
-  "[its key]"; Kit warns of it in an authored text as it does of an
-  unknown {<word>:...}.
+deprecated: reserved type kit/world | 2 | kit/terrain
+deprecated: reserved type kit/world_region | 2 | kit/terrain_region
+  ([KIT_WORLD_RENAME]) a composition, prefab or save naming the old type
+  reads as the new.
 
 The listing
 -----------
@@ -90,13 +89,11 @@ reserved param own_look | {"default": true, "kind": "bool"}
 reserved param use | {"default": "all", "kind": "string"}
 reserved params.kit_*
 reserved state.kit_*
-reserved text [<action>]
 reserved text {<word>:...}
 reserved text {key:...}
 reserved text {value:...}
-reserved type_field players | reads_players
-reserved type_field regions | reads_regions
-reserved type_field teams | reads_teams
+reserved type kit/world
+reserved type kit/world_region
 server c.aim
 server c.body | [experimental]
 server c.box
@@ -209,7 +206,6 @@ server env string.char
 server env string.dump
 server env string.find
 server env string.format
-server env string.gfind
 server env string.gmatch
 server env string.gsub
 server env string.len
@@ -221,13 +217,9 @@ server env string.sub
 server env string.upper
 server env table
 server env table.concat
-server env table.foreach
-server env table.foreachi
-server env table.getn
 server env table.insert
 server env table.maxn
 server env table.remove
-server env table.setn
 server env table.sort
 server env tonumber
 server env tostring
