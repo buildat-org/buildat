@@ -130,6 +130,8 @@ return {
 		},
 	},
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	outputs = {lap = "none", fire = "number", smash = "number", ram = "string"},
 	movement = {body = BODY, raw_keys = true, touch = "drive", bodies = true,
 		-- (4z37i: Brake, Gas, Handbrake, each brake beside Gas)

@@ -28,6 +28,9 @@ return {
 		what = "What players keep from one round to the next.",
 	},
 	root = true,
+	-- [KIT_SINGLE] simplified: game-wide, the first anywhere is used; one
+	-- a holder refused at least (one a game is the upgrade)
+	single = true,
 	between_plays = true,
 	params = {
 		keep_inventory = {type = "bool", default = false},

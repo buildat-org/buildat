@@ -98,6 +98,8 @@ end
 return {
 	version = 1,
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	controls = true,
 	params = {
 		camera = {type = "string", default = "first_person",

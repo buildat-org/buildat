@@ -22,6 +22,8 @@ return {
 		what = "A movement: players walk to where they click.",
 	},
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	-- [KIT_ZONE_SHAPES] zones meet its body box, not its point
 	movement = {body = BODY, touch = "tap", click = true, zone = "box"},
 	params = {

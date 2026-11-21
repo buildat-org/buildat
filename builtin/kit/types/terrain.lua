@@ -71,6 +71,8 @@ return {
 		what = "What the world is generated from: the generator, seed, materials and biome.",
 	},
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	world = true,
 	params = {
 		generator = {type = "string", default = "flat",

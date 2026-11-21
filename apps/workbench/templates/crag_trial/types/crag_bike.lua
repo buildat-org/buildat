@@ -94,6 +94,8 @@ return {
 		outputs = {crash = "The rider's head hit something; the rider goes back to the start a second later."},
 	},
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	outputs = {crash = "none"},
 	movement = {body = BODY, raw_keys = true, touch = "drive",
 		touch_buttons = {{"Turn", "jump"}},

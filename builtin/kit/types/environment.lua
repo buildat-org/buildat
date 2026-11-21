@@ -84,6 +84,8 @@ end
 return {
 	version = 1,
 	root = true,
+	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
+	single = true,
 	environment = true,
 	params = {
 		sky = {cat = "look", type = "string", default = "#8cadd9"},
