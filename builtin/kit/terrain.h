@@ -75,7 +75,9 @@
 // **The generators** are native and fill a column from its top cell: the
 // top role there (riverbed under the sea and BEACH over it), filler below
 // it, stone below that, water from over the ground up to sea_level. flat: the top at
-// level; noise: level + height * fbm(x / spread, z / spread, seed);
+// level; noise: level + height * fbm(x / spread, z / spread, seed)
+// ([KIT_TERRAIN_FLATTEN] times Flatten's weight with flatten on: level
+// round the scene's parts on the ground);
 // valleys: Luanti's valleys mapgen's surface (luanti_mapgen's
 // surface_map, mgvalleys_river_size 0: its valleys, no river channels;
 // its 3D fill left out, so no overhangs) + level. Each is a function of
@@ -913,6 +915,50 @@ inline json::Value merge_sets(const json::Value &base, const json::Value &over)
 	return out;
 }
 
+// [KIT_TERRAIN_FLATTEN] Where a noise ground is flat at its level: round
+// the boxes of the scene's parts on the ground (kit.cpp flatten_boxes()),
+// flat to FLAT past a box, the hills back over RAMP more. Made once a
+// generation and read from worldgen's thread (not changed after)
+struct Flatten
+{
+	static constexpr float FLAT = 1, RAMP = 8;
+	static const int CELL = 16;
+	sv_<std::array<float, 4>> boxes; // x0, z0, x1, z1
+	std::unordered_map<int64_t, sv_<uint32_t>> cells; // the boxes near a CELL
+	static int64_t key(int cx, int cz)
+	{
+		return (int64_t)((uint64_t)(uint32_t)cx << 32 | (uint32_t)cz);
+	}
+	void add(float x0, float z0, float x1, float z1)
+	{
+		const float m = FLAT + RAMP;
+		const uint32_t i = (uint32_t)boxes.size();
+		boxes.push_back({{x0, z0, x1, z1}});
+		for(int cz = (int)std::floor((z0 - m) / CELL);
+				cz <= (int)std::floor((z1 + m) / CELL); cz++)
+			for(int cx = (int)std::floor((x0 - m) / CELL);
+					cx <= (int)std::floor((x1 + m) / CELL); cx++)
+				cells[key(cx, cz)].push_back(i);
+	}
+	// 0 on a box (and FLAT past it), 1 from RAMP further on, smooth between
+	float weight(float x, float z) const
+	{
+		auto it = cells.find(key((int)std::floor(x / CELL),
+				(int)std::floor(z / CELL)));
+		if(it == cells.end())
+			return 1;
+		float t = 1;
+		for(uint32_t i : it->second){
+			const std::array<float, 4> &b = boxes[i];
+			const float dx = std::max(std::max(b[0] - x, x - b[2]), 0.0f),
+					dz = std::max(std::max(b[1] - z, z - b[3]), 0.0f);
+			t = std::min(t, std::max(0.0f, std::min(1.0f,
+					(std::sqrt(dx * dx + dz * dz) - FLAT) / RAMP)));
+		}
+		return t * t * (3 - 2 * t);
+	}
+};
+
 // The World's parameters (types/terrain.lua)
 struct Params
 {
@@ -923,6 +969,10 @@ struct Params
 			depth = 64;
 	// [KIT] stage 4f: caves and the biome's decorations
 	bool caves = false, decorations = true;
+	// [KIT_TERRAIN_FLATTEN] noise flat round the parts (the parameter), and
+	// where (set by kit.cpp's apply_world(); none: nowhere)
+	bool flatten = true;
+	sp_<const Flatten> flat;
 
 	// A column whose top is under this is the riverbed's (KIT_BEACH)
 	int sand_to() const
@@ -954,6 +1004,7 @@ struct Params
 		caves = j.get("caves").is_true();
 		decorations = !j.get("decorations").is_boolean() ||
 				j.get("decorations").is_true();
+		flatten = !j.get("flatten").is_boolean() || j.get("flatten").is_true();
 		// [KIT_NO_WORLD] No ground at all: the empty generator's (nothing
 		// generated), no sea, border, caves or decorations
 		if(none()){
@@ -986,9 +1037,12 @@ struct Heights
 
 	float at(float x, float z)
 	{
-		if(p.generator == "noise")
-			return p.level + p.height * interface::noise::fbm2(
-					x / p.spread, z / p.spread, p.seed, 4, 0.5f);
+		if(p.generator == "noise"){
+			const float w = p.flat ? p.flat->weight(x, z) : 1;
+			return p.level + (w <= 0 ? 0 : w * p.height *
+					interface::noise::fbm2(x / p.spread, z / p.spread, p.seed,
+					4, 0.5f));
+		}
 		if(p.generator == "valleys" && valleys){
 			float h = 0;
 			valleys->surface_map(x, z, 1, 1, 1, &h);
