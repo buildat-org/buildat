@@ -32,7 +32,10 @@
 --   (util/kit_hud_atlas.py; the cell floor(f * 32)), tinted. A label wider
 --   than its shape shrinks down to 8 pixels, then is clipped; no wrapping
 --   inside a bar. `blink_below` (a fraction of a bar's range, 0 off) blinks
---   it. In a text: {value}, {value:time} (m:ss), {value:int} (none yet: 0).
+--   it. In a text: {value}, {value:time} (m:ss), {value:int} (none yet: 0),
+--   [KIT_RECORDS] {value:time1} (12.3, 1:02.3; none yet: 0.0); a
+--   kit/stopwatch's running value counts on here (shown_text()), and a
+--   text's clear_after clears each value set after that many seconds.
 --   **Stacking**: a panel's `layout` "column" or "row" stacks its shown
 --   children by order (then id) with its `gap`, a hidden one leaving no
 --   gap, their x and y unused; a width or height of 0 fits it to them and
@@ -244,10 +247,19 @@ end
 
 local function shown_text(s, value)
 	local v = value
-	if type(v) == "table" then
+	-- [KIT_RECORDS] a kit/stopwatch's running time, {since = the server's
+	-- c.now at its 0}: the seconds now by the shared time (controls.lua's),
+	-- a tenth down so it never shows ahead; none yet: 0
+	local run = type(v) == "table" and tonumber(v.since)
+	local n
+	if run then
+		local now = M.shared_time and M.shared_time()
+		n = math.floor(math.max(0, now and now - run or 0) * 10) / 10
+		v = string.format("%.1f", n)
+	elseif type(v) == "table" then
 		v = network.write_json(v)
 	end
-	local n = tonumber(v)
+	n = n or tonumber(v)
 	v = tostring(v == nil and "" or v):sub(1, 200)
 	s = tostring(s or ""):gsub("{value:time}", function()
 		if not n then
@@ -255,6 +267,15 @@ local function shown_text(s, value)
 		end
 		local t = math.max(0, math.floor(n + 0.5))
 		return string.format("%d:%02d", math.floor(t / 60), t % 60)
+	end):gsub("{value:time1}", function()
+		-- [KIT_RECORDS] to a tenth: 12.3, past a minute 1:02.3
+		if not n and v ~= "" then
+			return v
+		end
+		local t = math.max(0, math.floor((n or 0) * 10 + 0.5) / 10)
+		local m = math.floor(t / 60)
+		return m > 0 and string.format("%d:%04.1f", m, t - m * 60) or
+				string.format("%.1f", t)
 	end):gsub("{value:int}", function()
 		-- ([KIT_SHIP] none yet, a count before its first: 0)
 		return n and string.format("%.0f", n) or (v == "" and "0" or v)
@@ -1494,6 +1515,21 @@ local function update()
 					r.on = false
 				end
 				value = state(r.n, id, "value")
+				-- [KIT_RECORDS] clear_after: each value set (its count, sets)
+				-- shown that long, then none. simplified: from when this client
+				-- saw it (an element made anew, a scene come back to, shows
+				-- the last one again); a server stamp would cut it to the rest
+				local clear = tonumber(u.clear_after) or 0
+				if clear > 0 then
+					local sets = state(r.n, id, "sets")
+					local now = buildat.get_time_us() / 1e6
+					if sets ~= r.sets then
+						r.sets, r.set_at = sets, now
+					end
+					if r.set_at and now - r.set_at >= clear then
+						value = nil
+					end
+				end
 				-- [KIT_GOALS] a goal with no line
 				if u.stack and tostring(u.text or "") == "" then
 					r.on, r.empty = false, true
@@ -1521,6 +1557,7 @@ local function update()
 			end
 			r.pw, r.ph, r.top = pw, ph, top
 			local text = shown_text(u.text, value)
+			r.counting = type(value) == "table" and tonumber(value.since) ~= nil
 			if u.kind == "button" and text == "" and u.action == "pause_menu" then
 				text = "Menu"
 			elseif u.kind == "button" and u.action == "mute" then
@@ -1963,8 +2000,13 @@ local function update()
 							tostring(r.value) or ", nobody") or ""),
 					((r.text .. (r.last_line and " | " .. r.last_line or "")):gsub(
 							"\n", " | ")))
-			if line ~= r.log then
-				r.log = line
+			-- ([KIT_RECORDS] a running kit/stopwatch time said once a
+			-- whole second, its tenths and its size by them left out of
+			-- the comparison)
+			local key = r.counting and line:gsub(" at %-?%d+,%-?%d+ %d+x%d+", "")
+					:gsub("(%d)%.%d", "%1") or line
+			if key ~= r.log then
+				r.log = key
 				local off = sp.x < bx or sp.y < by or sp.x + w > bx + sw or
 						sp.y + h > by + sh
 				log:info(line .. ((off and r.el.visible) and " OFF SCREEN" or ""))

@@ -1,13 +1,17 @@
--- Crag Trial's run, each rider's own: a clock from the start (a tenth at a
--- time), the gems taken (every entity linked to its input gem: all of them
--- open the finish) and the best time, on their screen (hud, to a
--- kit/ui_text whose to is "player"). A crash (crag_bike's output; the bike
--- goes back by itself), a hazard (a kit/trigger_zone's entered: back to
--- `start`) or the finish with every gem (finished, the time; back to
--- `start`) starts the run over: the clock at 0, every linked gem back (and
--- reset, for more). [CRAG_BEST_RESET] The best times are kept state, by the
+-- Crag Trial's run, each rider's own: the gems taken (every entity linked
+-- to its input gem: all of them open the finish), on their screen (hud, to
+-- a kit/ui_text whose to is "player"; what just happened on note, to one
+-- that clears itself), [KIT_RECORDS] the clock a kit/stopwatch's (go starts
+-- it, stop stops it at the finish, reset puts it at 0; its elapsed comes
+-- back here) and the best times a kit/records' (the stopwatch's elapsed to
+-- its time; its best and new_best back here for the result). A crash
+-- (crag_bike's output; the bike goes back by itself), a hazard (a
+-- kit/trigger_zone's entered: back to `start`) or the finish with every gem
+-- (finished, the time; back to `start`) starts the run over: the clock at 0
+-- for a second, then from 0, every linked gem back (and reset, for more).
+-- [CRAG_BEST_RESET] The best times are the kit/records' kept state, by the
 -- rider's name: play never resets them, a builder's "Clear kept state" does;
--- the five best go out on board (a kit/sign's value) as they change.
+-- its board (to a kit/sign's value) the five best.
 -- [KIT_LOBBY] With a kit/lobby's entered linked to start: each rider's clock
 -- from their own Play or Again, their gems, crashes and finish counted only
 -- then; the finish their result (the time and the best) and the run over.
@@ -19,7 +23,7 @@
 local function view(c, by)
 	local r = c.state.runs[by]
 	if not r then
-		r = {t = 0, got = 0}
+		r = {got = 0}
 		c.state.runs[by] = r
 	end
 	return r
@@ -37,36 +41,12 @@ local function waits(c)
 	return #(c.linked_in.start or {}) > 0
 end
 
--- Its line; a note (what just happened) for two seconds
+-- Its line: the gems; a note (what just happened) to its own text
 local function show(c, by, r, note)
+	c:emit("hud", "Gems " .. r.got .. "/" .. gems(c) ..
+			(r.got >= gems(c) and "   The finish is open" or ""), by)
 	if note then
-		r.note, r.note_left = note, 2
-	end
-	local all = r.got >= gems(c)
-	local best = c.state.bests[c:name(by)]
-	note = (r.note_left or 0) > 0 and r.note or all and "The finish is open" or nil
-	c:emit("hud", "Time " .. tenths(math.max(0, r.t)) .. (best and
-			"   Best " .. tenths(best) or "") .. "   Gems " .. r.got .. "/" ..
-			gems(c) .. (note and "   " .. note or ""), by)
-end
-
--- The five best, "1. name 12.3|2. ...", out when it changed
-local function board(c)
-	local all = {}
-	for name, t in pairs(c.state.bests) do
-		all[#all + 1] = {name, t}
-	end
-	table.sort(all, function(a, b)
-		return a[2] < b[2] or a[2] == b[2] and a[1] < b[1]
-	end)
-	local lines = {}
-	for i = 1, math.min(5, #all) do
-		lines[i] = i .. ". " .. all[i][1] .. " " .. tenths(all[i][2])
-	end
-	local text = table.concat(lines, "|")
-	if text ~= c.state.board then
-		c.state.board = text
-		c:emit("board", text)
+		c:emit("note", note, by)
 	end
 end
 
@@ -80,10 +60,11 @@ local function open(c, by, r)
 	end
 end
 
--- Over from the start: the clock held a second (the bike's crash, a teleport)
+-- Over from the start: the clock at 0, from 0 a second later (the bike's
+-- crash, a teleport)
 local function over(c, by, why)
 	local r = view(c, by)
-	r.t, r.got = -1, 0
+	r.got = 0
 	for _, id in ipairs(c.linked_in.gem or {}) do
 		c:send(id, "reset", nil, by)
 	end
@@ -91,6 +72,22 @@ local function over(c, by, why)
 	open(c, by, r)
 	c:log(c:name(by) .. ": " .. why .. ", the run starts over")
 	show(c, by, r, why:sub(1, 1):upper() .. why:sub(2))
+	if r.playing or not waits(c) then
+		c:after(1, "go", {player = by})
+	end
+end
+
+-- The finish's time (the stopwatch's elapsed) and best (the records')
+local function finished(c, by, r, best)
+	local t, new = r.time, r.new
+	r.time, r.new = nil, nil
+	local name = c:name(by)
+	c:emit("result", "Time " .. tenths(t) .. (best and "|Best " .. tenths(best) or
+			"") .. (new and "|Your best yet" or ""), by)
+	c:emit("finished", t, by)
+	c:log(name, "finished in", tenths(t), new and "(best)" or "")
+	over(c, by, "finished in " .. tenths(t) .. (new and ", the best" or ""))
+	c:teleport(nil, {entity = c.params.start, yaw = 90})
 end
 
 return {
@@ -100,20 +97,25 @@ return {
 	linked_in = true,
 	about = {
 		group = "Game",
-		what = "Crag Trial's run: each rider's clock, gems, finish and best time.",
+		what = "Crag Trial's run: each rider's gems, finish and result, timed by a kit/stopwatch, the bests a kit/records'.",
 		inputs = {
 			start = "The rider's run starts (a kit/lobby's entered); the clock starts from 0.",
 			gem = "The rider took a gem. Every entity linked here is a gem needed to finish.",
 			crash = "The rider crashed: the run starts over.",
 			hazard = "The rider touched a hazard: back to the start.",
 			finish = "The rider reached the finish; it counts as a time if every gem is taken.",
+			elapsed = "The run's time at the finish (the kit/stopwatch's elapsed).",
+			best = "The rider's best time (the kit/records' best): the finish's result.",
+			new_best = "The finish was the rider's best yet (the kit/records' new_best).",
 		},
 		outputs = {
-			hud = "The rider's HUD line. Value: time, best time and gems.",
-			reset = "The run started over (the linked gems come back by themselves).",
+			hud = "The rider's HUD line. Value: the gems.",
+			note = "What just happened, for a kit/ui_text that clears itself. Value: the line.",
+			go = "The rider's clock starts (a kit/stopwatch's start), a second after the run started over.",
+			stop = "The rider reached the finish with every gem: their clock stops (a kit/stopwatch's stop).",
+			reset = "The run started over (the linked gems come back by themselves; the clock at 0).",
 			finished = "A run finished. Value: its time.",
 			result = "A run finished. Value: \"Time 12.3|Best 11.0\", for the rider's result card.",
-			board = "The five best times as they change. Value: \"1. name 12.3|2. ...\".",
 		},
 		params = {
 			start = "The entity a rider is put back at after a hazard or the finish.",
@@ -124,37 +126,27 @@ return {
 	},
 	state = {
 		runs = {default = {}, per_player = true},
-		bests = {default = {}, kept = true},
-		board = {default = false},
 	},
 	inputs = {start = "none", gem = "any", crash = "none", hazard = "none",
-		finish = "none"},
-	outputs = {hud = "string", reset = "none", finished = "number", board = "string",
-		result = "string"},
-	on_start = function(c)
-		c:after(0.1, "tick")
-	end,
-	-- (back in: in the lobby, no run; their line, the best, as it was)
+		finish = "none", elapsed = "number", best = "number", new_best = "number"},
+	outputs = {hud = "string", note = "string", go = "none", stop = "none",
+		reset = "none", finished = "number", result = "string"},
+	-- (back in: in the lobby, no run; their line as it was)
 	on_join = function(c, by)
 		local r = view(c, by)
-		r.playing, r.open = nil, nil
+		r.playing, r.open, r.finishing, r.time = nil, nil, nil, nil
 		show(c, by, r)
-	end,
-	on_timer = function(c)
-		for _, p in ipairs(c.players or {}) do
-			local by = "player:" .. p.id
-			local r = view(c, by)
-			-- (one on another track: not this run's clock)
-			if p.here and not p.away and (r.playing or not waits(c)) then
-				r.t = r.t + 0.1
-				r.note_left = (r.note_left or 0) - 0.1
-				show(c, by, r)
-				-- (a gem placed or removed meanwhile)
-				open(c, by, r)
-			end
+		if not waits(c) then
+			c:emit("go", nil, by)
 		end
-		board(c)
-		c:after(0.1, "tick")
+	end,
+	-- (the second after a run started over)
+	on_timer = function(c, name, player)
+		local by = tostring(player)
+		local r = view(c, by)
+		if name == "go" and (r.playing or not waits(c)) then
+			c:emit("go", nil, by)
+		end
 	end,
 	on_input = function(c, input, value, by)
 		if type(by) ~= "string" or not by:match("^player:%d+$") then
@@ -162,18 +154,38 @@ return {
 		end
 		local r = view(c, by)
 		if input == "start" then
-			r.playing = true
+			r.playing, r.finishing, r.time = true, nil, nil
 			over(c, by, "off you go")
 			c:teleport(nil, {entity = c.params.start, yaw = 90})
 			return
+		elseif input == "elapsed" then
+			-- (the finish's; the result once the records' best is back,
+			-- or now with none linked)
+			if r.finishing then
+				r.finishing, r.time = nil, tonumber(value) or 0
+				if #(c.linked_in.best or {}) == 0 then
+					finished(c, by, r, nil)
+				end
+			end
+			return
+		elseif input == "new_best" then
+			r.new = true
+			return
+		elseif input == "best" then
+			if r.time then
+				finished(c, by, r, tonumber(value))
+			end
+			return
 		end
-		if waits(c) and not r.playing then
+		-- (none while the finish's time comes back)
+		if (waits(c) and not r.playing) or r.finishing or r.time then
 			return
 		end
 		if input == "gem" then
 			r.got = r.got + 1
 			c:log(c:name(by), "has", r.got, "of", gems(c), "gems")
 			open(c, by, r)
+			show(c, by, r)
 		elseif input == "crash" then
 			over(c, by, "crashed")
 		elseif input == "hazard" then
@@ -184,20 +196,8 @@ return {
 				show(c, by, r, "Take every gem first")
 				return
 			end
-			local t = math.max(0, r.t)
-			local name = c:name(by)
-			local best = not c.state.bests[name] or t < c.state.bests[name]
-			if best then
-				c.state.bests[name] = t
-			end
-			r.playing = nil
-			c:emit("result", "Time " .. tenths(t) .. "|Best " ..
-					tenths(c.state.bests[name]) .. (best and "|Your best yet" or ""), by)
-			c:emit("finished", t, by)
-			c:log(name, "finished in", tenths(t), best and "(best)" or "")
-			over(c, by, "finished in " .. tenths(t) .. (best and ", the best" or ""))
-			board(c)
-			c:teleport(nil, {entity = c.params.start, yaw = 90})
+			r.playing, r.finishing, r.new = nil, true, nil
+			c:emit("stop", nil, by)
 		end
 	end,
 }

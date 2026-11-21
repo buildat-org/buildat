@@ -1,6 +1,8 @@
 -- A text on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a
 -- score, a countdown, a hint. In `text`, {value} is the last value on
--- "value" ({value:time} as m:ss, {value:int} a whole number, 0 before any),
+-- "value" ({value:time} as m:ss, [KIT_RECORDS] {value:time1} to a tenth
+-- (12.3, 1:02.3; 0.0 before any), {value:int} a whole number, 0 before
+-- any; a kit/stopwatch's running time counts on in all three),
 -- {key:<action>} each player's key for it, | a new line. Where: `anchor` (a corner, an
 -- edge's middle or the centre) and x, y in from it, on the screen or in
 -- its parent if a kit/ui_panel (shown while it is). [KIT_HUD_STYLE] x, y,
@@ -11,7 +13,10 @@
 -- their own, the player who set a signal off the one it changes (a signal
 -- by no player, everyone's), or with "team" the members of that
 -- player's team alike. "show", "hide" and "toggle" show it;
--- `shown`: at the start. Edit mode draws every UI component where it
+-- `shown`: at the start. [KIT_RECORDS] `clear_after` (seconds, 0 never):
+-- each value shown for that long, then as none, on the client (a note,
+-- an announcer's line; the same value again shows it again: `sets`
+-- counts them). Edit mode draws every UI component where it
 -- would be, to click on
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
@@ -44,7 +49,8 @@ return {
 		x = "param:x", y = "param:y", width = "param:width",
 		height = "param:height", size = "param:size", color = "param:color",
 		background = "param:background", border = "param:border",
-		style = "param:style", order = "param:order"},
+		style = "param:style", order = "param:order",
+		clear_after = "param:clear_after"},
 	params = {
 		text = {cat = "hud", type = "string", default = "Score: {value}"},
 		anchor = {cat = "hud", type = "string", default = "top",
@@ -69,10 +75,14 @@ return {
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = true},
+		clear_after = {cat = "hud", type = "number", default = 0, min = 0,
+			max = 3600},
 	},
 	state = {
 		shown = {default = true, shared = true, param = "shown"},
 		value = {default = "", shared = true},
+		-- ([KIT_RECORDS] with clear_after: the values set, each shown anew)
+		sets = {default = 0, shared = true},
 		own = {default = {}, per_player = true},
 	},
 	about = {
@@ -86,7 +96,7 @@ return {
 			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 		params = {
-			text = "What it says: {value} the last value, {key:<action>} a player's key, | a new line.",
+			text = "What it says: {value} the last value ({value:time} m:ss, {value:time1} to a tenth, {value:int} whole), {key:<action>} a player's key, | a new line.",
 			anchor = "The corner, edge's middle or centre of the screen (or its panel) it is placed from.",
 			x = "How far in from its anchor sideways, in percent of the screen's shorter side.",
 			y = "How far in from its anchor up or down, in percent of the screen's shorter side.",
@@ -100,6 +110,7 @@ return {
 			order = "Drawn over what it overlaps with a lower order.",
 			to = "Who sees a change: everyone, the player who set it off, or that player's team.",
 			shown = "Whether it is up at the start.",
+			clear_after = "Seconds each value is shown before it is cleared on the screen (0: never).",
 		},
 	},
 	inputs = {value = "any", clear = "none", show = "none", hide = "none",
@@ -125,6 +136,9 @@ return {
 		local v = view(c, by)
 		if input == "value" or input == "clear" then
 			v.value = input == "value" and value ~= nil and value or ""
+			if c.params.clear_after > 0 then
+				v.sets = (v.sets or 0) + 1
+			end
 		elseif input == "toggle" then
 			local now = v.shown
 			if now == nil then

@@ -104,8 +104,10 @@ namespace interface
 // {<word>:...} is Kit's. API 1 has {key:<action>}, this player's key for
 // the action (bare; "(unbound)" with none; on a touchscreen the on-screen
 // control's label; drawn anew as the player rebinds; an action nobody
-// declares as written), and {value:time} and {value:int} (with {value},
-// a kit/ui_text's or kit/ui_bar's value). Any other word is drawn as
+// declares as written), and {value:time} (m:ss), [KIT_RECORDS]
+// {value:time1} (to a tenth: 12.3, 1:02.3; 0.0 before any) and
+// {value:int} (with {value}, a kit/ui_text's or kit/ui_bar's value; a
+// kit/stopwatch's running time counts on in each). Any other word is drawn as
 // written, and an edit setting it, Play and get_goal_warnings warn of it
 // (kit.cpp's placeholder_warnings()): a later Kit may give
 // it a meaning, so a game must not use it for one of its own. A
@@ -1564,6 +1566,10 @@ namespace interface
 // players its start took in, bots too; in the default round c.sessions =
 // {[id] = {players, taken, clock}} the game sessions it made: its players
 // now (no bots), those its start took, its clock (s). As the run began.
+// [KIT_RECORDS] c.now: the round's clock (a session's its own), seconds of
+// game time as the run began; only differences mean anything (a time is
+// c.now - an earlier c.now). The clients have the same clock (kit:clock):
+// a kit/stopwatch's running time is counted on there from a c.now stamp.
 //
 // **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
 // owns a round's lifecycle, each game its goal. kit/arena is the lobby
@@ -1923,6 +1929,27 @@ namespace interface
 // or "none") drawing the going. A run counts a player's takes by linking
 // pickup to an input of its own and resets the ones linked to it there
 // (c.linked_in, c:send(id, "reset", nil, by): Crag Trial's crag_run).
+// [KIT_RECORDS] kit/stopwatch (its file says how): each player's own, by
+// the player the signal carries: "start" from 0 (again while it runs: from
+// 0 again), "stop" (elapsed: its seconds), "reset" (stopped at 0), "lap"
+// (lap: the seconds since its start or the last lap, running on); a stop or
+// reset by no player is everyone's. Its "time", one signal at each start,
+// stop and reset, is for a kit/ui_text to the player: while it runs the
+// value {since = c.now} (the round's clock at its 0), which that text's
+// {value}, {value:time} and {value:time1} count on from on the client by
+// the shared time (kit:clock; controls.lua's M.shared_time()), so a running
+// clock costs the server nothing; stopped, the seconds. kit/records: each
+// player's best "time" or "score" (a number by a player; `better` "lower"
+// or "higher"), kept state by the player's name (play and restarts keep
+// them; Clear kept state drops them); each value sends "new_best" (a new
+// best, by them) then "best" (their best, by them; also as they come into
+// the round: on_join), and "board" the top `count` as they change and at
+// the start, "1. name 12.3|2. ..." (a time to a tenth, a score as it is;
+// a Clear kept state's empty one within a second).
+// Crag Trial's crag_run and Brimstone's time trial are timed and ranked by
+// them: the run's outputs start and stop the stopwatch, its elapsed (or
+// lap) goes to the records' time and back to the run, the records' best
+// back to the run for its result card.
 //
 // **The World** ([KIT] stage 4e; terrain.h says how it is made): one
 // game-wide kit/terrain on the app root, its parameters the choices -- the

@@ -4,9 +4,14 @@
 -- kit/lobby on the root: its scene list takes them to that scene; its
 -- entered and left linked here by name):
 -- **Time trial**: alone against the clock (a ghost: no other car meets
--- it, no weapons), `trial_laps` laps from a countdown on the pole; each
--- lap's time, the best lap kept (kept state, by name: play never resets
--- it, a builder's Clear kept state does) and the five best on `board`.
+-- it, no weapons), `trial_laps` laps from a countdown on the pole.
+-- [KIT_RECORDS] Its clock a kit/stopwatch's (go starts it, countdown puts it
+-- at 0, split takes a lap's time, stop the whole trial's; they come back on
+-- lap_clock and trial_clock), the lap records a kit/records' (the
+-- stopwatch's lap to its time: the best lap by name, kept state, and the
+-- board; its best and new_best back on record and new_record): each lap's
+-- note, the result card once its record is back. Notes go to `note` (a
+-- kit/ui_text that clears itself).
 -- Every car in a time trial's scene is a ghost (c:body_var ghost: the
 -- car's step meets no other).
 -- **Race**: the players who pick it line up on the grid (frozen, their
@@ -94,9 +99,8 @@ local function is_bot(by)
 	return tostring(by):match("^bot:%d+$") ~= nil
 end
 
+-- (the announcer's kit/ui_text clears it: its clear_after)
 local function say(c, text)
-	c.state.said = text
-	c.state.said_left = 3
 	c:emit("announce", text)
 end
 
@@ -149,17 +153,21 @@ local function show(c, by, r, note)
 	if is_bot(by) then
 		return
 	end
+	if r.mode == "trial" then
+		-- (the time and record are the stopwatch's and the records' texts)
+		c:emit("hud", "Lap " .. math.min(r.lap or 1, c.params.trial_laps) ..
+				"/" .. c.params.trial_laps, by)
+		if note then
+			c:emit("note", note, by)
+		end
+		return
+	end
 	if note then
 		r.note, r.note_left = note, 2
 	end
 	note = (r.note_left or 0) > 0 and r.note or nil
 	local line
-	if r.mode == "trial" then
-		local best = c.state.bests[c:name(by)]
-		line = "Lap " .. math.min(r.lap or 1, c.params.trial_laps) .. "/" ..
-				c.params.trial_laps .. "   Time " .. clock(r.t or 0) ..
-				(best and "   Record " .. tenths(best) or "")
-	elseif r.mode == "race" then
+	if r.mode == "race" then
 		local ph = c.state.phase
 		if ph == "grid" then
 			line = "On the grid: " .. #c.state.racers .. " car" ..
@@ -174,26 +182,6 @@ local function show(c, by, r, note)
 		line = ""
 	end
 	c:emit("hud", line .. (note and "   " .. note or ""), by)
-end
-
--- The board: the five best laps, "1. name 23.4|2. ..."
-local function board(c)
-	local all = {}
-	for name, t in pairs(c.state.bests) do
-		all[#all + 1] = {name, t}
-	end
-	table.sort(all, function(a, b)
-		return a[2] < b[2] or a[2] == b[2] and a[1] < b[1]
-	end)
-	local lines = {}
-	for i = 1, math.min(5, #all) do
-		lines[i] = i .. ". " .. all[i][1] .. " " .. tenths(all[i][2])
-	end
-	local text = table.concat(lines, "|")
-	if text ~= c.state.board then
-		c.state.board = text
-		c:emit("board", text)
-	end
 end
 
 local function racing(c, by)
@@ -278,7 +266,8 @@ local function enter(c, by)
 	local r = view(c, by)
 	local p = player_of(c, by)
 	r.mode = c.params.mode
-	r.lap, r.next, r.last, r.t, r.done, r.at = 1, 1, 0, 0, nil, 0
+	r.lap, r.next, r.last, r.done, r.at = 1, 1, 0, nil, 0
+	r.finishing, r.lap_t, r.total, r.new, r.best_lap = nil, nil, nil, nil, nil
 	r.wrecked = nil
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
@@ -320,6 +309,8 @@ local function enter(c, by)
 	else
 		r.mode = "trial"
 		r.count = 3
+		c:after(1, "trial", {player = by})
+		c:emit("countdown", nil, by)
 		c:body_var(by, "ghost", true)
 		c:body_var(by, "paint", p and (p.id % PAINTS) + 1 or 1)
 		c:speed(by, 0)
@@ -389,29 +380,16 @@ local function lap(c, by, r)
 	set_open(c, by, r, false)
 	r.next = 1
 	if r.mode == "trial" then
-		local t = r.t - (r.lap_at or 0)
-		r.lap_at = r.t
-		local name = c:name(by)
-		local best = not c.state.bests[name] or t < c.state.bests[name]
-		if best then
-			c.state.bests[name] = t
-		end
-		r.best_lap = math.min(r.best_lap or t, t)
-		c:log(name, "lap", r.lap, "in", tenths(t), best and "(record)" or "")
-		c:emit("lap_time", t, by)
-		board(c)
+		-- (its time and record come back: lap_clock, record)
+		r.lap_n = r.lap
+		c:emit("split", nil, by)
 		if r.lap >= c.params.trial_laps then
-			c:emit("result", "Time " .. clock(r.t) .. "|Best lap " ..
-					tenths(r.best_lap) .. "|Record " .. tenths(c.state.bests[name]) ..
-					(best and "|A new record!" or ""), by)
-			c:emit("finished", r.t, by)
-			c:log(name, "finished the trial in", clock(r.t))
-			r.mode = nil
-			c:send(c.params.lobby, "over", nil, by)
+			r.mode, r.finishing = nil, true
+			c:emit("stop", nil, by)
 			return
 		end
 		r.lap = r.lap + 1
-		show(c, by, r, "Lap " .. tenths(t) .. (best and ", a record!" or ""))
+		show(c, by, r)
 		return
 	end
 	c:log(c:name(by), "completed lap", r.lap)
@@ -423,6 +401,29 @@ local function lap(c, by, r)
 		show(c, by, r, "Last lap!")
 	end
 	rank(c)
+end
+
+-- [KIT_RECORDS] A trial's lap with its time (the stopwatch's) and record
+-- (the records' best): its note, or after the last the result card
+local function lap_done(c, by, r, record)
+	local t, new = r.lap_t, r.new
+	r.lap_t, r.new = nil, nil
+	local name = c:name(by)
+	r.best_lap = math.min(r.best_lap or t, t)
+	c:log(name, "lap", r.lap_n, "in", tenths(t), new and "(record)" or "")
+	c:emit("lap_time", t, by)
+	if not r.finishing then
+		show(c, by, r, "Lap " .. tenths(t) .. (new and ", a record!" or ""))
+		return
+	end
+	r.finishing = nil
+	local total = r.total or 0
+	c:emit("result", "Time " .. clock(total) .. "|Best lap " ..
+			tenths(r.best_lap) .. "|Record " .. tenths(record or r.best_lap) ..
+			(new and "|A new record!" or ""), by)
+	c:emit("finished", total, by)
+	c:log(name, "finished the trial in", clock(total))
+	c:send(c.params.lobby, "over", nil, by)
 end
 
 -- Back on the road where they wrecked: full health (the game rules'
@@ -546,12 +547,19 @@ return {
 			mine = "The player touched a mine. Value: the mine.",
 			ram = "The player's boosted car rammed another. Value: the other's by.",
 			back = "Sent by itself: a wrecked car goes back on the road, as its player.",
+			lap_clock = "A trial's lap time (the kit/stopwatch's lap).",
+			trial_clock = "A finished trial's whole time (the kit/stopwatch's elapsed).",
+			record = "The player's lap record (the kit/records' best): the lap's note or the trial's result.",
+			new_record = "The lap was the player's best yet (the kit/records' new_best).",
 		},
 		outputs = {
 			hud = "The player's HUD line. Value: lap, place, time and weapon.",
-			announce = "The announcer's line for everyone. Value: the line; \"\" after a while.",
+			announce = "The announcer's line for everyone (its kit/ui_text clears it after a while). Value: the line.",
 			result = "The player's result card. Value: their place and the places so far, or their trial's times.",
-			board = "The five best laps as they change. Value: \"1. name 23.4|2. ...\".",
+			note = "A time trial's note (the countdown, a checkpoint, a lap), for a kit/ui_text that clears itself. Value: the line.",
+			countdown = "A time trial's countdown began for the player: their clock to 0 (a kit/stopwatch's reset).",
+			split = "A time trial's lap closed: its time (a kit/stopwatch's lap).",
+			stop = "A time trial's last lap closed: its clock stops (a kit/stopwatch's stop).",
 			lap_time = "A time trial's lap. Value: its seconds.",
 			finished = "A player finished. Value: their place (a race) or time (a trial).",
 			go = "The player's run began: the race's GO, or the start of their trial.",
@@ -589,8 +597,6 @@ return {
 	},
 	state = {
 		runs = {default = {}, per_player = true},
-		bests = {default = {}, kept = true},
-		board = {default = false},
 		phase = {default = "grid"},
 		racers = {default = {}},
 		finished = {default = {}},
@@ -599,17 +605,18 @@ return {
 		mines = {default = {}},
 		scorches = {default = {}},
 		dice = {default = 0},
-		said_left = {default = 0},
 	},
 	actions = {{name = "fire", key = "Left Ctrl", label = "Fire"}},
 	inputs = {entered = "none", left = "none",
 		start = "none", checkpoint = "number", lap = "none", fire = "number",
-		crate = "string", mine = "entity", ram = "string", back = "none"},
+		crate = "string", mine = "entity", ram = "string", back = "none",
+		lap_clock = "number", trial_clock = "number", record = "number",
+		new_record = "number"},
 	outputs = {hud = "string", announce = "string", result = "string",
-		board = "string", lap_time = "number", finished = "number", go = "none"},
+		lap_time = "number", finished = "number", go = "none", note = "string",
+		countdown = "none", split = "none", stop = "none"},
 	on_start = function(c)
 		c:after(0.1, "tick")
-		board(c)
 	end,
 	on_join = function(c, by)
 		local r = view(c, by)
@@ -618,7 +625,7 @@ return {
 	end,
 	on_timer = function(c, name, player)
 		if name == "unboost" then
-			local by = "player:" .. tostring(player)
+			local by = tostring(player)
 			local r = view(c, by)
 			r.boosted = nil
 			c:body_var(by, "boost", nil)
@@ -635,6 +642,24 @@ return {
 					c:send(c.id, "back", nil, by)
 				end
 			end
+			return
+		elseif name == "trial" then
+			-- A trial's countdown, a second a step
+			local by = tostring(player)
+			local r = view(c, by)
+			if r.mode ~= "trial" or not r.count then
+				return
+			end
+			r.count = r.count - 1
+			if r.count > 0 then
+				show(c, by, r, tostring(r.count))
+				c:after(1, "trial", {player = by})
+				return
+			end
+			r.count = nil
+			c:speed(by, 1)
+			show(c, by, r, "GO!")
+			c:emit("go", nil, by)
 			return
 		elseif name == "count" then
 			local n = c.state.count
@@ -685,12 +710,6 @@ return {
 				end
 			end
 		end
-		if st.said_left > 0 then
-			st.said_left = st.said_left - 0.1
-			if st.said_left <= 0 then
-				c:emit("announce", "")
-			end
-		end
 		for _, p in ipairs(c.players or {}) do
 			local by = p.by
 			local r = c.state.runs[by]
@@ -700,22 +719,6 @@ return {
 					drop_racer(c, by)
 				end
 				r.mode = nil
-			elseif r and r.mode == "trial" then
-				if r.count then
-					r.count = r.count - 0.1
-					if r.count <= 0 then
-						r.count, r.t, r.lap_at = nil, 0, 0
-						c:speed(by, 1)
-						show(c, by, r, "GO!")
-						c:emit("go", nil, by)
-					else
-						show(c, by, r, tostring(math.ceil(r.count)))
-					end
-				else
-					r.t = r.t + 0.1
-					r.note_left = (r.note_left or 0) - 0.1
-					show(c, by, r)
-				end
 			elseif r and r.mode == "race" then
 				r.note_left = (r.note_left or 0) - 0.1
 				show(c, by, r)
@@ -800,6 +803,21 @@ return {
 			return
 		elseif input == "back" then
 			return back(c, by, r)
+		elseif input == "lap_clock" then
+			-- [KIT_RECORDS] (a trial's: its note once the record is back)
+			r.lap_t = tonumber(value) or 0
+			return
+		elseif input == "trial_clock" then
+			r.total = tonumber(value) or 0
+			return
+		elseif input == "new_record" then
+			r.new = true
+			return
+		elseif input == "record" then
+			if r.lap_t then
+				lap_done(c, by, r, tonumber(value))
+			end
+			return
 		elseif input == "start" then
 			if c.state.phase ~= "grid" or not racing(c, by) or is_bot(by) then
 				return

@@ -109,6 +109,7 @@ server c.made
 server c.move_lib | [experimental]
 server c.moving
 server c.nearby
+server c.now
 server c.panel
 server c.params
 server c.path | [experimental]
@@ -1301,6 +1302,18 @@ type kit/radar | version 1
 type kit/radar handlers
 type kit/radar param range | {"default": 150, "kind": "number", "max": 1000, "min": 1}
 type kit/radar state contacts | shared
+type kit/records | version 1
+type kit/records handlers | on_input on_join on_start on_timer
+type kit/records param better | {"choices": ["lower", "higher"], "default": "lower", "kind": "string"}
+type kit/records param count | {"default": 5, "kind": "number", "max": 50, "min": 1}
+type kit/records input score | number
+type kit/records input time | number
+type kit/records output best | number
+type kit/records output board | string
+type kit/records output new_best | number
+type kit/records state bests | kept
+type kit/records state board
+type kit/records state kind | kept
 type kit/region | version 1
 type kit/region handlers | on_input on_params on_start on_timer
 type kit/region param capture | {"choices": ["player", "team"], "default": "player", "kind": "string"}
@@ -1459,6 +1472,16 @@ type kit/starting_kit param clear | {"default": false, "kind": "bool"}
 type kit/starting_kit param items | {"default": "kit/pickaxe, kit/stone 20", "kind": "string"}
 type kit/starting_kit param when | {"choices": ["round", "spawn"], "default": "round", "kind": "string"}
 type kit/starting_kit output given | none
+type kit/stopwatch | version 1
+type kit/stopwatch handlers | on_input
+type kit/stopwatch input lap | none
+type kit/stopwatch input reset | none
+type kit/stopwatch input start | none
+type kit/stopwatch input stop | none
+type kit/stopwatch output elapsed | number
+type kit/stopwatch output lap | number
+type kit/stopwatch output time | any
+type kit/stopwatch state runs | per_player
 type kit/supply | version 1
 type kit/supply handlers | on_enter on_start on_timer
 type kit/supply param color | {"default": "#e8c040", "kind": "string"}
@@ -1749,6 +1772,7 @@ type kit/ui_text handlers | migrate on_input on_params
 type kit/ui_text param anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "top", "kind": "string"}
 type kit/ui_text param background | {"default": "#000000a0", "kind": "string"}
 type kit/ui_text param border | {"default": "#808080a0", "kind": "string"}
+type kit/ui_text param clear_after | {"default": 0, "kind": "number", "max": 3600, "min": 0}
 type kit/ui_text param color | {"default": "#ffffff", "kind": "string"}
 type kit/ui_text param height | {"default": 0, "kind": "number", "max": 400, "min": 0}
 type kit/ui_text param order | {"default": 0, "kind": "number", "max": 40, "min": -40}
@@ -1766,6 +1790,7 @@ type kit/ui_text input show | none
 type kit/ui_text input toggle | none
 type kit/ui_text input value | any
 type kit/ui_text state own | per_player
+type kit/ui_text state sets | shared
 type kit/ui_text state shown | shared
 type kit/ui_text state value | shared
 type kit/ui_view | version 1
