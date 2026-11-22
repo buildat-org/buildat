@@ -1401,6 +1401,13 @@ struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
 	bool m_hosted = false;
+	// [KIT_GAME_NOT_HOSTED] Why the app's last game did not load, kept
+	// over the app's reload into no game (host()): what the agents are told
+	ss_ m_not_hosted;
+	// The Buildat that made the composition being loaded, if known (a
+	// template's meta.json, a save's version before this one's): whether a
+	// parameter this Kit does not know is one gone since or a newer one
+	ss_ m_made_by;
 	Host m_host;
 	storage::Store *m_store = nullptr;
 	up_<interface::WasmBox> m_box;
@@ -1748,6 +1755,7 @@ struct Module: public interface::Module, public Interface
 			return std::make_pair(b, why);
 		});
 #endif
+		m_not_hosted = m_server->tmp_restore_data("kit:not_hosted");
 		sub(m_server, "core:tick", &Module::on_tick);
 		// [KIT_SHUTDOWN_SAVE] Synchronous, every save still open: what
 		// changed since the last tick (a mark, the runtime) was lost at a
@@ -5412,10 +5420,21 @@ struct Module: public interface::Module, public Interface
 						continue;
 					}
 					if(!decl.get(it.key()).is_object()){
+						// [KIT_GAME_NOT_HOSTED] An older Buildat's: a parameter
+						// gone since; a newer one's (or by one not known): a
+						// parameter to come
+						const ss_ what = in.type+"'s "+it.key().substr(0, 64),
+								&by = m_made_by;
 						why = "entity "+itos(e.id)+": "+in.type+
-								" has no parameter "+it.key()+" ("+
-								interface::aitta::kit_newer(in.type+"'s "+
-								it.key().substr(0, 64), "has no such parameter")+")";
+								" has no parameter "+it.key().substr(0, 64);
+						if(by.empty() || interface::aitta::version_less(
+								BUILDAT_VERSION, by))
+							why += " ("+interface::aitta::kit_newer(what,
+									"has no such parameter", by)+")";
+						else if(by != BUILDAT_VERSION)
+							why += " (This game was made with an older Buildat ("+
+									by.substr(0, 40)+"): "+what+" is gone in this "
+									"one ("+BUILDAT_VERSION+"), which cannot open it.)";
 						return false;
 					}
 					if(!bad.empty()){
@@ -5935,6 +5954,12 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		const bool ok = host_u(host, why);
+		m_made_by.clear();
+		m_not_hosted = ok ? "" : (host.project.empty() ? ss_("the game") :
+				"the game "+host.project)+" did not load: "+why;
+		// [KIT_GAME_NOT_HOSTED] for the next instance, the app's reload
+		// into no game; taken by its init()
+		m_server->tmp_store_data("kit:not_hosted", m_not_hosted);
 		if(!ok)
 			log_e(MODULE, "Not hosted: %s", cs(why));
 		return ok;
@@ -6038,6 +6063,11 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CUSTOM_TYPES] and its template's types
 			if(!host.local_types_path.empty())
 				import_local_types(host.local_types_path);
+			m_made_by = by;
+		} else if(storage::Store *s = host.save->store("__save")){
+			// [KIT_GAME_NOT_HOSTED] the Buildat that opened the save before
+			// this one (builtin/storage's "was")
+			s->get("was", m_made_by);
 		}
 		load_local_types();
 		json::json_error_t err;
@@ -36272,8 +36302,8 @@ struct Module: public interface::Module, public Interface
 			// The guide, as Claude Code puts it into the model's context (a
 			// resource it only lists): get_guide has it whole
 			res.set("instructions", m_hosted ? agent_guide(at.name+"'s agent",
-					false) : ss_("Buildat ")+BUILDAT_VERSION+" server. Kit is "
-					"not hosted by this server's app: its tools refuse");
+					false) : ss_("Buildat ")+BUILDAT_VERSION+" server. Its tools "
+					"refuse: "+not_hosted_text());
 			log_i(MODULE, "MCP: %s's agent (\"%s\", %s token) from %s, protocol "
 					"%s", cs(at.name), cs(at.label), cs(at.scope), cs(r.address),
 					cs(res.get("protocolVersion").as_string()));
@@ -36508,13 +36538,26 @@ struct Module: public interface::Module, public Interface
 		return s.stringify();
 	}
 
+	// What the agents are told while Kit is not hosted: [KIT_GAME_NOT_HOSTED]
+	// no game, why the last did not load
+	ss_ not_hosted_text()
+	{
+		if(m_not_hosted.empty())
+			return "Kit is not hosted by this server's app";
+		ss_ s = m_not_hosted;
+		while(!s.empty() && s.back() == '.')
+			s.pop_back();
+		return "No game is loaded on this server: "+s+". An admin joining the "
+				"server opens another game or makes one";
+	}
+
 	ss_ agent_tool(const accounts::Interface::AgentToken &at,
 			const AgentTool &t, const json::Value &args, bool &failed)
 	{
 		SessionScope top(*this, 0);
 		failed = true;
 		if(!m_hosted)
-			return "Kit is not hosted by this server's app";
+			return not_hosted_text();
 		const size_t peer = agent_peer(at);
 		if(!peer)
 			return "This server runs no agents";

@@ -197,8 +197,18 @@ struct CSave: public Save
 		if(format < SAVE_FORMAT)
 			exec(("PRAGMA user_version="+itos(SAVE_FORMAT)).c_str());
 		// Written only when it changes: the launcher opens every save to
-		// read it, and an open alone leaves the file as it was
+		// read it, and an open alone leaves the file as it was.
+		// [KIT_GAME_NOT_HOSTED] The one it replaces kept as "was": a game
+		// Kit cannot open was made with an older Buildat, or a newer one
 		sqlite3_stmt *st = nullptr;
+		check(m_db, sqlite3_prepare_v2(m_db, "INSERT OR REPLACE INTO store"
+				" SELECT '__save', 'was', value FROM store WHERE store ="
+				" '__save' AND key = 'version' AND value != ?1", -1, &st,
+				nullptr), "was");
+		sqlite3_bind_text(st, 1, BUILDAT_VERSION, -1, SQLITE_STATIC);
+		const int was = sqlite3_step(st);
+		sqlite3_finalize(st);
+		check(m_db, was, "was");
 		check(m_db, sqlite3_prepare_v2(m_db, "INSERT OR REPLACE INTO store"
 				" SELECT '__save', 'version', ?1 WHERE NOT EXISTS (SELECT 1"
 				" FROM store WHERE store = '__save' AND key = 'version' AND"
