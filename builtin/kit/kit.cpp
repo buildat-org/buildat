@@ -35138,7 +35138,8 @@ struct Module: public interface::Module, public Interface
 				"has loaded around the pose. pos and look_at, or pos, yaw and "
 				"pitch (degrees: yaw 0 looks along +z, 90 along +x; pitch down), "
 				"positions in cells (y up); none: that client's own view (the "
-				"server's camera's: over your last place, else the spawn). "
+				"server's camera's: over your last place, else the spawn; your "
+				"body's screen, its UI too, while you play one). "
 				"views: several poses in one call. preset: \"map\" (top-down, "
 				"orthographic, +z up; over area [x0, z0, x1, z1] or the scene's "
 				"extent), \"turn\" (count pictures around entity id, 4 unless "
@@ -35226,9 +35227,10 @@ struct Module: public interface::Module, public Interface
 				"entities emitted meanwhile (by \"you\" when your body did it), "
 				"the screen's buttons (id, label; a list's rows) and texts (each "
 				"UI text up for your body, as its client shows it, {value} "
-				"filled: id, text, kind but for a kit/ui_text; the picture draws "
-				"no UI); picture: also "
-				"a picture of its own view at the end (width, height). press: a "
+				"filled: id, text, kind but for a kit/ui_text); picture: also a "
+				"picture of its screen at the end (width, height), its UI laid "
+				"out as a screen of that size shows it; picture_at: pictures at "
+				"up to 3 times after the end (s, 0 to 2: a pop, a fade). press: a "
 				"button on your body's screen pressed first, as a click on it (a "
 				"kit/ui_button, a pause menu item, a kit/ui_scene_list's row: "
 				"Play in a lobby), by its id or its label (a list's row by its "
@@ -35243,6 +35245,8 @@ struct Module: public interface::Module, public Interface
 				"seconds": {"type": "number"}, "yaw": {"type": "number"},
 				"pitch": {"type": "number"}, "jump": {"type": "boolean"},
 				"use": {"type": "integer"}, "picture": {"type": "boolean"},
+				"picture_at": {"type": "array", "items": {"type": "number"},
+					"maxItems": 3},
 				"width": {"type": "integer"}, "height": {"type": "integer"},
 				"press": {"description": "A button's entity id or its label"},
 				"row": {"type": "integer", "description": "press's list's row, from 1"},
@@ -37926,8 +37930,10 @@ struct Module: public interface::Module, public Interface
 					"with theirs, or run one yourself with your token (this tool's "
 					"description says how: a release's client, headless)";
 		// The camera with no pose: over what the agent placed last, else the
-		// scene's spawn
-		if(!client && views.size() == 1 && views[0].get("pos").is_undefined()){
+		// scene's spawn; ([KIT_PLAY_PICTURE_UI]) its body's own view, its
+		// screen, while it plays one for the agent
+		if(!client && views.size() == 1 && views[0].get("pos").is_undefined() &&
+				m_cam.play.empty()){
 			const Agent *ag = agent_of(peer);
 			double c[3], look = 0;
 			if(ag && ag->has_at && ag->at_scene == scene){
@@ -38529,6 +38535,8 @@ struct Module: public interface::Module, public Interface
 		bool picture = false;
 		int wh[2] = {512, 384};
 		double secs = 0;
+		// [KIT_PLAY_PICTURE_UI] picture_at's times, ms after the input's end
+		std::vector<int> at;
 	};
 	PlayWait m_play; // id "": none
 
@@ -39145,6 +39153,25 @@ struct Module: public interface::Module, public Interface
 		const ss_ size_why = view_size(a, w.wh);
 		if(!size_why.empty())
 			return size_why;
+		// [KIT_PLAY_PICTURE_UI] pictures at set times after its end (a pop,
+		// a fade)
+		const json::Value &atv = a.get("picture_at");
+		for(unsigned i = 0; atv.is_array() && i < atv.size(); i++){
+			const double s = atv.at(i).is_number() ? atv.at(i).as_number() : -1;
+			if(!(s >= 0 && s <= 2) || atv.size() > 3 ||
+					(!w.at.empty() && s * 1000 < w.at.back() + 50))
+				return "picture_at: 1 to 3 times, seconds after the input's end "
+						"(0 to 2), each 0.05 after the one before";
+			w.at.push_back((int)std::lround(s * 1000));
+		}
+		if(!atv.is_undefined() && (!atv.is_array() || w.at.empty()))
+			return "picture_at: a list of 1 to 3 times";
+		if(!w.at.empty() && (int64_t)w.at.size() * w.wh[0] * w.wh[1] >
+				VIEW_CALL_PIXELS)
+			return itos(w.at.size())+" pictures of "+itos(w.wh[0])+"x"+
+					itos(w.wh[1])+": "+itos(VIEW_CALL_PIXELS)+" pixels at most per "
+					"call (smaller width and height, or fewer)";
+		w.picture = w.picture || !w.at.empty();
 		const json::Value body = play_body();
 		for(unsigned k = 0; k < 3 && body.get("pos").is_array(); k++)
 			w.from[k] = body.get("pos").at(k).as_number();
@@ -39258,16 +39285,10 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "The server's camera played: %s", cs(text.substr(0, 300)));
 		if(!w.picture || !m_cam.peer || !m_mcp_waits.count(w.agent))
 			return mcp_answer(w.agent, text, false);
-		// Its own view at the end. simplified: [KIT_AGENT_PLAY_TEXTS] the world
-		// alone, no UI (the answer's texts and buttons say what is up): the
-		// camera's UI is laid out for its 320x240 window (a 1440x1080 root at
-		// scale 0.22: texts at their 8-pixel floor, twice a screen's size),
-		// so a renderui pass into the picture (at the window's size, or
-		// scaled) would show another layout than a player's.
-		// The upgrade: the UI root laid out at the picture's size for its
-		// frame (UI::SetCustomSize, which the sandbox does not offer, as it
-		// keeps UI.scale read-only for the trust overlay: a trusted hook in
-		// the client's C++ for the camera), then renderui in its path
+		// Its own view at the end, or at picture_at's times after it: the
+		// player's screen, [KIT_PLAY_PICTURE_UI] its UI laid out at the
+		// picture's size and drawn over it (client_lua/module.lua's VIEW,
+		// magic.picture_ui())
 		std::random_device rd;
 		char id[24];
 		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
@@ -39278,18 +39299,27 @@ struct Module: public interface::Module, public Interface
 		v.session = session_of_peer(m_cam.peer);
 		v.scene = jstr(r, "scene");
 		v.since = now;
-		v.deadline = std::max(now + 1000000, w.since + CAMERA_CALL_US);
+		const std::vector<int> at = w.at.empty() ? std::vector<int>{-1} : w.at;
+		v.deadline = std::max<int64_t>(now + 1000000 +
+				std::max(0, at.back()) * 1000LL, w.since + CAMERA_CALL_US);
 		v.camera = true;
 		v.play = text+"\n";
-		json::Value view = json::object(), vl = json::array();
-		view.set("w", (int64_t)w.wh[0]);
-		view.set("h", (int64_t)w.wh[1]);
-		vl.append(view);
-		v.what.push_back(itos(w.wh[0])+"x"+itos(w.wh[1])+" "+view_what(view));
-		v.key.push_back("");
-		v.png.resize(1);
-		v.why.resize(1);
-		v.early.resize(1);
+		json::Value vl = json::array();
+		for(int ms : at){
+			json::Value view = json::object();
+			view.set("w", (int64_t)w.wh[0]);
+			view.set("h", (int64_t)w.wh[1]);
+			if(ms >= 0)
+				view.set("at", (int64_t)ms);
+			vl.append(view);
+			v.what.push_back(itos(w.wh[0])+"x"+itos(w.wh[1])+" "+view_what(view)+
+					(ms >= 0 ? ", "+json::Value(ms / 1000.0).stringify()+
+					" s after the input" : ss_()));
+			v.key.push_back("");
+		}
+		v.png.resize(at.size());
+		v.why.resize(at.size());
+		v.early.resize(at.size());
 		v.q = json::object();
 		v.q.set("id", ss_(id));
 		v.q.set("views", vl);

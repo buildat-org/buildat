@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-17)
-# covers: src/server/confine.cpp src/client/command_seq.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua extensions/weave/init.lua
+# covers: src/server/confine.cpp src/client/command_seq.cpp src/client/app.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/UI/UI.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua extensions/weave/init.lua
 # [KIT_AGENT_NEXT_1] The server's camera: a headless client of the
 # server's own draws an agent's get_view when no client of its account is
 # there, and plays a body for it (play_join, play_input, play_leave). One
@@ -26,7 +26,11 @@
 #      started again; [KIT_AGENT_PLAY_TEXTS] each answer held till it is
 #      in, or "Still starting" after 7 s); a trigger zone placed ahead; play_input walks into
 #      it: the zone's "entered" among the events, the body moved, a picture
-#      at the end; play_leave;
+#      at the end; [KIT_PLAY_PICTURE_UI] a kit/ui_bar and a kit/ui_text in
+#      it (the bar's colour at its place, the text's glyphs as tall as a
+#      screen of that size draws them), in two picture_at pictures at
+#      800x600 and in get_view's with no pose (the body's screen), not in
+#      a pose's; picture_at's pixel cap and range; play_leave;
 #   6. the server stopped: its camera gone with it;
 #   7. (CAMERA_X11=1) a server given no display, offscreen failing:
 #      get_view says what its host needs;
@@ -377,14 +381,53 @@ elif phase == "play":
     text = call("place", {"type": "kit/trigger_zone", "pos": [round(x) - 2,
         round(y) - 1, round(z) + 2], "params": {"size": [5, 4, 3]}})[0]
     zone = int(re.search(r"placed kit/trigger_zone (\d+)", text).group(1))
+    # [KIT_PLAY_PICTURE_UI] the screen's UI in its pictures: an orange bar
+    # and a yellow text, at the top left (x, y and size in vmin)
+    call("place", {"type": "kit/ui_bar", "pos": [0, 0, 0], "params": {"anchor": "top_left", "x": 4,
+        "y": 20, "width": 40, "height": 8, "color": "#ff8000", "style": "plain"}})
+    call("place", {"type": "kit/ui_text", "pos": [0, 0, 0], "params": {"text": "UIPIC", "anchor":
+        "top_left", "x": 4, "y": 40, "size": 8, "color": "#ffff00", "style": "plain"}})
+    def ui_in(img, name):
+        """The bar at its place (left of its label), the text's glyphs as tall as a screen of the
+        picture's size draws them (not at the 8-pixel floor)"""
+        w, h, px = img
+        v = min(w, h) / 100.0
+        r, g, b = px(int(10 * v), int(24 * v))
+        assert r > 200 and 90 < g < 170 and b < 70, (name, "no bar", (r, g, b))
+        rows = [y for y in range(int(38 * v), min(h, int(52 * v)))
+            if any(px(x, y)[0] > 200 and px(x, y)[1] > 200 and px(x, y)[2] < 90
+                for x in range(int(4 * v), min(w, int(44 * v))))]
+        assert rows and rows[-1] - rows[0] > 3.5 * v, (name, "the text", rows)
+        print("   %s %dx%d: the bar, the text %d px high" % (name, w, h,
+            rows[-1] - rows[0] + 1))
     text, imgs = call("play_input", {"yaw": 0, "pitch": 0, "keys": ["W"],
         "seconds": 2, "picture": True})
     assert len(imgs) == 1 and decode(imgs[0])[:2] == (512, 384), text
     with open(out + "/play_end.png", "wb") as f:
         f.write(imgs[0])
+    ui_in(decode(imgs[0]), "play_end")
     got = json.loads(re.search(r"Played 2 s: (\{.*\})\n", text).group(1))
     assert got["moved"] > 1, got
     assert any(e["id"] == zone and e["output"] == "entered" for e in got["events"]), got
+    # Two at set times after the input, at a size asked; the pixel cap
+    text, imgs = call("play_input", {"seconds": 0.1, "width": 800, "height": 600,
+        "picture_at": [0, 0.6]})
+    assert len(imgs) == 2 and "0.6 s after the input" in text, text
+    for k, png in enumerate(imgs):
+        with open("%s/play_at_%d.png" % (out, k), "wb") as f:
+            f.write(png)
+        assert decode(png)[:2] == (800, 600)
+        ui_in(decode(png), "play_at_%d" % k)
+    assert "1572864 pixels at most" in refused("play_input", {"width": 1024,
+        "height": 768, "picture_at": [0, 0.5, 1]})
+    assert "picture_at: 1 to 3 times" in refused("play_input", {"picture_at": [3]})
+    # get_view with no pose: the body's screen; a pose's: the world alone
+    text, imgs = view({"width": 320, "height": 240}, "play_own")
+    assert "its own view" in text, text
+    ui_in(imgs[0], "play_own")
+    w_, h_, px = view({"pos": C, "look_at": M}, "play_pose")[1][0]
+    r, g, b = px(int(10 * 3.84), int(24 * 3.84))
+    assert not (r > 200 and 90 < g < 170 and b < 70), ("UI in a pose's picture", (r, g, b))
     assert "0.1 to 4" in refused("play_input", {"seconds": 9})
     text = call("play_leave")[0]
     assert "Your body is gone" in text, text

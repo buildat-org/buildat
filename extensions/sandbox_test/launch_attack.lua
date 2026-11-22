@@ -111,6 +111,15 @@ local ATTEMPTS = {
 		magic.renderer.numViewports = 100000
 		return true
 	end},
+	-- [KIT_PLAY_PICTURE_UI] the UI over a picture: the server's camera's
+	-- alone (it lays the screen out anew and draws the UI where a script
+	-- reads it back)
+	{"picture_ui outside the server's camera", function()
+		local tex = magic.Texture2D:new()
+		tex:SetSize(64, 64, magic.Graphics.GetRGBAFormat(),
+				magic.TEXTURE_RENDERTARGET)
+		return magic.picture_ui(tex)
+	end},
 	{"rewrite string.format", function()
 		string.format = function() end
 		return true
@@ -167,8 +176,51 @@ function M.run()
 	local peer_removed, peer_own = peer.unsubscribe({{"Update", held},
 		{"Update", held_fn}})
 	local frames = 0
+	-- [KIT_PLAY_PICTURE_UI] **The UI read back from a texture of its own**:
+	-- a renderui command in a render path of its own, into its render
+	-- target, read back by texture_png. The UI holds the client's own (the
+	-- trust colour shown on this screen), which no script may read: the
+	-- picture is the clear's one colour unless the UI got in.
+	local probe
+	local function ui_probe()
+		if frames == 5 then
+			local scene = magic.Scene:new()
+			scene:CreateComponent("Octree")
+			local cam = scene:CreateChild("cam"):CreateComponent("Camera")
+			local tex = magic.Texture2D:new()
+			tex:SetSize(320, 180, magic.Graphics.GetRGBAFormat(),
+					magic.TEXTURE_RENDERTARGET)
+			local vp = magic.Viewport:new(scene, cam)
+			local path = vp.renderPath:Clone()
+			path:GetCommand(1).type = magic.CMD_RENDERUI
+			vp.renderPath = path
+			local s = tex:GetRenderSurface()
+			s:SetViewport(0, vp)
+			s.updateMode = magic.SURFACE_MANUALUPDATE
+			s:QueueUpdate()
+			probe = {tex = tex, scene = scene, vp = vp, path = path}
+		elseif frames == 8 and probe then
+			local png = magic.texture_png(probe.tex)
+			local img, seen, n = magic.Image:new(), {}, 0
+			if png and magic.image_load_data(img, png) then
+				for y = 0, img.height - 1, 2 do
+					for x = 0, img.width - 1, 2 do
+						local c = img:GetPixel(x, y)
+						local k = string.format("%.2f %.2f %.2f", c.r, c.g, c.b)
+						if not seen[k] then
+							seen[k], n = true, n + 1
+						end
+					end
+				end
+			end
+			log:info("launch sandbox: the UI read back from a texture of its " ..
+					"own: " .. (png and n .. " colours" or "no picture"))
+			probe = nil
+		end
+	end
 	magic.SubscribeToEvent("Update", function()
 		frames = frames + 1
+		ui_probe()
 		if frames == 3 then
 			log:info("launch sandbox: another extension's unsubscribes of " ..
 					"its handler: " .. peer_removed .. " removed, its own " ..

@@ -3071,15 +3071,21 @@ function VIEW.next()
 	local surface = tex:GetRenderSurface()
 	surface:SetViewport(0, vp)
 	surface.updateMode = magic.SURFACE_MANUALUPDATE
-	-- The server's camera: the chunks round the view meshed first
+	-- The server's camera: the chunks round the view meshed first.
+	-- ([KIT_PLAY_PICTURE_UI]) Its own view is the player's screen: the UI
+	-- laid out at the picture's size from now (a frame at least before it
+	-- is drawn) and drawn over it
 	if q.camera and pos then
 		require("buildat/module/voxelworld").set_camera(node)
+	elseif q.camera then
+		magic.picture_ui(tex)
 	end
 	-- ([KIT_SIDE_SCENERY] (8) a pose's camera is the parallax layers' while
 	-- it draws: pose, cam, aspect)
 	VIEW.job = {node = node, tex = tex, vp = vp, surface = surface,
 			frames = 0, t = buildat.get_time_us(), pose = pos ~= nil, cam = cam,
-			aspect = w / h, hidden = q.camera and true or false}
+			aspect = w / h, hidden = q.camera and true or false,
+			at = q.camera and tonumber(v.at) or nil}
 	-- (the layers placed for it now: a picture queued here is drawn this
 	-- frame, maybe after their Update)
 	M.parallax_tick()
@@ -3127,9 +3133,14 @@ buildat.sub_packet("kit:view", function(data)
 end)
 -- The server's camera's view has its chunks: none came lately and none
 -- is waiting for its mesh (the first view waits 0.4 s for them to start
--- coming); out of budget it is drawn as it is
+-- coming); out of budget it is drawn as it is. ([KIT_PLAY_PICTURE_UI]) A
+-- view `at` ms after the request (play_input's picture_at: its body's
+-- surroundings are loaded) is drawn then
 function VIEW.settled(j)
 	local now = buildat.get_time_us()
+	if j.at then
+		return now - VIEW.t0 >= j.at * 1000, true
+	end
 	if now - VIEW.t0 > VIEW.budget then
 		return true, false
 	end

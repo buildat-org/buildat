@@ -1716,6 +1716,12 @@ void View::ExecuteRenderPathCommands()
                 break;
 
             case CMD_RENDERUI:
+                // buildat [KIT_PLAY_PICTURE_UI]: never into a texture. A
+                // script reads its own render targets back (texture_png),
+                // and the UI holds the client's own (the trust colour,
+                // another's windows); the server's camera's pictures get
+                // it from the client itself (picture_ui)
+                if (!renderTarget_)
                 {
                     SetRenderTargets(command);
                     GetSubsystem<UI>()->Render(false);
