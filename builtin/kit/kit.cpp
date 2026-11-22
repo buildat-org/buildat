@@ -5430,6 +5430,28 @@ struct Module: public interface::Module, public Interface
 				if(ov.at(m).is_string() && decl.get(ov.at(m).as_string()).
 						is_object())
 					in.overrides.insert(ov.at(m).as_string());
+			// [KIT_REPORT_1122] A scene's environment of before alpha.64 has
+			// no own-param list: each param other than the default its own (an
+			// inherited one holds the default), so it looks as it did
+			if(t.environment && e.parent != 1 && !e.has_pos && e.kind.empty() &&
+					decl.is_object()){
+				ss_ made;
+				for(json::Iterator it(decl); it; ++it){
+					const json::Value &v = in.params.get(it.key()),
+							&d = (*it).get("default");
+					if(in.overrides.count(it.key()) || (v.is_number() &&
+							d.is_number() ? v.as_number() == d.as_number() :
+							v.stringify() == d.stringify()))
+						continue;
+					in.overrides.insert(it.key());
+					made += (made.empty() ? "" : ", ")+it.key();
+				}
+				if(!made.empty()){
+					log_i(MODULE, "Entity %s's %s: %s its own (set before its "
+							"own-param list)", cs(itos(e.id)), cs(in.type), cs(made));
+					m_upgraded++;
+				}
+			}
 			const json::Value &ls = cj.get("links");
 			for(unsigned m = 0; m < ls.size(); m++){
 				Link l;
@@ -35691,12 +35713,15 @@ struct Module: public interface::Module, public Interface
 				"on_enter(c, by) and on_leave(c, by) as a body enters and leaves "
 				"it. Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
-				"on_timer(c, name, player), on_params(c, changed), on_remove(c). c: "
+				"on_timer(c, name, player) (player: \"player:<id>\" when "
+				"c:after(s, name, {player = by}) set it, else nil), "
+				"on_params(c, changed), on_remove(c). c: "
 				"c.id, c.pos, c.params, c.state (read and write), "
 				"c:params_of(type) (the params of the same entity's component of "
 				"that type, a copy read at use, so always current; nil: none; "
 				"c:params_of(\"kit/polygon\").points), c:emit(output, value), "
-				"c:after(seconds, name) (then on_timer), c:log(...) (get_log), "
+				"c:after(seconds, name, {player = by}) (then on_timer; one a name "
+				"and player), c:log(...) (get_log), "
 				"c:name(by), c:teleport({x, y, z}) (who set the run off). A "
 				"movement (a seat's: seat = true, usable = true; or "
 				"kit/controls' movement): movement = {body = {r = 0.45, h = 1.7, "

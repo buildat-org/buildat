@@ -605,6 +605,15 @@ namespace interface
 //   any, none (no value), number, bool, string, entity, position. A link
 //   joins an output to an input that takes its values; an emitted or
 //   delivered value not of its type is logged and not sent.
+//   [KIT_REPORT_1122] The order: a run's emits go out as emitted, each
+//   along its component's links in their list's order (the order they
+//   were made; a save, export and duplicate keep it; [KIT_SYMMETRY] a
+//   link's copies right after it), into an entity's components that take
+//   the input in theirs; each becomes a run at the end of one queue, run
+//   in order. So what a signal sets off comes after every run queued
+//   before it: a value two links away (a kit/records' best from a
+//   kit/stopwatch's elapsed) always after the ones one link away (that
+//   elapsed to the run), whatever the links' order.
 //   "string:player" is a string the editor calls a player; a link does not
 //   look at the label.
 //   [KIT_SCENE_PACKAGES] A link by name ("to_name" instead of "to"; the op
