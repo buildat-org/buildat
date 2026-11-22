@@ -20,6 +20,17 @@
 -- the bike holds itself on the finish line, on their client at once; the
 -- finish here (the time, the result) still decides. simplified: a last gem
 -- taken under a round trip before the line, the client's bike rewinds there.
+-- [KIT_TEMPLATE_CLEANUP] Back at `start` facing its way (a spawner's yaw:
+-- turn it to turn the riders). The HUD's lines, notes and the result card's
+-- are params (cat hud), {word}s in them filled in: {got} and {all} gems,
+-- {time} and {best} seconds.
+local function fill(c, param, vars)
+	return (tostring(c.params[param]):gsub("{(%w+)}", function(k)
+		local v = vars and vars[k]
+		return v ~= nil and tostring(v) or nil
+	end))
+end
+
 local function view(c, by)
 	local r = c.state.runs[by]
 	if not r then
@@ -43,8 +54,8 @@ end
 
 -- Its line: the gems; a note (what just happened) to its own text
 local function show(c, by, r, note)
-	c:emit("hud", "Gems " .. r.got .. "/" .. gems(c) ..
-			(r.got >= gems(c) and "   The finish is open" or ""), by)
+	c:emit("hud", fill(c, r.got >= gems(c) and "hud_open" or "hud_gems",
+			{got = r.got, all = gems(c)}), by)
 	if note then
 		c:emit("note", note, by)
 	end
@@ -61,8 +72,8 @@ local function open(c, by, r)
 end
 
 -- Over from the start: the clock at 0, from 0 a second later (the bike's
--- crash, a teleport)
-local function over(c, by, why)
+-- crash, a teleport); why for the log, the note the param `note`'s text
+local function over(c, by, why, note, vars)
 	local r = view(c, by)
 	r.got = 0
 	for _, id in ipairs(c.linked_in.gem or {}) do
@@ -71,7 +82,7 @@ local function over(c, by, why)
 	c:emit("reset", nil, by)
 	open(c, by, r)
 	c:log(c:name(by) .. ": " .. why .. ", the run starts over")
-	show(c, by, r, why:sub(1, 1):upper() .. why:sub(2))
+	show(c, by, r, fill(c, note, vars))
 	if r.playing or not waits(c) then
 		c:after(1, "go", {player = by})
 	end
@@ -82,12 +93,15 @@ local function finished(c, by, r, best)
 	local t, new = r.time, r.new
 	r.time, r.new = nil, nil
 	local name = c:name(by)
-	c:emit("result", "Time " .. tenths(t) .. (best and "|Best " .. tenths(best) or
-			"") .. (new and "|Your best yet" or ""), by)
+	local vars = {time = tenths(t), best = best and tenths(best)}
+	c:emit("result", fill(c, "result_time", vars) .. (best and "|" ..
+			fill(c, "result_best", vars) or "") .. (new and "|" ..
+			fill(c, "result_new", vars) or ""), by)
 	c:emit("finished", t, by)
 	c:log(name, "finished in", tenths(t), new and "(best)" or "")
-	over(c, by, "finished in " .. tenths(t) .. (new and ", the best" or ""))
-	c:teleport(nil, {entity = c.params.start, yaw = 90})
+	over(c, by, "finished in " .. tenths(t) .. (new and ", the best" or ""),
+			new and "note_best" or "note_finish", vars)
+	c:teleport(nil, {entity = c.params.start})
 end
 
 return {
@@ -118,11 +132,35 @@ return {
 			result = "A run finished. Value: \"Time 12.3|Best 11.0\", for the rider's result card.",
 		},
 		params = {
-			start = "The entity a rider is put back at after a hazard or the finish.",
+			start = "The entity a rider is put back at after a hazard or the finish, facing its way (a spawner's).",
+			hud_gems = "The HUD: the gems taken ({got}) of all ({all}).",
+			hud_open = "The HUD with every gem taken.",
+			note_start = "The note as a run starts.",
+			note_crash = "The note after a crash.",
+			note_hazard = "The note after a hazard.",
+			note_finish = "The note after the finish ({time}).",
+			note_best = "The note after a finish that was the rider's best.",
+			note_gems = "The note at the finish with a gem left.",
+			result_time = "The result card's time line ({time}).",
+			result_best = "The result card's best line ({best}).",
+			result_new = "The result card's last line after a best.",
 		},
 	},
 	params = {
 		start = {type = "entity", default = 0},
+		hud_gems = {cat = "hud", type = "string", default = "Gems {got}/{all}"},
+		hud_open = {cat = "hud", type = "string",
+			default = "Gems {got}/{all}   The finish is open"},
+		note_start = {cat = "hud", type = "string", default = "Off you go"},
+		note_crash = {cat = "hud", type = "string", default = "Crashed"},
+		note_hazard = {cat = "hud", type = "string", default = "Hit a hazard"},
+		note_finish = {cat = "hud", type = "string", default = "Finished in {time}"},
+		note_best = {cat = "hud", type = "string",
+			default = "Finished in {time}, the best"},
+		note_gems = {cat = "hud", type = "string", default = "Take every gem first"},
+		result_time = {cat = "hud", type = "string", default = "Time {time}"},
+		result_best = {cat = "hud", type = "string", default = "Best {best}"},
+		result_new = {cat = "hud", type = "string", default = "Your best yet"},
 	},
 	state = {
 		runs = {default = {}, per_player = true},
@@ -155,8 +193,8 @@ return {
 		local r = view(c, by)
 		if input == "start" then
 			r.playing, r.finishing, r.time = true, nil, nil
-			over(c, by, "off you go")
-			c:teleport(nil, {entity = c.params.start, yaw = 90})
+			over(c, by, "off you go", "note_start")
+			c:teleport(nil, {entity = c.params.start})
 			return
 		elseif input == "elapsed" then
 			-- (the finish's; the result once the records' best is back,
@@ -187,13 +225,13 @@ return {
 			open(c, by, r)
 			show(c, by, r)
 		elseif input == "crash" then
-			over(c, by, "crashed")
+			over(c, by, "crashed", "note_crash")
 		elseif input == "hazard" then
-			over(c, by, "hit a hazard")
-			c:teleport(nil, {entity = c.params.start, yaw = 90})
+			over(c, by, "hit a hazard", "note_hazard")
+			c:teleport(nil, {entity = c.params.start})
 		elseif input == "finish" then
 			if r.got < gems(c) then
-				show(c, by, r, "Take every gem first")
+				show(c, by, r, fill(c, "note_gems"))
 				return
 			end
 			r.playing, r.finishing, r.new = nil, true, nil

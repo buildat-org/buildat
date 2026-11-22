@@ -12,7 +12,8 @@
 #      track's (world's) heightmap raised; the Scenes window's Duplicate
 #      world: world_2, kitboss taken there. By MCP: world_2's entities new
 #      ids, as many and named as world's; its links and entity parameters
-#      among them onto world_2's (the race's mine, its HUD), those onto the
+#      among them onto world_2's (the race's HUD and weapons, the weapons'
+#      mine), those onto the
 #      root's (the lobby, Retry, the music, the result) as they were, its
 #      link by name kept; its kit/scene_info "Race: The Bone Yard
 #      (world_2)", listed; the raised ground copied. In world_2 the start
@@ -229,9 +230,11 @@ elif phase == "brim":
     assert cp["lobby"] == 7 and cp["retry"] == 1315, cp
     to = {l["output"]: l["to"] for l in comp(crace, "local/brim_race")["links"]}
     assert to["go"] == 780 and to["result"] == 13, to
-    assert to["hud"] in ces and cp["mine"] in ces, (to, cp)
+    assert to["hud"] in ces and to["arm"] in ces, (to, cp)
+    weap = of(ces, "local/brim_weapons")[0]
+    assert comp(weap, "local/brim_weapons")["params"]["mine"] in ces, weap
     mine = [e for e in ces.values() if e["name"] == "mine (the race's pattern)"][0]
-    assert any({"output": "touched", "to_name": "the race", "input": "mine"}.items() <= l.items()
+    assert any({"output": "touched", "to_name": "the weapons", "input": "mine"}.items() <= l.items()
         for c in mine["components"] for l in c.get("links", [])), mine
     info = comp(of(ces, "kit/scene_info")[0], "kit/scene_info")["params"]
     assert info["title"] == "Race: The Bone Yard (world_2)", info

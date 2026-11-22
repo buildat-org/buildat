@@ -259,7 +259,7 @@ local function drop_look(n)
 	n.vanish = nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
-	n.text_back, n.text_back_node = nil, nil
+	n.text_back, n.text_back_node, n.edge_mat = nil, nil, nil
 end
 
 -- [KIT_LIGHTING_SCENE] The lighting turned physical or back (environment.lua's
@@ -965,6 +965,39 @@ local function draw_look(id, n, look)
 			m.material = n.mat
 			m.castShadows = true
 		end
+		-- [KIT_COLLECTIBLE] edge = "#rrggbb": a box's twelve edges as boards
+		-- of that colour (a crate's frame), in the body, so a when's scale
+		-- and a vanish take them along. simplified: a box's alone, each
+		-- board an eighth of its shortest side wide, standing out a quarter
+		-- of that; a width field is the upgrade
+		if type(look.edge) == "string" and look.edge ~= "" and
+				(look.shape == nil or look.shape == "box") then
+			local s = look_box(look, false).size
+			local w = math.min(s[1], s[2], s[3]) / 8
+			local out = w / 4
+			n.edge_mat = material(look.material)
+			for axis = 1, 3 do
+				for _, q in ipairs({{-1, -1}, {-1, 1}, {1, -1}, {1, 1}}) do
+					local pos, sc, k = {0, 0, 0}, {}, 0
+					for i = 1, 3 do
+						if i == axis then
+							sc[i] = 1 + 2 * out / s[i]
+						else
+							k = k + 1
+							pos[i] = q[k] * (0.5 - (w / 2 - out) / s[i])
+							sc[i] = w / s[i]
+						end
+					end
+					local e = n.body:CreateChild("Edge")
+					e.position = v3(pos)
+					e.scale = v3(sc)
+					local m = e:CreateComponent("StaticModel")
+					m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+					m.material = n.edge_mat
+					m.castShadows = true
+				end
+			end
+		end
 		if look.text then
 			-- [KIT] stage 4l: text_facing "flat" (on the box's front, its -z
 			-- side, as the entity faces) or "camera" (turning round y),
@@ -1065,6 +1098,13 @@ local function draw_look(id, n, look)
 		col = magic.Color(col.r, col.g, col.b, 0.4)
 	end
 	n.mat:SetShaderParameter("MatDiffColor", col)
+	if n.edge_mat then
+		local ec = color(look.edge, magic.Color(0.3, 0.2, 0.1))
+		if M.physical and M.physical() and look.material ~= "glow" then
+			ec = magic.Color(ec.r ^ 2.2, ec.g ^ 2.2, ec.b ^ 2.2, ec.a)
+		end
+		n.edge_mat:SetShaderParameter("MatDiffColor", ec)
+	end
 	-- [KIT_LOOK_MATERIAL] (a voxel material is its own colours: col is
 	-- unused there)
 	-- [KIT] stage 4l: color "none", no box drawn (a sign's letters alone)

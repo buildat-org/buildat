@@ -1,8 +1,8 @@
 -- Brimstone Speedway's car: a movement (kit/controls' movement) for the
 -- top-down view, stepped in kit/controls' plane "horizontal" (the body held
 -- at its height, x and z the plane's 2D x and y). W gas, S brake and
--- reverse, A and D steer, Space the handbrake; the race's weapon fires on
--- its own key (the race's action "fire": Ctrl, the left mouse button).
+-- reverse, A and D steer, Space the handbrake; a weapon fires on its own
+-- key (brim_weapons' action "fire": Ctrl, the left mouse button).
 -- A rigid body with a mass and a yaw inertia on four tyres (the user's
 -- EDGM car, a Box2D truck, ported without Box2D): each tyre cancels the
 -- speed across it at its place, up to a grip limit by the floor under it;
@@ -16,7 +16,8 @@
 -- the grip and drag: dirt (and anything else: the track's ground), "gravel"
 -- (the run-off beside it: less grip, more drag, short of "mud"), "mud",
 -- "oil", "asphalt" holds best, "boost" pushes it on; "finish" is the lap
--- line (dirt to the tyres).
+-- line (dirt to the tyres). [KIT_TEMPLATE_CLEANUP] The grip and the power
+-- are params (cat physics), each surface's grip its <surface>_grip.
 -- [KIT_BODY_VARS] Read from s.vars (the race's c:body_var), here and in the
 -- client's prediction alike:
 --   lap_open: every checkpoint passed in order; the next touch of the
@@ -26,8 +27,8 @@
 --   wreck: wrecked, no control, braked to a stop;
 --   paint: its colour variant (1...6), drawn by brim_car.client.lua;
 --   ghost: a time trial's car, meeting no other car;
---   fire: the race's count of its fire key's presses: a new one is the
---     event "fire" with the heading (the race's action has no heading);
+--   fire: brim_weapons' count of its fire key's presses: a new one is the
+--     event "fire" with the heading (the action has no heading);
 --   run: the race's count of the player's runs: a new one clears the tyre
 --     marks (brim_car.client.lua, its own car's state's s.vars).
 -- [KIT_TOP_DOWN] (8) Two circles along the body meet the walls, one round
@@ -41,8 +42,9 @@
 -- the contact (s.vel is that) and gives up its own share, once each time
 -- the other has stepped (s.met): a car pushed along keeps up with the one
 -- pushing.
--- Events (the movement's outputs, the race's inputs): lap, fire (value: the
--- heading), smash (a wall hit hard; value: the speed into it), ram.
+-- Events (the movement's outputs; lap the race's input, fire and ram
+-- brim_weapons'): lap, fire (value: the heading), smash (a wall hit hard;
+-- value: the speed into it), ram.
 -- Its state: s.c {x, z, vx, vz}, s.h the heading (radians from +z toward
 -- +x, kit's yaw), s.w its yaw rate, s.st the steering angle, s.bumps the
 -- hard wall hits so far and s.bump_v the last one's speed (its client's
@@ -71,15 +73,14 @@ local function tyres(p)
 end
 -- The yaw inertia over the mass (m^2: a 4.8 by 2 m box's, a little more)
 local RG2 = 1.5
--- The floor: {grip (a share of p.grip), drag (m/s^2 on the car, its four
--- tyres together), marks always}; EDGM's asphalt, gravel and field
+-- The floor: {grip (a share of p.grip: asphalt's whole, the others' their
+-- params <surface>_grip), drag (m/s^2 on the car, its four tyres together),
+-- marks always}; EDGM's asphalt, gravel and field
 local GROUND = {asphalt = {1, 0.16}, dirt = {0.5, 0.33}, mud = {0.25, 2.5, true},
 	gravel = {0.35, 1.8, true},
 	oil = {0.08, 0.1}, boost = {0.8, 0.1}}
 -- (the pose's floor index: the client's dust and marks colours)
 local SURF = {dirt = 1, mud = 2, oil = 3, asphalt = 4, boost = 5, gravel = 6}
-local ROLL = 0.25 -- rolling resistance (m/s^2)
-local BRAKE = 9 -- the brakes (m/s^2)
 local WALL_E, WALL_MU = 0.35, 0.35
 local CAR_E = 0.2
 local PI = math.pi
@@ -122,7 +123,7 @@ return {
 		what = "Brimstone Speedway's car, seen from above: a heavy body on four tyres. W is the gas, S the brake, A and D steer and Space is the handbrake. Its grip depends on the floor's surface: dirt (the default), gravel, mud, oil, asphalt, boost or finish (the lap line).",
 		outputs = {
 			lap = "It crossed the finish line with every checkpoint passed (the race's lap_open).",
-			fire = "The race's fire key was pressed (its body var fire). Value: the car's heading (degrees, kit's yaw).",
+			fire = "The fire key was pressed (its body var fire, brim_weapons'). Value: the car's heading (degrees, kit's yaw).",
 			smash = "It hit a wall hard. Value: its speed at impact.",
 			ram = "It hit another car while boosted. Value: the other's by.",
 		},
@@ -132,6 +133,20 @@ return {
 			steer = "The front tyres' widest steering angle, degrees.",
 			grip = "Each tyre's grip on asphalt, m/s^2 (EDGM's impulse_base).",
 			boost = "The top speed's factor while the ram boost is on.",
+			boost_push = "The engine's push's factor while the ram boost is on.",
+			low_gear = "The engine's push's factor under 1.5 m/s (first gear).",
+			brake = "The brakes, m/s^2.",
+			roll = "Rolling resistance, m/s^2.",
+			handbrake = "The handbrake's pull, a share of the engine's push.",
+			rear_grip = "The driven rear tyres' grip, a factor over the front ones'.",
+			throttle_grip = "The rear tyres' grip under throttle, a factor.",
+			brake_grip = "Every tyre's grip under the brakes, a factor.",
+			handbrake_grip = "The rear tyres' grip under the handbrake while moving, a factor.",
+			dirt_grip = "The grip on dirt (and any floor not named here), a share of the asphalt's.",
+			gravel_grip = "The grip on gravel (the run-off), a share of the asphalt's.",
+			mud_grip = "The grip in mud, a share of the asphalt's.",
+			oil_grip = "The grip on oil, a share of the asphalt's.",
+			boost_grip = "The grip on a boost floor, a share of the asphalt's.",
 			track = "Each tyre's distance from the middle sideways, m (the client part draws them there).",
 			front = "The front tyres ahead of the middle, m.",
 			rear = "The rear tyres behind the middle, m.",
@@ -166,6 +181,34 @@ return {
 			max = 40},
 		boost = {cat = "physics", type = "number", default = 1.45, min = 1,
 			max = 3},
+		boost_push = {cat = "physics", type = "number", default = 2, min = 1,
+			max = 5},
+		low_gear = {cat = "physics", type = "number", default = 1.5, min = 1,
+			max = 4},
+		brake = {cat = "physics", type = "number", default = 9, min = 1,
+			max = 50},
+		roll = {cat = "physics", type = "number", default = 0.25, min = 0,
+			max = 5},
+		handbrake = {cat = "physics", type = "number", default = 0.35, min = 0,
+			max = 2},
+		rear_grip = {cat = "physics", type = "number", default = 1.2, min = 0.1,
+			max = 4},
+		throttle_grip = {cat = "physics", type = "number", default = 0.75,
+			min = 0.05, max = 1},
+		brake_grip = {cat = "physics", type = "number", default = 0.5,
+			min = 0.05, max = 1},
+		handbrake_grip = {cat = "physics", type = "number", default = 0.3,
+			min = 0.05, max = 1},
+		dirt_grip = {cat = "physics", type = "number", default = 0.5, min = 0.01,
+			max = 2},
+		gravel_grip = {cat = "physics", type = "number", default = 0.35,
+			min = 0.01, max = 2},
+		mud_grip = {cat = "physics", type = "number", default = 0.25, min = 0.01,
+			max = 2},
+		oil_grip = {cat = "physics", type = "number", default = 0.08, min = 0.01,
+			max = 2},
+		boost_grip = {cat = "physics", type = "number", default = 0.8, min = 0.01,
+			max = 2},
 		track = {cat = "physics", type = "number", default = 0.92, min = 0.3,
 			max = 2},
 		front = {cat = "physics", type = "number", default = 1.3, min = 0.3,
@@ -191,8 +234,10 @@ return {
 			f, r, hb = 0, 0, false
 		end
 		local top = (p.speed or 28) * (v.boost and (p.boost or 1.45) or 1)
-		local push = (p.accel or 7) * (v.boost and 2 or 1)
+		local push = (p.accel or 7) * (v.boost and (p.boost_push or 2) or 1)
 		local grip = p.grip or 7
+		-- (rolling resistance and the brakes, m/s^2)
+		local ROLL, BRAKE = p.roll or 0.25, p.brake or 9
 		local y = type(s.pos) == "table" and tonumber(s.pos[2]) or 0
 		local sh, ch = math.sin(s.h), math.cos(s.h)
 		-- The body's frame: ahead (sh, ch), right (ch, -sh); m = {the speed
@@ -225,7 +270,8 @@ return {
 		if hb then
 			-- (EDGM: the handbrake's force is the engine's push; here 0.35 of
 			-- it: the locked rear's slide, not a stop, turns the car)
-			af = af - clamp(vf / dt, -push * 0.35, push * 0.35)
+			local hp = push * (p.handbrake or 0.35)
+			af = af - clamp(vf / dt, -hp, hp)
 			flags = flags + 16
 		elseif f < 0 then
 			if vf > 0 then
@@ -240,7 +286,7 @@ return {
 				af = af + BRAKE * f
 				brake = true
 			else
-				af = af + push * f * (vf < 1.5 and 1.5 or 1)
+				af = af + push * f * (vf < 1.5 and (p.low_gear or 1.5) or 1)
 				throttle = true
 			end
 		end
@@ -271,7 +317,8 @@ return {
 			local tx = c[1] + lx * ch + lz * sh
 			local tz = c[2] - lx * sh + lz * ch
 			local info = w:under(tx, y + 0.1, tz)
-			local g = GROUND[info and info.surface or "dirt"] or GROUND.dirt
+			local sf = info and GROUND[info.surface] and info.surface or "dirt"
+			local g = GROUND[sf]
 			local fr = info and tonumber(info.friction) or 1
 			-- Its speed at its place: across and along the body
 			local pr, pf = d0[1] + d0[3] * lz, d0[2] - d0[3] * lx
@@ -284,25 +331,25 @@ return {
 			local sa, ca = math.sin(a), math.cos(a)
 			local across = pr * ca - pf * sa
 			local j = -across / 4
-			local lim = grip * g[1] * fr * dt
+			local lim = grip * (p[sf .. "_grip"] or g[1]) * fr * dt
 			local slip = g[3] == true
 			if k > 2 then
-				lim = lim * 1.2
+				lim = lim * (p.rear_grip or 1.2)
 				if hb then
 					if speed > 0.2 then
 						-- (EDGM's 0.4: the heavier car's slide wants less;
 						-- at 0.2 a half second's pull at full lock spun it past
 						-- what a counter-steer catches)
-						lim = lim * 0.3
+						lim = lim * (p.handbrake_grip or 0.3)
 						slip = true
 					end
 				elseif throttle then
-					lim = lim * 0.75
+					lim = lim * (p.throttle_grip or 0.75)
 				elseif brake then
-					lim = lim * 0.5
+					lim = lim * (p.brake_grip or 0.5)
 				end
 			elseif brake then
-				lim = lim * 0.5
+				lim = lim * (p.brake_grip or 0.5)
 			end
 			local aj = j < 0 and -j or j
 			if aj > lim then
@@ -442,7 +489,7 @@ return {
 			events[#events + 1] = "lap"
 		end
 		s.on_line = on_line or nil
-		-- The race's fire key: a new count is a shot along the heading
+		-- The fire key: a new count is a shot along the heading
 		if v.fire ~= s.fired then
 			s.fired = v.fire
 			if v.fire and not v.wreck then

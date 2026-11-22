@@ -11,28 +11,28 @@
 -- (Crag Trial's crag_run: its linked gems are the ones to take). The
 -- client part hides it on this player's screen at once (e:predict), the
 -- look's when.vanish (module.lua) playing it out: "fly" a short shrink
--- and rise, "none" gone at once.
+-- and rise, "none" gone at once. [KIT_COLLECTIBLE] (4z37zr) Its box may wear
+-- a voxel material (`voxel`) and darker boards along its edges (`edge`, the
+-- look's edge): Brimstone Speedway's wooden crates.
 return {
 	version = 1,
 	zone = "size",
 	look = {shape = "box", size = "param:look_size", color = "param:color",
-		offset = "param:offset", state = "taken",
+		offset = "param:offset", voxel = "param:voxel", edge = "param:edge",
+		state = "taken",
 		when = {scale = {0.01, 0.01, 0.01}, vanish = "param:vanish"}},
 	params = {
-		-- What a take sends on pickup (a weapon's name, a score...)
 		value = {type = "string", default = ""},
-		-- Seconds until it is back for that player; 0: at a reset only
 		again = {type = "number", default = 0, min = 0, max = 3600},
-		-- The zone: the cells from its own on
 		size = {cat = "look", type = "position", default = {1, 1, 1}},
-		-- Played at it on a take ("": none)
 		sound = {cat = "look", type = "sound", default = "kit/pickup"},
-		-- Its look: half its side, colour, and middle from its position
 		look_size = {cat = "look", type = "number", default = 0.25,
 			min = 0.02, max = 8},
 		color = {cat = "look", type = "string", default = "#4cc9f0"},
 		offset = {cat = "look", type = "position", default = {0, 0, 0}},
-		-- How it goes on a take: "fly" (shrinks and rises), "none" (at once)
+		voxel = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
+		edge = {cat = "look", type = "string", default = ""},
 		vanish = {cat = "look", type = "string", default = "fly",
 			choices = {"fly", "none"}},
 	},
@@ -46,6 +46,18 @@ return {
 		},
 		outputs = {
 			pickup = "A player took it. Value: its value.",
+		},
+		params = {
+			value = "What a take sends on pickup (a weapon's name, a score...).",
+			again = "Seconds until it is back for that player; 0: at a reset only.",
+			size = "Its zone: the cells from its own on.",
+			sound = "Played at it on a take (empty: none).",
+			look_size = "Its look's half side, in cells.",
+			color = "Its look's colour, as #rrggbb.",
+			offset = "Its look's middle from its position.",
+			voxel = "A voxel material its box wears (empty: its colour): kit/planks for a wooden crate.",
+			edge = "Boards of this colour (#rrggbb) along its box's edges, a crate's frame (empty: none).",
+			vanish = "How it goes on a take: fly (shrinks and rises) or none (at once).",
 		},
 	},
 	inputs = {reset = "none"},
