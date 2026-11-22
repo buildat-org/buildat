@@ -1188,10 +1188,12 @@ buildat.sub_packet("kit:environment", function(data)
 	fade_to(d, set_lighting(d.lighting) or first)
 	env_light()
 	log:info(string.format("kit: environment: from the %s, %s, %.1f o'clock,"..
-			" sky %s, fog %s-%s, gravity %s, weather %s, season %s",
+			" sky %s, fog %s-%s, gravity %s, weather %s, season %s, ambient %s,"..
+			" sun %s, latitude %s",
 			tostring(d.from), tostring(d.entity), env.h, tostring(d.sky),
 			tostring(d.fog_start), tostring(d.fog_end), tostring(d.gravity),
-			tostring(d.weather), tostring(d.season)))
+			tostring(d.weather), tostring(d.season), tostring(d.ambient),
+			tostring(d.sun), tostring(d.latitude)))
 	if d.weather ~= was then
 		log:info("kit: weather " .. tostring(d.weather))
 	end

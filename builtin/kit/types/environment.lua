@@ -4,9 +4,11 @@
 -- stands), gravity (times each movement's own), the weather and the
 -- season. On the app root it is every scene's; a scene with one of its own
 -- (placed while one is on the root, or in a game of more than one scene:
--- [KIT_SIDE_SCENERY] (1)) has that instead, whole.
--- [KIT_SCENE_TREE] and the scenes under it theirs: the nearest copy from a
--- scene up.
+-- [KIT_SIDE_SCENERY] (1)) has its parameters set on it (at its place or
+-- after: kit.cpp keeps them as its overrides) and the rest from above
+-- ([KIT_ENV_INHERIT]: the sky set, the root's light, fog and time kept).
+-- [KIT_SCENE_TREE] and the scenes under it theirs: each parameter the
+-- nearest copy's from a scene up that sets it.
 --
 -- Kit keeps the clock and tells the clients; they draw the light of the
 -- hour, the weather under open sky (rain, snow, a storm: rain and a dark

@@ -8849,10 +8849,24 @@ struct Module: public interface::Module, public Interface
 					!scene_instance(t, scene, &holder, &ci) ||
 					m_entities[holder].parent == sid)
 				continue;
-			for(unsigned i = 0; i < all.size(); i++)
-				if((uint64_t)json::jint(all.at(i), "id", 0) == holder &&
-						ci < all.at(i).get("components").size())
-					carried.append(all.at(i).get("components").at((unsigned)ci));
+			for(unsigned i = 0; i < all.size(); i++){
+				if((uint64_t)json::jint(all.at(i), "id", 0) != holder ||
+						ci >= all.at(i).get("components").size())
+					continue;
+				json::Value cj = all.at(i).get("components").at((unsigned)ci).
+						deepcopy();
+				// [KIT_ENV_INHERIT] an environment as the scene has it, each
+				// parameter its own
+				if(ty.environment){
+					const json::Value v = env_merged(scene);
+					json::Value ov = json::array();
+					for(json::Iterator it(v); it; ++it)
+						ov.append(it.key());
+					cj.set("params", v);
+					cj.set("overrides", ov);
+				}
+				carried.append(cj);
+			}
 		}
 		ss_ text, title;
 		if(carried.size()){
@@ -23178,15 +23192,72 @@ struct Module: public interface::Module, public Interface
 		return v;
 	}
 
+	// [KIT_ENV_INHERIT] Whether an environment's parameter is its own: the
+	// root's all, a scene's those set on it (its overrides) or by a signal
+	// (state.set); the rest the one's above
+	static bool env_own(uint64_t holder, const Instance &in, const ss_ &k)
+	{
+		return holder == 1 || in.overrides.count(k) ||
+				!in.state.get("set").get(k).is_undefined();
+	}
+
+	// [KIT_ENV_INHERIT] A scene's environment's values: each parameter the
+	// nearest environment's from the scene up that has it as its own, else
+	// the type's default; undefined with none. clock: the entity whose
+	// clock it runs on, the nearest with the time or day_minutes its own
+	json::Value env_merged(const ss_ &scene, uint64_t *clock = nullptr)
+	{
+		uint64_t ck = 0;
+		const Instance *nearest = env_of(scene, &ck);
+		if(!nearest)
+			return json::Value();
+		json::Value v = params_of(nearest->type, nullptr);
+		const sv_<uint64_t> chain = scene_chain(scene);
+		for(size_t i = chain.size(); i-- > 0;){
+			uint64_t id = 0;
+			const Instance *in = env_at(chain[i], &id);
+			if(!in)
+				continue;
+			const json::Value own = env_values(*in);
+			for(json::Iterator it(own); it; ++it)
+				if(!v.get(it.key()).is_undefined() &&
+						env_own(chain[i], *in, it.key()))
+					v.set(it.key(), *it);
+			if(env_own(chain[i], *in, "time") ||
+					env_own(chain[i], *in, "day_minutes"))
+				ck = id;
+		}
+		if(clock)
+			*clock = ck;
+		return v;
+	}
+
+	// [KIT_ENV_INHERIT] A scene's environment entity's parameters it has
+	// from above, {name: value} (empty: the root's, or all its own)
+	json::Value env_inherited(const Entity &e, const Instance &in)
+	{
+		json::Value out = json::object();
+		auto s = m_entities.find(e.parent);
+		if(e.parent == 1 || s == m_entities.end() || s->second.kind != "scene" ||
+				env_on(e) != &in)
+			return out;
+		const json::Value v = env_merged(s->second.name);
+		for(json::Iterator it(v); it; ++it)
+			if(!env_own(e.parent, in, it.key()))
+				out.set(it.key(), *it);
+		return out;
+	}
+
 	// [KIT_LIGHTING_SCENE] A scene's lighting: the nearest environment's
 	// from the scene up that says other than inherit; inherit on the root's
-	// is fast_physical, no environment on the root cartoon
+	// is fast_physical, no environment on the root cartoon.
+	// [KIT_ENV_INHERIT] a scene's counts where it is its own
 	ss_ env_lighting(const ss_ &scene)
 	{
 		for(uint64_t h : scene_chain(scene)){
 			const Instance *in = env_at(h);
-			const json::Value l = in ? env_values(*in).get("lighting") :
-					json::Value();
+			const json::Value l = in && env_own(h, *in, "lighting") ?
+					env_values(*in).get("lighting") : json::Value();
 			if(l.is_string() && l.as_string() != "inherit")
 				return l.as_string();
 			if(h == 1)
@@ -23197,10 +23268,7 @@ struct Module: public interface::Module, public Interface
 
 	double env_gravity(const ss_ &scene)
 	{
-		const Instance *in = env_of(scene);
-		if(!in)
-			return 1;
-		const json::Value g = env_values(*in).get("gravity");
+		const json::Value g = env_merged(scene).get("gravity");
 		return g.is_number() && std::isfinite(g.as_number()) ?
 				std::max(0.0, std::min(10.0, g.as_number())) : 1;
 	}
@@ -23227,12 +23295,16 @@ struct Module: public interface::Module, public Interface
 				x.as_number() : def;
 	}
 
-	EnvClock& env_clock(uint64_t id, const Instance &in, const json::Value &v)
+	// ([KIT_ENV_INHERIT] v a scene's merged values, id the entity whose
+	// clock: the time as v has it, set_time's count as id's has it)
+	EnvClock& env_clock(uint64_t id, const json::Value &v)
 	{
 		EnvClock &c = m_env_clock[id];
 		const int64_t now = now_us();
-		const ss_ seq = in.params.get("time").stringify()+"|"+
-				in.state.get("time_set").stringify();
+		auto e = m_entities.find(id);
+		const Instance *in = e == m_entities.end() ? nullptr : env_on(e->second);
+		const ss_ seq = v.get("time").stringify()+"|"+(in ?
+				in->state.get("time_set").stringify() : ss_());
 		const double minutes = std::max(0.0, env_num(v, "day_minutes", 0));
 		if(seq != c.seq){
 			c.seq = seq;
@@ -23271,7 +23343,8 @@ struct Module: public interface::Module, public Interface
 				*key = j.stringify();
 			return j;
 		}
-		const json::Value v = env_values(*in);
+		uint64_t clock = id;
+		const json::Value v = env_merged(scene, &clock);
 		for(json::Iterator it(v); it; ++it)
 			j.set(it.key(), *it);
 		j.set("from", from);
@@ -23284,7 +23357,7 @@ struct Module: public interface::Module, public Interface
 			if(m.second.light > 0)
 				lamps.set(m.first, (int64_t)std::min(15, m.second.light));
 		j.set("lamps", lamps);
-		EnvClock &c = env_clock(id, *in, v);
+		EnvClock &c = env_clock(clock, v);
 		if(key)
 			*key = j.stringify()+"|"+itos(c.at)+"|"+std::to_string(c.base);
 		j.set("time", env_hours(c, now_us()));
@@ -23359,8 +23432,7 @@ struct Module: public interface::Module, public Interface
 	// materials that have them; "" swaps back
 	void send_season(const ss_ &scene, int64_t peer)
 	{
-		const Instance *in = env_of(scene);
-		const ss_ season = in ? jstr(env_values(*in), "season") : "";
+		const ss_ season = jstr(env_merged(scene), "season");
 		if(peer < 0 && m_season_sent[scene] == season)
 			return;
 		if(peer < 0)
@@ -34724,9 +34796,11 @@ struct Module: public interface::Module, public Interface
 		static const sv_<AgentTool> t = {
 			{"get_state", "=state", "The composition as built: each authored "
 				"entity's id, parent, name, position (x, y, z; y up, 1 per cell) "
-				"and components (type, params, links to other entities' inputs), "
-				"its comments (builders' notes); whether the round is Running, "
-				"and then each component's state; round: its state (Running, "
+				"and components (type, params, links to other entities' inputs; "
+				"a scene's kit/environment's overrides: those set on it, "
+				"inherited: the rest's values from above), its comments "
+				"(builders' notes); whether the round is Running, and then each "
+				"component's state; round: its state (Running, "
 				"Ended), who started it, its phase (ended or playing; with a "
 				"kit/lobby, each player's: lobby, playing or over), bodies (each "
 				"player's body's c:body_var values, keyed by its by); your scene "
@@ -35054,7 +35128,10 @@ struct Module: public interface::Module, public Interface
 			{"set_param", "set", "Sets a parameter of an entity's component to "
 				"value, checked against its type's declaration. Or params: "
 				"several of that component's parameters at once, each checked "
-				"first, all or none set, one undo.",
+				"first, all or none set, one undo. A scene's kit/environment has "
+				"each parameter not set on it from the one above (get_state: "
+				"overrides lists those set on it, inherited what the rest are); "
+				"inherit: true instead of value makes param inherited again.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"},
 				"comp": {"type": "integer", "description":
@@ -35063,7 +35140,9 @@ struct Module: public interface::Module, public Interface
 				"value": {"description":
 					"A number, string, boolean, array or object, as the parameter's type is"},
 				"params": {"type": "object", "description":
-					"Instead of param and value: {param: value, ...}"}},
+					"Instead of param and value: {param: value, ...}"},
+				"inherit": {"type": "boolean", "description":
+					"Instead of value: a scene's kit/environment's param from the one above again"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
 			// [KIT_GENERATORS] (4z37f)
 			{"run_generator", "build", "Runs a generator (experimental; an "
@@ -39204,6 +39283,14 @@ struct Module: public interface::Module, public Interface
 					c < cs_.size() && c < it->second.comps.size(); c++)
 				if(!m_types[it->second.comps[c].type].zone.empty())
 					cs_[c].set("zone", zone_json(it->second, it->second.comps[c]));
+			// [KIT_ENV_INHERIT] a scene's environment's parameters from above
+			for(unsigned c = 0; it != m_entities.end() && c < cs_.size() &&
+					c < it->second.comps.size(); c++){
+				const json::Value inh = env_inherited(it->second,
+						it->second.comps[c]);
+				if(inh.size())
+					cs_[c].set("inherited", inh);
+			}
 			kept.append(es.at(i));
 		}
 		s.set("entities", kept);
@@ -41783,7 +41870,11 @@ struct Module: public interface::Module, public Interface
 			"fast_physical (physical's sky, light of the hour and voxel lamps "
 			"without the shadow map or bloom) or physical (HDR, bloom, the "
 			"sun's shadow map); a scene's other than inherit is that scene's. "
-			"No kit/environment: cartoon and Kit's defaults.\n"
+			"A scene's own kit/environment has only the parameters set on it "
+			"(at its place or by set_param) its own, each other one the "
+			"environment's above it (the root's), so one placed to change the "
+			"sky keeps the root's light, fog and time; set_param inherit: true "
+			"gives one back. No kit/environment: cartoon and Kit's defaults.\n"
 			"\n## kit/terrain: the World (the ground)\n"
 			"generator empty, flat (at level), noise (level +- height, a "
 			"feature every spread cells) or valleys; seed; materials (a "
@@ -45464,7 +45555,7 @@ struct Module: public interface::Module, public Interface
 			// in: a kit/pickup of it), each checked as "set" checks it
 			const json::Value &ps = j.get("params");
 			if(ps.is_object()){
-				json::Value own = json::object();
+				json::Value own = json::object(), ov = json::array();
 				for(json::Iterator it(ps); it; ++it){
 					const json::Value &decl = m_types[type].decl.
 							get("params").get(it.key());
@@ -45475,8 +45566,13 @@ struct Module: public interface::Module, public Interface
 						return false;
 					}
 					own.set(it.key(), *it);
+					// [KIT_ENV_INHERIT] a scene's environment's own
+					if(env && on_scene)
+						ov.append(it.key());
 				}
 				comp.set("params", own);
+				if(ov.size())
+					comp.set("overrides", ov);
 			}
 			json::Value comps = json::array();
 			comps.append(comp);
@@ -45488,9 +45584,9 @@ struct Module: public interface::Module, public Interface
 					(under > 1 ? " under "+itos(under) :
 					ss_())+(ps.is_object() ? " with "+
 					comp.get("params").stringify() : ss_())+
-					(!env ? ss_() : on_scene ? " (this scene's own environment; "
-					"lighting inherit is the app root's)" : " (every scene's "
-					"environment but those with their own)");
+					(!env ? ss_() : on_scene ? " (this scene's own environment: "
+					"each parameter not set on it from above, the app root's)" :
+					" (every scene's environment but those with their own)");
 			return true;
 		}
 		if(op == "move" && !j.get("ids").is_undefined())
@@ -45705,6 +45801,33 @@ struct Module: public interface::Module, public Interface
 			Instance *in = instance_arg(j, e, why);
 			if(!in)
 				return false;
+			// [KIT_ENV_INHERIT] a scene's environment: what is set on it its
+			// own (its overrides), the rest the one's above; "inherit": true
+			// makes param the one's above again (its value the default)
+			const bool env_scene = e->parent != 1 && env_on(*e) == in;
+			if(j.get("inherit").is_true()){
+				const ss_ param = jstr(j, "param");
+				if(!env_scene){
+					why = "inherit: only a scene's kit/environment has its "
+							"parameters from above";
+					return false;
+				}
+				if(!in->overrides.count(param)){
+					why = "its "+param.substr(0, 64)+" is not its own: it is "
+							"the one's above already";
+					return false;
+				}
+				const size_t ci = in - &e->comps[0];
+				Entity copy = *e;
+				copy.comps[ci].params = copy.comps[ci].params.deepcopy();
+				copy.comps[ci].params.set(param, m_types[in->type].decl.
+						get("params").get(param).get("default"));
+				copy.comps[ci].overrides.erase(param);
+				change.push_back(std::make_pair(e->id, entity_json(copy)));
+				what = "entity "+itos(e->id)+"'s "+in->type+" "+param+
+						" is the one's above again";
+				return true;
+			}
 			// [KIT_AGENT_VISUALS] "params": {name: value, ...}, several of the
 			// component's at once: each checked first, one change
 			const json::Value &many = j.get("params");
@@ -45761,8 +45884,8 @@ struct Module: public interface::Module, public Interface
 				// A prefab copy's own value from now on, kept as the prefab
 				// changes ([KIT_GENERATORS] a generator's child's, as it builds
 				// again; [KIT_PREFAB_ROOT] a copy's members are its root's
-				// children so)
-				if(!copy.built.is_undefined())
+				// children so). [KIT_ENV_INHERIT] a scene's environment's own
+				if(!copy.built.is_undefined() || env_scene)
 					copy.comps[ci].overrides.insert(param);
 				what += (what.empty() ? "set "+itos(e->id)+"'s "+in->type+" " :
 						ss_(", "))+param+" to "+value.stringify();
