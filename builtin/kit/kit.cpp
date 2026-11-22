@@ -35725,7 +35725,8 @@ struct Module: public interface::Module, public Interface
 				"default, min, max, choices = {...}}}; state = {name = {default, "
 				"shared = true (sent to the clients), kept = true (play never "
 				"resets it: Play, Stop, rounds and restarts keep it, only "
-				"clear_kept clears it; a game's best times by c:name(by))}}; "
+				"clear_kept clears it, or one key of it; a game's best times by "
+				"c:name(by))}}; "
 				"linked_in = true: c.linked_in = {input = {id...}}, the entities "
 				"linking to it, which it reaches (c:send); inputs = {name = "
 				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
@@ -36038,9 +36039,13 @@ struct Module: public interface::Module, public Interface
 				"required": ["id"]})J", ""},
 			{"clear_kept", "clear_kept", "Resets the kept state (a type's "
 				"state with kept = true: what play never resets, a game's best "
-				"times) of entity id's component comp to its defaults. One undo.",
+				"times) of entity id's component comp to its defaults; with key, "
+				"only removes that key from each kept table that has it (one "
+				"player's best from kit/records' bests, by their name; refused "
+				"if none has it), the rest kept. One undo.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
-				"comp": {"type": "integer", "description": "From 0"}},
+				"comp": {"type": "integer", "description": "From 0"},
+				"key": {"type": "string", "description": "Only this key of the kept tables (a player's name)"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
 			// [KIT_API_1]
 			{"clear_old_params", "clear_old_params", "Removes the old_params "
@@ -39223,7 +39228,17 @@ struct Module: public interface::Module, public Interface
 			return size_why;
 		// [KIT_PLAY_PICTURE_UI] pictures at set times after its end (a pop,
 		// a fade)
-		const json::Value &atv = a.get("picture_at");
+		// [KIT_REPORT_1122B] or as text (a client keeping an older schema
+		// sends a parameter it doesn't know so): a JSON list in a string,
+		// or one time; a string not JSON stays one, refused below
+		json::Value atv = a.get("picture_at");
+		if(atv.is_string()){
+			const json::Value l = json::load_string(atv.as_cstring());
+			if(!l.is_undefined())
+				atv = l;
+		}
+		if(atv.is_number())
+			atv = json::array().append(atv);
 		for(unsigned i = 0; atv.is_array() && i < atv.size(); i++){
 			const double s = atv.at(i).is_number() ? atv.at(i).as_number() : -1;
 			if(!(s >= 0 && s <= 2) || atv.size() > 3 ||
@@ -39233,7 +39248,8 @@ struct Module: public interface::Module, public Interface
 			w.at.push_back((int)std::lround(s * 1000));
 		}
 		if(!atv.is_undefined() && (!atv.is_array() || w.at.empty()))
-			return "picture_at: a list of 1 to 3 times";
+			return "picture_at: a list of 1 to 3 times (or one time, or the "
+					"list as a JSON string)";
 		if(!w.at.empty() && (int64_t)w.at.size() * w.wh[0] * w.wh[1] >
 				VIEW_CALL_PIXELS)
 			return itos(w.at.size())+" pictures of "+itos(w.wh[0])+"x"+
@@ -42325,7 +42341,7 @@ struct Module: public interface::Module, public Interface
 			"its client part's draw(s, node, yaw, p) draws them (the Crag Trial "
 			"template's local/crag_bike). State with kept = true (best "
 			"times) outlives Stop and restarts (a game session's its own); "
-			"clear_kept clears it.\n"
+			"clear_kept clears it (with key one player's entry).\n"
 			"- Work in small steps and read back: get_state (or list_types), "
 			"then place, set_param, link, start, try_input, get_events, "
 			"get_log, stop, fix, again. An edit's arguments are 4 KB at "
@@ -44884,19 +44900,44 @@ struct Module: public interface::Module, public Interface
 			c.kept_id = e->id;
 			c.kept_comp = in - &e->comps[0];
 			c.kept_before = json::object();
-			Instance d;
-			d.type = in->type;
-			d.params = in->params;
-			state_defaults(d);
-			for(const ss_ &k : m_types[in->type].kept)
-				if(!in->state.get(k).is_undefined())
-					c.kept_before.set(k, in->state.get(k));
-			set_kept(*e, c.kept_comp, d.state, "cleared by "+p.name);
+			json::Value after = json::object();
+			ss_ how = "cleared by "+p.name, what = in->type+"'s kept state";
+			// [KIT_REPORT_1122B] one key (a player's name in kit/records'
+			// bests) out of each kept value that is a table, the rest kept
+			const json::Value &kv = j.get("key");
+			if(!kv.is_undefined()){
+				if(!kv.is_string() || kv.as_string().empty())
+					return refuse("key: a string");
+				const ss_ &key = kv.as_string();
+				for(const ss_ &k : m_types[in->type].kept){
+					const json::Value &v = in->state.get(k);
+					if(!v.is_object() || v.get(key).is_undefined())
+						continue;
+					c.kept_before.set(k, v);
+					json::Value w = v;
+					w.del_key(key);
+					after.set(k, std::move(w));
+				}
+				if(!after.size())
+					return refuse("no kept entry "+key+" in "+in->type);
+				how = "entry "+key+" "+how;
+				what = key+" from "+what;
+			} else {
+				Instance d;
+				d.type = in->type;
+				d.params = in->params;
+				state_defaults(d);
+				after = d.state;
+				for(const ss_ &k : m_types[in->type].kept)
+					if(!in->state.get(k).is_undefined())
+						c.kept_before.set(k, in->state.get(k));
+			}
+			set_kept(*e, c.kept_comp, after, how);
 			std::deque<Change> &u = m_undo[p.name];
 			u.push_back(c);
 			while(u.size() > UNDO_MAX)
 				u.pop_front();
-			m_edit_what = "Cleared "+in->type+"'s kept state";
+			m_edit_what = "Cleared "+what;
 			send_state(peer);
 			return;
 		}

@@ -30,7 +30,8 @@
 #      it (the bar's colour at its place, the text's glyphs as tall as a
 #      screen of that size draws them), in two picture_at pictures at
 #      800x600 and in get_view's with no pose (the body's screen), not in
-#      a pose's; picture_at's pixel cap and range; play_leave;
+#      a pose's; picture_at's pixel cap and range, as a JSON string or one
+#      number ([KIT_REPORT_1122B]); play_leave;
 #   6. the server stopped: its camera gone with it;
 #   7. (CAMERA_X11=1) a server given no display, offscreen failing:
 #      get_view says what its host needs;
@@ -421,6 +422,16 @@ elif phase == "play":
     assert "1572864 pixels at most" in refused("play_input", {"width": 1024,
         "height": 768, "picture_at": [0, 0.5, 1]})
     assert "picture_at: 1 to 3 times" in refused("play_input", {"picture_at": [3]})
+    # [KIT_REPORT_1122B] as text (an older schema's client): the list as a
+    # JSON string, or one number; a string not a list refused
+    for at, pics, last in (("[0.05, 0.25]", 2, "0.25"), (0.1, 1, "0.1")):
+        text, imgs = call("play_input", {"seconds": 0.1, "width": 320,
+            "height": 240, "picture_at": at})
+        assert len(imgs) == pics and last + " s after the input" in text, text
+        assert all(decode(png)[:2] == (320, 240) for png in imgs)
+    assert "picture_at: a list of 1 to 3 times" in refused("play_input",
+        {"picture_at": "soon"})
+    assert "picture_at: 1 to 3 times" in refused("play_input", {"picture_at": "[3]"})
     # get_view with no pose: the body's screen; a pose's: the world alone
     text, imgs = view({"width": 320, "height": 240}, "play_own")
     assert "its own view" in text, text
