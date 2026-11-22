@@ -542,7 +542,8 @@ end
 -- (never its position, text or wiring) onto another's. A type's own prefix
 -- where they live beside others (its parameters' names start with it)
 NT.STYLE_KEYS = {"style", "form", "direction", "color", "background", "border",
-	"size", "blink_below", "width", "height"}
+	"size", "blink_below", "width", "height", "appear", "on_change",
+	"pulse_below"}
 NT.STYLE_PREFIX = {["kit/game_rules"] = "health_", ["kit/arena"] = "hud_",
 	["kit/flag"] = "hud_", ["kit/goal"] = "hud_"}
 

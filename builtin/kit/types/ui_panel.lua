@@ -30,6 +30,8 @@
 -- pressing the focused button as a click does; its first button focused as
 -- it comes up. Meanwhile the game gets none of the keys (Escape still opens
 -- the pause menu). Of panels in panels the outermost is the one
+-- [KIT_UI_EMPHASIS] `appear` "fade" or "slide": it and what it holds come
+-- up so as it is shown (a result card)
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -63,7 +65,7 @@ return {
 		background = "param:background", border = "param:border",
 		style = "param:style", size = "param:size", order = "param:order",
 		layout = "param:layout", gap = "param:gap", screen = "param:screen",
-		keyboard = "param:keyboard"},
+		keyboard = "param:keyboard", appear = "param:appear"},
 	params = {
 		title = {cat = "hud", type = "string", default = ""},
 		anchor = {cat = "hud", type = "string", default = "center",
@@ -95,6 +97,8 @@ return {
 			choices = {"none", "full", "over"}},
 		keyboard = {cat = "hud", type = "string", default = "auto",
 			choices = {"auto", "on", "off"}},
+		appear = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "fade", "slide"}},
 	},
 	state = {
 		shown = {default = false, shared = true, param = "shown"},
@@ -132,6 +136,7 @@ return {
 			shown = "Whether it is up at the start.",
 			screen = "none: on the HUD; full: the whole screen, no world under it; over: over the play view.",
 			keyboard = "Whether the keys move through its buttons: auto, on (while shown) or off.",
+			appear = "How it comes up as it is shown, what it holds with it: at once (none), fading in or sliding in.",
 		},
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},

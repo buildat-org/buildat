@@ -509,6 +509,7 @@ type kit/arena param hud_background | {"default": "#000000a0", "kind": "string"}
 type kit/arena param hud_border | {"default": "#808080a0", "kind": "string"}
 type kit/arena param hud_color | {"default": "#ffffff", "kind": "string"}
 type kit/arena param hud_height | {"default": 0, "kind": "number", "max": 400, "min": 0}
+type kit/arena param hud_on_change | {"choices": ["none", "pop", "pop_words"], "default": "none", "kind": "string"}
 type kit/arena param hud_order | {"default": 0, "kind": "number", "max": 40, "min": -40}
 type kit/arena param hud_size | {"default": 2, "kind": "number", "max": 30, "min": 0.5}
 type kit/arena param hud_style | {"choices": ["shapes", "plain"], "default": "shapes", "kind": "string"}
@@ -1024,6 +1025,7 @@ type kit/game_rules param health_form | {"choices": ["bar", "pie"], "default": "
 type kit/game_rules param health_height | {"default": 2.4, "kind": "number", "max": 400, "min": 0}
 type kit/game_rules param health_label | {"default": "{value:int}", "kind": "string"}
 type kit/game_rules param health_order | {"default": 0, "kind": "number", "max": 40, "min": -40}
+type kit/game_rules param health_pulse_below | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/game_rules param health_size | {"default": 1.8, "kind": "number", "max": 30, "min": 0.5}
 type kit/game_rules param health_style | {"choices": ["shapes", "plain"], "default": "shapes", "kind": "string"}
 type kit/game_rules param health_width | {"default": 20, "kind": "number", "max": 400, "min": 0}
@@ -1640,6 +1642,7 @@ type kit/turret input throttle | number
 type kit/ui_bar | version 2
 type kit/ui_bar handlers | migrate on_input on_params
 type kit/ui_bar param anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "top_left", "kind": "string"}
+type kit/ui_bar param appear | {"choices": ["none", "fade", "slide", "pop"], "default": "none", "kind": "string"}
 type kit/ui_bar param background | {"default": "#000000a0", "kind": "string"}
 type kit/ui_bar param blink_below | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/ui_bar param border | {"default": "#808080a0", "kind": "string"}
@@ -1650,7 +1653,9 @@ type kit/ui_bar param height | {"default": 0, "kind": "number", "max": 400, "min
 type kit/ui_bar param label | {"default": "{value}", "kind": "string"}
 type kit/ui_bar param max | {"default": 100, "kind": "number", "max": 1000000, "min": -1000000}
 type kit/ui_bar param min | {"default": 0, "kind": "number", "max": 1000000, "min": -1000000}
+type kit/ui_bar param on_change | {"choices": ["none", "pop"], "default": "none", "kind": "string"}
 type kit/ui_bar param order | {"default": 0, "kind": "number", "max": 40, "min": -40}
+type kit/ui_bar param pulse_below | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/ui_bar param shown | {"default": true, "kind": "bool"}
 type kit/ui_bar param size | {"default": 1.7, "kind": "number", "max": 30, "min": 0.5}
 type kit/ui_bar param source | {"choices": ["signal", "health"], "default": "signal", "kind": "string"}
@@ -1738,6 +1743,7 @@ type kit/ui_input state shown | shared
 type kit/ui_panel | version 2
 type kit/ui_panel handlers | migrate on_input on_params
 type kit/ui_panel param anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "center", "kind": "string"}
+type kit/ui_panel param appear | {"choices": ["none", "fade", "slide"], "default": "none", "kind": "string"}
 type kit/ui_panel param background | {"default": "#000000a0", "kind": "string"}
 type kit/ui_panel param border | {"default": "#808080a0", "kind": "string"}
 type kit/ui_panel param color | {"default": "#ffffff", "kind": "string"}
@@ -1809,11 +1815,13 @@ type kit/ui_scene_list state value | shared
 type kit/ui_text | version 2
 type kit/ui_text handlers | migrate on_input on_params
 type kit/ui_text param anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "top", "kind": "string"}
+type kit/ui_text param appear | {"choices": ["none", "fade", "slide", "pop"], "default": "none", "kind": "string"}
 type kit/ui_text param background | {"default": "#000000a0", "kind": "string"}
 type kit/ui_text param border | {"default": "#808080a0", "kind": "string"}
 type kit/ui_text param clear_after | {"default": 0, "kind": "number", "max": 3600, "min": 0}
 type kit/ui_text param color | {"default": "#ffffff", "kind": "string"}
 type kit/ui_text param height | {"default": 0, "kind": "number", "max": 400, "min": 0}
+type kit/ui_text param on_change | {"choices": ["none", "pop", "pop_words"], "default": "none", "kind": "string"}
 type kit/ui_text param order | {"default": 0, "kind": "number", "max": 40, "min": -40}
 type kit/ui_text param shown | {"default": true, "kind": "bool"}
 type kit/ui_text param size | {"default": 1.8, "kind": "number", "max": 30, "min": 0.5}

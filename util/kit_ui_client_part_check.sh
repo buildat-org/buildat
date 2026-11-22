@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~30 s, ~2 min with a cold module cache (2026-11-22)
+# cost: ~40 s, ~2 min with a cold module cache (2026-11-22)
 # covers: builtin/kit/client_lua/ui.lua builtin/kit/client_lua/module.lua
 # [KIT_UI_CLIENT_PART] A UI type's client part moving and changing its own
 # element (e.ui), on a fresh Workbench project: kitboss (the admin, 1024x700)
@@ -18,7 +18,15 @@
 #      screen; 4 never moved, faded or changed (bob.png and bob2.png 20
 #      frames later: look at them);
 #   3. edit mode: 3 drawn as authored (no part offset).
-# KEEP_TMP=1 keeps $t/bob.png and $t/bob2.png.
+#   4. [KIT_UI_EMPHASIS] kit/ui_text 6 (appear fade), 7 (slide), 9 (pop and
+#      on_change pop, in the row panel 8 beside the text 10) and a kit/ui_bar
+#      11 (at 20 of 100, pulse_below 0.5); each shown or changed by a Try in
+#      edit mode, then play: 6 at two opacities or more, 7 at two dys and
+#      heights, 9 under scale 1 as it appears and over 1.1 at its change,
+#      wider than at rest, 10 never moved by it; 11's opacity swinging, its
+#      pulse off at 80; no failed update (pop.png 3 frames into the change
+#      pop, pop2.png at rest: look at them).
+# KEEP_TMP=1 keeps $t/bob.png, $t/bob2.png, $t/pop.png and $t/pop2.png.
 #   util/kit_ui_client_part_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -178,10 +186,98 @@ await "$CL" "$mc" 10 "kit: ui 3 text at .*edit mode"
 tail -c +$((mc + 1)) "$CL" | grep -a "kit: ui 3 text at .*edit mode" | tail -1 |
 	grep -qa ", part " && fail "3's part offset drawn in framed edit mode ($CL)"
 echo "ok: edit mode: 3 as authored"
+
+# 4. [KIT_UI_EMPHASIS] appear fade (6), slide (7), pop with on_change pop (9,
+# in the row panel 8 beside 10), a bar's pulse_below (11)
+place kit/ui_text 6
+setp 6 text '"Fade in"'; setp 6 anchor '"top_left"'; setp 6 x 3; setp 6 y 25
+setp 6 shown false; setp 6 appear '"fade"'
+place kit/ui_text 7
+setp 7 text '"Slide in"'; setp 7 anchor '"top_left"'; setp 7 x 3; setp 7 y 35
+setp 7 shown false; setp 7 appear '"slide"'
+place kit/ui_panel 8
+setp 8 anchor '"bottom"'; setp 8 y 5; setp 8 layout '"row"'; setp 8 width 0
+setp 8 height 0; setp 8 shown true
+place kit/ui_text 9
+setp 9 text '"Count {value}"'; setp 9 shown false; setp 9 appear '"pop"'
+setp 9 on_change '"pop"'
+ed '{"op": "parent", "id": 9, "parent": 8}'
+place kit/ui_text 10
+setp 10 text '"Neighbour"'
+ed '{"op": "parent", "id": 10, "parent": 8}'
+place kit/ui_bar 11
+setp 11 anchor '"top_left"'; setp 11 x 3; setp 11 y 45; setp 11 start 20
+setp 11 pulse_below 0.5
+await "$SL" 0 10 "An edit by kitboss: set 11's kit/ui_bar pulse_below to"
+mc=$(mark "$CL")
+ed '{"op": "mode", "on": false}'
+await "$CL" "$mc" 10 "kit: ui 11 pulse on"
+await "$CL" "$mc" 10 "kit: ui 9 text at .* hidden: "
+# (a try is edit mode's: each shown or changed there comes up in play)
+try() { ed "{\"op\": \"try\", \"id\": $1, \"input\": \"$2\", \"value\": $3}"; }
+ed '{"op": "mode", "on": true}'
+try 6 show null; try 7 show null; try 9 show null
+ed '{"op": "mode", "on": false}'
+await "$CL" "$mc" 10 "kit: ui 9 appear pop"
+await "$CL" "$mc" 10 "kit: ui 6 appear fade"
+await "$CL" "$mc" 10 "kit: ui 7 appear slide"
+# (its appear over: a change in it is not popped again)
+await "$CL" "$mc" 10 "kit: ui 9 text at .* order 0 shown: \"Count \"$"
+# (the pop's middle: 3 frames at 30 fps into its 0.3 s)
+m9=$(mark "$CL")
+ed '{"op": "mode", "on": true}'
+try 9 value 7
+cmd 'event kit_edit {"op": "mode", "on": false}'
+cmd "wait_log 5000 kit: ui 9 change pop" "frames 3" "screenshot $t/pop.png" "frames 15" \
+	"screenshot $t/pop2.png" "sync 5000"
+await "$CL" "$m9" 10 "kit: ui 9 text at .* shown.*: \"Count 7\"$"
+for i in $(seq 25); do [ -s "$t/pop2.png" ] && break; sleep 0.2; done
+[ -s "$t/pop.png" ] && [ -s "$t/pop2.png" ] || fail "no screenshots $t/pop.png, pop2.png"
+for i in $(seq 25); do
+	tail -c +$((mc + 1)) "$CL" | grep -ac "kit: ui 11 text at .*emphasis" | grep -qv '^[01]$' && break
+	sleep 0.2
+done
+tail -c +$((mc + 1)) "$CL" > "$t/l_em"
+ems() { grep -a "kit: ui $1 $2 at .*emphasis" "$t/l_em"; }
+# fade: opacities under 1 rising, then at rest
+o6=$(ems 6 text | grep -aoE 'opacity [0-9.]+' | cut -d' ' -f2 | sort -u | tr '\n' ' ')
+[ "$(echo $o6 | wc -w)" -ge 2 ] || fail "6 (fade) at opacities $o6, not 2 or more ($t/l_em)"
+ems 6 text | grep -aoE 'scale [0-9.]+ ' | grep -qv 'scale 1.00 ' && fail "6 (fade) scaled ($t/l_em)"
+grep -a "kit: ui 6 text at" "$t/l_em" | tail -1 | grep -qa "emphasis" &&
+	fail "6 (fade) not at rest after it ($t/l_em)"
+# slide: dy toward 0, its height moving
+d7=$(ems 7 text | grep -aoE 'dy -?[0-9.]+' | cut -d' ' -f2 | sort -u | tr '\n' ' ')
+y7=$(ems 7 text | grep -aoE ' at [0-9-]+,[0-9-]+ ' | cut -d, -f2 | sort -u | wc -l)
+[ "$(echo $d7 | wc -w)" -ge 2 ] && [ "$y7" -ge 2 ] ||
+	fail "7 (slide) at dy $d7, $y7 heights, not 2 or more each ($t/l_em)"
+# pop: from under 1 as it appears, over 1 at the change, its size so;
+# 10 beside it never moved by it
+s9=$(ems 9 text | grep -aoE 'scale [0-9.]+' | cut -d' ' -f2 | sort -u | tr '\n' ' ')
+echo "$s9" | grep -qE '(^| )0\.[0-9]+' || fail "9 (pop) never under scale 1: $s9 ($t/l_em)"
+sed -n '/kit: ui 9 change pop/,$p' "$t/l_em" > "$t/l_ch"
+ch=$(grep -a "kit: ui 9 text at .*emphasis scale 1\.[1-9]" "$t/l_ch" | head -1)
+[ -n "$ch" ] || fail "9's change pop never over scale 1.1 ($t/l_ch)"
+rest=$(grep -a "kit: ui 9 text at" "$t/l_ch" | grep -av emphasis | tail -1)
+wc=$(echo "$ch" | grep -oE ' [0-9]+x[0-9]+ in' | cut -dx -f1)
+wr=$(echo "$rest" | grep -oE ' [0-9]+x[0-9]+ in' | cut -dx -f1)
+[ -n "$wr" ] && [ "$wc" -gt "$wr" ] || fail "9 not wider in its pop ($wc) than at rest ($wr): $ch / $rest"
+n10=$(grep -a "kit: ui 10 text at" "$t/l_ch" | grep -aoE ' at [0-9-]+,[0-9-]+ ' | sort -u | wc -l)
+[ "$n10" -le 1 ] || fail "10 moved while 9 popped beside it ($t/l_ch)"
+# pulse: its opacity and scale swinging
+o11=$(ems 11 bar | grep -aoE 'opacity [0-9.]+' | cut -d' ' -f2 | sort -u | tr '\n' ' ')
+[ "$(echo $o11 | wc -w)" -ge 2 ] || fail "11 (pulse_below 0.5 at 0.20) at opacities $o11 ($t/l_em)"
+m11=$(mark "$CL")
+ed '{"op": "mode", "on": true}'
+try 11 value 80
+ed '{"op": "mode", "on": false}'
+await "$CL" "$m11" 10 "kit: ui 11 pulse off"
+e=$(tail -c +$((mc + 1)) "$CL" | grep -a " kit: ui: " | head -1)
+[ -z "$e" ] || fail "the UI's update failed: $e ($CL)"
+echo "ok: emphasis: 6 fade opacities $o6; 7 slide dy $d7; 9 pop scales $s9, ${wc} px wide in its change pop over $wr, 10 beside it unmoved; 11 pulse opacities $o11, off at 0.80; $t/pop.png (mid-pop), $t/pop2.png"
 cmd quit
 exec 3>&-
 wait $BOSS 2>/dev/null
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
-echo "PASS: a UI type's client part moves, fades, recolours and retexts its own element by e.ui, over the player's own width; another element and edit mode untouched; screenshots $t/bob.png $t/bob2.png"
+echo "PASS: a UI type's client part moves, fades, recolours and retexts its own element by e.ui, over the player's own width; another element and edit mode untouched; appear fade, slide and pop, on_change pop beside an unmoved neighbour, pulse_below; screenshots $t/bob.png $t/bob2.png $t/pop.png $t/pop2.png"
 # vim: set noet ts=4 sw=4:

@@ -73,6 +73,10 @@
 -- markup), its {value} the signal's value cut at 200 characters.
 -- [KIT_UI_CLIENT_PART] **A client part's changes** (e.ui, M.ui_api below):
 -- its offset, opacity and fields over each layout, in play.
+-- [KIT_UI_EMPHASIS] **Emphasis** (emphasis() below): a text's or a bar's
+-- `appear` (fade, slide, pop) as it is shown, `on_change` pop as its text or
+-- value changes, a bar's `pulse_below`; a panel's appear fade or slide, its
+-- contents with it. Drawn only: a pop's size is not the layout's.
 --   kit.ui_at(x, y) -> whether the pointer (pixels) is on a UI component
 --     that takes clicks (a button or a panel with a background in play;
 --     any in edit mode), which the controls and the editor leave alone
@@ -475,6 +479,7 @@ local function make(r, id, parent, in_panel)
 	local order = num(u.order, 0, -40, 40)
 	el.priority = math.floor(in_panel and 60 + order or
 			u.kind == "panel" and -100 + order or -1000 + order)
+	r.prio, r.prio_at = el.priority, el.priority
 	el.bringToFront = false
 	-- [KIT_PHONE_EDITING] Placed from the root's size (the hotbar centred
 	-- held to the left): counted by the client's fit, a fit down moved it
@@ -680,7 +685,8 @@ end
 
 -- ---- Kit's own HUD: its placement from kit/game_rules ("kit:slots")
 local OWN_KEYS = {health = {"style", "form", "direction", "label", "color",
-	"background", "border", "size", "blink_below", "anchor", "x", "y", "width",
+	"background", "border", "size", "blink_below", "pulse_below", "anchor", "x",
+	"y", "width",
 	"height", "order"}, hotbar = {"anchor", "x", "y"}, feed = {"anchor", "x",
 	"y"}, hint = {"anchor", "x", "y"}, item_line = {"anchor", "x", "y"}}
 local OWN_LABEL = {hotbar = "Hotbar", feed = "Kill feed", hint =
@@ -858,6 +864,7 @@ local function fit_text(r, text, px, aw, ah, pw, pad)
 			return r.t.minWidth
 		end
 		r.t:SetWordwrap(false)
+		r.wrapped = false
 		local tw, p = put(px), px
 		if aw then
 			local least = min_text()
@@ -868,6 +875,7 @@ local function fit_text(r, text, px, aw, ah, pw, pad)
 			end
 		elseif r.kind ~= "panel" and tw > pw - 2 * pad then
 			r.t:SetWordwrap(true)
+			r.wrapped = true
 			tw = math.max(8, pw - 2 * pad)
 		end
 		r.tw = tw
@@ -1461,6 +1469,77 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	focus_item(i, "to")
 end)
 
+-- [KIT_UI_EMPHASIS] A text's or a bar's `appear` (fade, slide, pop) as it
+-- comes up, `on_change` pop as its text (a bar's value) changes (pop_words:
+-- not as its digits alone do, a clock's tick), a bar's `pulse_below` while
+-- under that fraction; a panel's appear fade or slide. In play and
+-- unframed edit mode. Returns a scale about its centre (drawn only: the
+-- layout and its neighbours keep its size), an opacity and a dy (UI units).
+-- The state on its entity (r.n) so an element made anew keeps it; the first
+-- draw of one shown at once appears too.
+local EM_T = 0.3
+local function emphasis(r, u, now, frame)
+	local ap, oc = u.appear or "none", u.on_change or "none"
+	local pb = r.kind == "bar" and tonumber(u.pulse_below) or 0
+	if frame or (ap == "none" and oc == "none" and pb <= 0) or
+			(r.kind ~= "text" and r.kind ~= "bar" and r.kind ~= "panel") then
+		return 1, 1, 0
+	end
+	local at = r.n or r
+	local m = at.em or {}
+	at.em = m
+	local key = r.kind == "bar" and tostring(r.value) or
+			(r.counting and "" or r.text)
+	if oc == "pop_words" then
+		key = key:gsub("%d", "")
+	end
+	-- (one cut short by edit mode over by now)
+	if m.what and now - m.t0 >= EM_T then
+		m.what = nil
+	end
+	if r.vis and not m.vis and ap ~= "none" then
+		m.what, m.t0 = ap, now
+		log:info("kit: ui " .. tostring(r.id) .. " appear " .. ap)
+	elseif r.vis and oc ~= "none" and m.key ~= nil and key ~= m.key and
+			m.what ~= ap then
+		m.what, m.t0 = "change", now
+		log:info("kit: ui " .. tostring(r.id) .. " change pop")
+	end
+	m.vis, m.key = r.vis, key
+	local s, op, dy = 1, 1, 0
+	local t = m.what and (now - m.t0) / EM_T or 1
+	if t >= 1 or not r.vis then
+		m.what = nil
+	elseif m.what == "fade" then
+		op = 1 - (1 - t) ^ 3
+	elseif m.what == "slide" then
+		op = 1 - (1 - t) ^ 3
+		dy = (1 - op) * 3 * (tostring(u.anchor):find("top") and -1 or 1)
+	elseif m.what == "pop" then
+		-- (an ease out past 1 and back: 0.5 to ~1.05 to 1)
+		local q = t - 1
+		s, op = 0.5 + 0.5 * (1 + 2.70158 * q ^ 3 + 1.70158 * q ^ 2),
+				math.min(1, t * 3)
+	elseif m.what == "change" then
+		s = 1 + 0.25 * math.sin(math.pi * t)
+	end
+	local pulse = pb > 0 and r.vis and (r.frac or 1) < pb
+	if pulse ~= (m.pulse or false) then
+		m.pulse = pulse
+		log:info("kit: ui " .. tostring(r.id) .. " pulse " ..
+				(pulse and "on" or "off"))
+	end
+	if pulse then
+		local p = 0.5 - 0.5 * math.cos(now * 2 * math.pi * 1.25)
+		s, op = s * (1 + 0.06 * p), op * (1 - 0.4 * p)
+	end
+	-- (a panel's contents can't grow with it)
+	if r.kind == "panel" then
+		s = 1
+	end
+	return s, op, dy
+end
+
 local function update()
 	local root = magic.ui.root
 	for _, it in pairs(menu_items) do
@@ -1924,6 +2003,21 @@ local function update()
 			local u = r.ui
 			local pr = r.pr
 			local w, h = r.w, r.h
+			-- Play: as its state says; edit mode: all, a hidden one dimmed,
+			-- framed (framed())
+			-- ([KIT_LOBBY] edit mode one layer, the HUD view's pick's or the
+			-- selected one's; play under a full screen its layer alone)
+			local layer_on
+			if E.editing then
+				layer_on = r.layer == (M.hud_layer and M.hud_layer() or "hud")
+			else
+				layer_on = up == nil or r.layer == up
+			end
+			r.vis = not edit_off() and layer_on and not r.skip and
+					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
+			-- [KIT_UI_EMPHASIS] its appear, on_change and pulse_below
+			local es, eop, edy = emphasis(r, u, now, frame)
+			r.eop = eop * (pr and pr.eop or 1)
 			local x, y
 			if r.sx then
 				x, y = r.sx, r.sy
@@ -1948,10 +2042,42 @@ local function update()
 			end
 			-- [KIT_UI_CLIENT_PART] its client part's offset, kept in its box
 			local cp = not frame and r.n and r.n.ui_set
-			if cp and (cp.dx or cp.dy) then
-				local x0, y0 = pr and pad or bx, pr and pad + r.top or by
-				x = math.max(x0, math.min(x0 + r.pw - w, x + (cp.dx or 0) * V))
-				y = math.max(y0, math.min(y0 + r.ph - h, y + (cp.dy or 0) * V))
+			local x0, y0 = pr and pad or bx, pr and pad + r.top or by
+			if (cp and (cp.dx or cp.dy)) or edy ~= 0 then
+				x = math.max(x0, math.min(x0 + r.pw - w,
+						x + (cp and cp.dx or 0) * V))
+				y = math.max(y0, math.min(y0 + r.ph - h,
+						y + ((cp and cp.dy or 0) + edy) * V))
+			end
+			-- ([KIT_UI_EMPHASIS] grown or shrunk about its centre, its text as
+			-- big; fitted again at its own size the next frame. On the screen
+			-- kept in the box; in a panel it may stand out of it)
+			local tw = r.tw
+			-- (a grown one over the others of its place while it is)
+			local prio = r.prio + (es > 1 and 41 or 0)
+			if prio ~= r.prio_at then
+				r.prio_at = prio
+				r.el.priority = prio
+			end
+			if es ~= 1 then
+				local w2, h2 = math.floor(w * es + 0.5), math.floor(h * es + 0.5)
+				x, y = x - (w2 - w) / 2, y - (h2 - h) / 2
+				if not pr then
+					x = math.max(bx, math.min(bx + bw - w2, x))
+					y = math.max(by, math.min(by + bh - h2, y))
+				end
+				w, h = w2, h2
+				local p = math.max(min_text(), math.floor((r.px or 8) * es + 0.5))
+				if r.t and p ~= r.px then
+					r.px, r.wrap = p, nil
+					r.t:SetFont(magic.cache:GetResource("Font", FONT), p)
+					local s = r.t.text
+					r.t.text = ""
+					r.t.text = s
+					tw = r.wrapped and math.floor((r.tw or 0) * es) or
+							r.t.minWidth
+					r.t.width = tw
+				end
 			end
 			-- ([KIT_LOBBY] the HUD view's frame a box too: its bx, by undone)
 			r.to_params = function(px, py, nw, nh)
@@ -1984,7 +2110,7 @@ local function update()
 					y = y + rh + math.floor(0.6 * V)
 				end
 			elseif u.kind ~= "panel" then
-				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
+				r.t:SetPosition(math.max(1, math.floor((w - tw) / 2)),
 						math.floor((h - r.t.height) / 2))
 			end
 			if r.edit then
@@ -2043,18 +2169,7 @@ local function update()
 				r.col_at = u.color
 				recolor(r, u)
 			end
-			-- Play: as its state says; edit mode: all, a hidden one dimmed,
-			-- framed (framed())
-			-- ([KIT_LOBBY] edit mode one layer, the HUD view's pick's or the
-			-- selected one's; play under a full screen its layer alone)
-			local layer_on
-			if E.editing then
-				layer_on = r.layer == (M.hud_layer and M.hud_layer() or "hud")
-			else
-				layer_on = up == nil or r.layer == up
-			end
-			r.vis = not edit_off() and layer_on and not r.skip and
-					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
+			-- (r.vis above)
 			r.el.visible = r.vis
 			if r.vis and up and r.layer == up and r.kind == "button" and
 					u.action == "pause_menu" then
@@ -2068,12 +2183,13 @@ local function update()
 				r.el.opacity = (r.on or r.own) and 0.95 or 0.45
 			elseif r.blinking then
 				r.el.opacity = ((now * 2) % 1 < 0.5 and 1 or 0.25) *
-						(cp and cp.opacity or 1)
+						(cp and cp.opacity or 1) * eop
 			else
-				r.el.opacity = cp and cp.opacity or 1
+				r.el.opacity = (cp and cp.opacity or 1) * eop
 			end
-			-- (a Text's opacity is its own, not its parent's times it)
-			local top = cp and cp.opacity or 1
+			-- (a Text's opacity is its own, not its parent's times it; a
+			-- panel's emphasis it takes)
+			local top = (cp and cp.opacity or 1) * r.eop
 			if r.t and top ~= (r.t_op or 1) then
 				r.t_op = top
 				r.t.opacity = top
@@ -2142,8 +2258,9 @@ local function update()
 			local sw, sh = bw, bh
 			local sp = r.el.screenPosition
 			r.ax, r.ay = sp.x, sp.y
+			local em = es ~= 1 or eop ~= 1 or edy ~= 0
 			local line = string.format("kit: ui %s %s at %d,%d %dx%d in %dx%d" ..
-					" font %d %s order %g %s%s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
+					" font %d %s order %g %s%s%s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
 					sp.x, sp.y, w, h, sw, sh, r.px or 0, tostring(u.style or "shapes"),
 					num(u.order, 0, -40, 40), r.el.visible and "shown" or "hidden",
 					E.editing and (r.on and ", edit mode" or
@@ -2158,6 +2275,8 @@ local function update()
 							tostring(r.value) or ", nobody") or ""),
 					cp and string.format(", part %.1f,%.1f opacity %.2f", cp.dx or 0,
 							cp.dy or 0, cp.opacity or 1) or "",
+					em and string.format(", emphasis scale %.2f opacity %.2f dy %.1f",
+							es, eop, edy) or "",
 					((r.text .. (r.last_line and " | " .. r.last_line or "")):gsub(
 							"\n", " | ")))
 			-- ([KIT_RECORDS] a running kit/stopwatch time said once a
@@ -2166,8 +2285,10 @@ local function update()
 			local key = r.counting and line:gsub(" at %-?%d+,%-?%d+ %d+x%d+", "")
 					:gsub("(%d)%.%d", "%1") or line
 			-- ([KIT_UI_CLIENT_PART] one its client part moves: twice a second
-			-- at most)
-			if key ~= r.log and not (cp and now - (r.log_at or 0) < 0.5) then
+			-- at most; [KIT_UI_EMPHASIS] an emphasis ten times, a pulse twice)
+			local every = (cp or (em and ((r.n or r).em or {}).pulse)) and 0.5
+					or em and 0.1 or 0
+			if key ~= r.log and not (now - (r.log_at or 0) < every) then
 				r.log, r.log_at = key, now
 				local off = sp.x < bx or sp.y < by or sp.x + w > bx + sw or
 						sp.y + h > by + sh
