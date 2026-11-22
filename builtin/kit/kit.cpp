@@ -186,6 +186,8 @@ static const char *const CORE_VOXEL = "kit/core";
 static const char *const ENGINE_TYPE = "kit/engine";
 static const char *const RADAR_TYPE = "kit/radar";
 static const char *const TRIGGER_TYPE = "kit/trigger_zone";
+// [KIT_RACE_PIECES] its state `last` its scene's (share_checkpoints())
+static const char *const CHECKPOINT_TYPE = "kit/checkpoint";
 static const char *const LOBBY_TYPE = "kit/lobby"; // [KIT_LOBBY_OUT_OF_PLAY]
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
@@ -18098,6 +18100,8 @@ struct Module: public interface::Module, public Interface
 			m_runtime_dirty = true;
 			if(t.shared.count(k))
 				replicate_state(e, r.comp, k);
+			if(type == CHECKPOINT_TYPE && k == "last")
+				share_checkpoints(e, in.state.get("last"));
 		}
 		// [KIT_TEAM_JOIN_LEAVES_OTHERS] A team joined: the player out of the
 		// scene's other teams (respawn_at takes the last one they are in)
@@ -18411,17 +18415,25 @@ struct Module: public interface::Module, public Interface
 		const json::Value &hurts = fx.get("hurt");
 		const json::Value &blasts = fx.get("explode");
 		const bool actor = e.kind == "player" || is_bot(e);
-		if((died.is_array() && actor) ||
-				fx.get("respawn_waiting").is_true() || hurts.size() ||
-				blasts.size()){
+		// ([KIT_RACE_PIECES] c:respawn_waiting(player): a list of ids)
+		const json::Value &rw = fx.get("respawn_waiting");
+		if((died.is_array() && actor) || rw.is_true() || rw.size() ||
+				hurts.size() || blasts.size()){
 			const json::Value ret = m_ret, hit_ret = m_hit_ret;
 			const uint64_t self = e.id;
 			if(died.is_array() && actor)
 				player_death(self, r.by, name_ok(jstr_at(died, 1)) ?
 						jstr_at(died, 1) : ss_("normal"));
-			if(fx.get("respawn_waiting").is_true())
+			if(rw.is_true())
 				log_i(MODULE, "Entity %s's %s respawns %i waiting players",
 						cs(itos(self)), cs(type), respawn_waiting());
+			for(unsigned i = 0; !rw.is_true() && i < rw.size(); i++){
+				const uint64_t pid = rw.at(i).is_number() ?
+						(uint64_t)rw.at(i).as_number() : 0;
+				log_i(MODULE, "Entity %s's %s respawns waiting player %s: %s",
+						cs(itos(self)), cs(type), cs(itos(pid)),
+						pid && respawn_waiting(pid) ? "back" : "not waiting");
+			}
 			for(unsigned i = 0; i < hurts.size() && m_entities.count(self);
 					i++)
 				hurt(m_entities[self], type, hurts.at(i), r.by);
@@ -31454,13 +31466,31 @@ struct Module: public interface::Module, public Interface
 		revive(player);
 	}
 
+	// [KIT_RACE_PIECES] kit/checkpoint's progress, each player's last one
+	// passed (its per_player state `last`), is its scene's: a run's set of it
+	// copied to every other kit/checkpoint there, so each reads the same.
+	// simplified: one course a scene; one spawned in play starts empty until
+	// the next set
+	void share_checkpoints(const Entity &from, const json::Value &last)
+	{
+		ss_ scene, s;
+		scene_of(from, &scene);
+		for(auto &p : m_entities)
+			for(Instance &ci : p.second.comps)
+				if(ci.type == CHECKPOINT_TYPE && p.first != from.id &&
+						scene_of(p.second, &s) && s == scene)
+					ci.state.set("last", last.deepcopy());
+	}
+
 	// c:respawn_waiting(): every player of the round waiting to respawn
-	// back at their spawn ([KIT_BOT_DRIVE] a bot too); how many
-	int respawn_waiting()
+	// back at their spawn ([KIT_BOT_DRIVE] a bot too); how many.
+	// [KIT_RACE_PIECES] only: that player alone
+	int respawn_waiting(uint64_t only = 0)
 	{
 		sv_<uint64_t> list;
 		for(auto &e : m_entities)
-			if((e.second.kind == "player" || (e.second.has_pos && is_bot(e.second))) &&
+			if((!only || e.first == only) && (e.second.kind == "player" ||
+					(e.second.has_pos && is_bot(e.second))) &&
 					player_waiting(e.first))
 				list.push_back(e.first);
 		for(uint64_t id : list)

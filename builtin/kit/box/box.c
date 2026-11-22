@@ -57,7 +57,7 @@
 **                        members, [KIT_GENERATORS]; its request's
 **                        max_children and entities), generate = {{id,
 **                        params}...} (c:generate), [KIT_CTF] died = {by, type},
-**                        respawn_waiting = true, hurt = {{player, amount,
+**                        respawn_waiting = true | {player...}, hurt = {{player, amount,
 **                        fraction, type}...}, explode = {{x, y, z, radius,
 **                        power, kill, hurt, share, friendly_fire,
 **                        type}...}, hit = {...} (modify_hit's
@@ -792,7 +792,17 @@ static const char PRELUDE[] =
 "	-- hooks, then kit/game_rules' respawn; every waiting player respawned;\n"
 "	-- a player hurt; a blast (api.h)\n"
 "	function c:died(by, type) fx.died = {by == nil and NULL or tostring(by), type == nil and NULL or tostring(type)} end\n"
-"	function c:respawn_waiting() fx.respawn_waiting = true end\n"
+"	-- [KIT_RACE_PIECES] a player: that one alone\n"
+"	function c:respawn_waiting(player)\n"
+"		if player == nil then fx.respawn_waiting = true return end\n"
+"		local pid = player_arg(player)\n"
+"		if not pid then error('respawn_waiting: a player is an entity id, \"player:<id>\" or \"bot:<id>\"', 2) end\n"
+"		if fx.respawn_waiting == true then return end\n"
+"		local l = fx.respawn_waiting or {}\n"
+"		if #l >= 16 then error('respawn_waiting: 16 players a run at most', 2) end\n"
+"		l[#l + 1] = pid\n"
+"		fx.respawn_waiting = l\n"
+"	end\n"
 "	function c:hurt(player, amount)\n"
 "		local h = fx.hurt or {}\n"
 "		if #h >= 16 then error('hurt: 16 a run at most', 2) end\n"
