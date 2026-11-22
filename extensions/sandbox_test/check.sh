@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: 3s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: client/sandbox.lua client/api.lua client/extensions.lua client/core/urho3d/** client/core/uistack/** src/lua_bindings/** extensions/sandbox_test_peer/**
+# covers: client/sandbox.lua client/api.lua client/extensions.lua client/core/urho3d/** client/core/uistack/** src/lua_bindings/** extensions/sandbox_test_peer/** 3rdparty/Urho3D/Source/Urho3D/Graphics/View.cpp
 # (client/api.lua is the sandbox's own surface -- every verb this check
 # tries to reach past, and the ones wrapped.lua exercises)
 # [LAUNCH_SANDBOX]: **the hostile launch UI**. The launch UI is a slot
@@ -98,6 +98,13 @@ fi
 if ! grep -aq "launch sandbox: secret field writes refused: 3" "$out/cli.log"; then
 	echo "FAIL: a script wrote the Starport ID dialog's password field --" \
 			"$(grep -a "secret field" "$out/cli.log" | tr '\n' ' ')"
+	exit 1
+fi
+# [KIT_PLAY_PICTURE_UI] A renderui command into a render target of its
+# own draws nothing there: the trust colour on this screen not read back
+if ! grep -aq "launch sandbox: the UI read back from a texture of its own: 1 colours" "$out/cli.log"; then
+	echo "FAIL: a script read the UI back from a texture --" \
+			"$(grep -a "read back from a texture" "$out/cli.log" | head -1 | sed 's/.*sandbox: //')"
 	exit 1
 fi
 # [SAFE_UNSUB_FOREIGN] Its TextFinished stays the client's, and none of

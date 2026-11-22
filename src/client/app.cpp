@@ -1904,6 +1904,8 @@ struct CApp: public App, public magic::Application
 	sv_<magic::IntRect> m_preferred_rects;
 	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
 	magic::SharedPtr<magic::BorderImage> m_preferred_image;
+	// The picture the UI is drawn over next (picture_ui())
+	magic::WeakPtr<magic::Texture2D> m_picture_ui;
 
 	// **What the launcher's UI was before a game was started**
 	// ([MENU_CONTEXT]). A game's client half puts its HUD straight on
@@ -2598,12 +2600,9 @@ struct CApp: public App, public magic::Application
 
 	// Non-public methods
 
-	void apply_ui_scale()
+	// The UI scale a screen of w x h gets, before the fit
+	float ui_scale_for(int w, int h)
 	{
-		magic::Graphics *g = GetSubsystem<magic::Graphics>();
-		magic::UI *ui = GetSubsystem<magic::UI>();
-		if(!g || !ui)
-			return;
 		float s = 0.f;
 		if(m_ui_scale_lua > 0.f)
 			s = m_ui_scale_lua;
@@ -2614,12 +2613,7 @@ struct CApp: public App, public magic::Application
 			else if(!m_options.ui_size_auto)
 				s = m_options.ui_size;
 			else {
-				// From the logical size in a scripted client, so that the
-				// layout does not move with the window ([SEQ_FIXED_SIZE])
-				int short_side = logical_mode() ? m_logical_w : g->GetWidth();
-				int other = logical_mode() ? m_logical_h : g->GetHeight();
-				if(other < short_side)
-					short_side = other;
+				int short_side = std::min(w, h);
 #ifdef __EMSCRIPTEN__
 				// [FP_TOUCH] 1: the canvas is at device pixels, and a CSS
 				// pixel is about as big to the eye on any screen, so the UI
@@ -2664,6 +2658,19 @@ struct CApp: public App, public magic::Application
 				}
 			}
 		}
+		return s;
+	}
+
+	void apply_ui_scale()
+	{
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!g || !ui)
+			return;
+		// From the logical size in a scripted client, so that the layout
+		// does not move with the window ([SEQ_FIXED_SIZE])
+		float s = logical_mode() ? ui_scale_for(m_logical_w, m_logical_h) :
+				ui_scale_for(g->GetWidth(), g->GetHeight());
 		// A scripted client keeps its logical size, which is what its
 		// pictures are compared at; update_ui_fit() leaves it at 1 there
 		s *= m_fit_factor;
@@ -2699,6 +2706,80 @@ struct CApp: public App, public magic::Application
 		if(m_preferred_image)
 			m_preferred_image->SetSize(ui->GetRoot()->GetSize());
 		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
+	}
+
+	// [KIT_PLAY_PICTURE_UI] **The UI in the server's camera's pictures**:
+	// Kit's play picture is the player's screen, so the UI is laid out as a
+	// screen of the picture's size lays it out (the scale from that size,
+	// the root that size over it) and drawn over the picture's world as its
+	// view is done (picture_ui(), client/core/urho3d). The server's camera's
+	// alone: a scripted client logged in by the camera's secret (cam_...),
+	// whose window no one sees -- its layout stays the last picture's -- and
+	// whose trust colour and code are its own, shown to no person. In a
+	// person's client it would lay their screen out anew and hand their UI
+	// to a server's script. The client's own UI (every "__trusted..."
+	// element) and the world's image are left out of the pass all the same.
+	bool is_server_camera() const
+	{
+		return m_command_seq_active &&
+				client::g_agent_token.compare(0, 4, "cam_") == 0;
+	}
+
+	void picture_ui_start(magic::Texture2D *t)
+	{
+		m_picture_ui = t;
+		SubscribeToEvent(magic::E_ENDVIEWRENDER,
+				URHO3D_HANDLER(CApp, on_picture_view));
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		const int w = t->GetWidth(), h = t->GetHeight();
+		const float s = ui_scale_for(w, h);
+		if(ui->GetCustomSize() == magic::IntVector2(w, h) && ui->GetScale() == s &&
+				ui->GetRoot()->GetPosition() == magic::IntVector2::ZERO)
+			return;
+		ui->SetCustomSize(w, h);
+		ui->SetScale(s);
+		ui->GetRoot()->SetPosition(0, 0);
+		log_i(MODULE, "The UI laid out at %ix%i (scale %g) for the camera's "
+				"pictures", w, h, s);
+	}
+
+	void on_picture_view(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		magic::Texture2D *t = m_picture_ui;
+		if(t && event_data[magic::EndViewRender::P_TEXTURE].GetPtr() != t)
+			return;
+		UnsubscribeFromEvent(magic::E_ENDVIEWRENDER);
+		m_picture_ui.Reset();
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		magic::Renderer *r = GetSubsystem<magic::Renderer>();
+		magic::RenderSurface *surface = t ? t->GetRenderSurface() : nullptr;
+		if(!surface || !ui || !g || !r)
+			return;
+		magic::PODVector<magic::UIElement*> all, more;
+		ui->GetRoot()->GetChildren(all, true);
+		ui->GetRootModalElement()->GetChildren(more, true);
+		all.Push(more);
+		sv_<magic::UIElement*> hidden;
+		for(magic::UIElement *e : all){
+			if(e->IsVisible() && (e == m_preferred_image ||
+					e == ui->GetCursor() || e->GetName().StartsWith("__trusted"))){
+				e->SetVisible(false);
+				hidden.push_back(e);
+			}
+		}
+		ui->RenderUpdate();
+		g->SetRenderTarget(0, surface);
+		for(unsigned i = 1; i < magic::MAX_RENDERTARGETS; i++)
+			g->SetRenderTarget(i, (magic::RenderSurface*)nullptr);
+		g->SetDepthStencil(r->GetDepthStencil(t->GetWidth(), t->GetHeight(),
+				surface->GetMultiSample(), surface->GetAutoResolve()));
+		g->SetViewport(magic::IntRect(0, 0, t->GetWidth(), t->GetHeight()));
+		ui->Render(false);
+		for(magic::UIElement *e : hidden)
+			e->SetVisible(true);
+		// The window's own UI drawn as before (Render() draws once a frame)
+		ui->RenderUpdate();
 	}
 
 	// **Menus fit the screen** (user, 2026-09-30): each frame, the visible
@@ -3089,6 +3170,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(in_flight)
 		DEF_BUILDAT_FUNC(resources)
 		DEF_BUILDAT_FUNC(logical_size)
+		DEF_BUILDAT_FUNC(picture_ui)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 		DEF_BUILDAT_FUNC(viewport_generation)
 		DEF_BUILDAT_FUNC(get_preference)

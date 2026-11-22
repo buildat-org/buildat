@@ -708,6 +708,16 @@ Safe.texture_png = wrap_function({"Texture2D"}, function(texture)
 	return __buildat_texture_png(texture)
 end)
 
+-- **The UI over a picture** ([KIT_PLAY_PICTURE_UI]): in the server's
+-- camera only (Kit's play pictures), the UI laid out now as a screen of
+-- the render target's size, and drawn over the texture's next render, the
+-- client's own UI left out: true, or nil and why not. See
+-- is_server_camera() in src/client/app.cpp.
+Safe.picture_ui = wrap_function({"__safe", "__safe"}, {"Texture2D"},
+		function(texture)
+	return __buildat_picture_ui(texture)
+end)
+
 -- The viewports the user's graphics preferences are applied to, as against
 -- the raw renderer:SetViewport() ones which are drawn the way the game says
 -- and nothing else. Use this instead of renderer:SetViewport(): the engine

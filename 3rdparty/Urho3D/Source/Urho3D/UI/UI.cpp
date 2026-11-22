@@ -871,6 +871,18 @@ void UI::Render(bool resetRenderTargets, VertexBuffer* buffer, const PODVector<U
     Vector2 invScreenSize(1.0f / (float)viewSize.x_, 1.0f / (float)viewSize.y_);
     Vector2 scale(2.0f * invScreenSize.x_, -2.0f * invScreenSize.y_);
     Vector2 offset(-1.0f, 1.0f);
+    // buildat [KIT_PLAY_PICTURE_UI]: on OpenGL, into a texture flipped as
+    // View::Render flips a camera's projection there, so that the UI reads
+    // the same way up as the view it is drawn over (as later Urho3D does)
+    bool flip = false;
+#ifdef URHO3D_OPENGL
+    flip = graphics_->GetRenderTarget(0) != 0;
+    if (flip)
+    {
+        scale.y_ = -scale.y_;
+        offset.y_ = -offset.y_;
+    }
+#endif
 
     Matrix4 projection(Matrix4::IDENTITY);
     projection.m00_ = scale.x_ * uiScale_;
@@ -883,7 +895,7 @@ void UI::Render(bool resetRenderTargets, VertexBuffer* buffer, const PODVector<U
 
     graphics_->ClearParameterSources();
     graphics_->SetColorWrite(true);
-    graphics_->SetCullMode(CULL_CCW);
+    graphics_->SetCullMode(flip ? CULL_NONE : CULL_CCW);
     graphics_->SetDepthTest(CMP_ALWAYS);
     graphics_->SetDepthWrite(false);
     graphics_->SetFillMode(FILL_SOLID);
@@ -943,6 +955,12 @@ void UI::Render(bool resetRenderTargets, VertexBuffer* buffer, const PODVector<U
         scissor.top_ = (int)(scissor.top_ * uiScale_);
         scissor.right_ = (int)(scissor.right_ * uiScale_);
         scissor.bottom_ = (int)(scissor.bottom_ * uiScale_);
+        if (flip)
+        {
+            const int top = scissor.top_;
+            scissor.top_ = viewSize.y_ - scissor.bottom_;
+            scissor.bottom_ = viewSize.y_ - top;
+        }
 
         graphics_->SetBlendMode(batch.blendMode_);
         graphics_->SetScissorTest(true, scissor);

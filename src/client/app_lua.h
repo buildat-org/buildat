@@ -1670,6 +1670,35 @@
 		return 2;
 	}
 
+	// picture_ui(texture) -> true, or nil and why not ([KIT_PLAY_PICTURE_UI],
+	// is_server_camera() in app.cpp): the UI laid out now at the size of a
+	// render target texture, and drawn over its next render
+	static int l_picture_ui(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		tolua_Error tolua_err;
+		if(!tolua_isusertype(L, 1, "Texture2D", 0, &tolua_err)){
+			tolua_error(L, __PRETTY_FUNCTION__, &tolua_err);
+			return 0;
+		}
+		magic::Texture2D *t = (magic::Texture2D*)tolua_tousertype(L, 1, 0);
+		const char *why = !self->is_server_camera() ? "only the server's camera "
+				"draws its UI into a picture" : !t || t->GetUsage() !=
+				magic::TEXTURE_RENDERTARGET || !t->GetRenderSurface() ||
+				t->GetWidth() < 16 || t->GetHeight() < 16 || t->GetWidth() > 2048 ||
+				t->GetHeight() > 2048 ? "a render target 16 to 2048 a side" : nullptr;
+		if(why){
+			lua_pushnil(L);
+			lua_pushstring(L, why);
+			return 2;
+		}
+		self->picture_ui_start(t);
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+
 	// get_ui_scale() -> number
 	static int l_get_ui_scale(lua_State *L)
 	{
