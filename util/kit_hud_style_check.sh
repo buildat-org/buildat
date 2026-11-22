@@ -33,11 +33,13 @@
 #      version 2 in the save afterwards;
 #  12. the health bar: a bar in Kit's HUD, as the rules' health_* say;
 #  13. the web client (headless Chrome, WebGL): the same elements, the pies
-#      from the atlas ($t/drive/web.png).
+#      from the atlas ($t/drive/web.png);
+#  14. [KIT_EDITOR_HOTBAR_CLIP] kitboss's editor at 1280x720 (UI scale 2/3):
+#      the hotbar's frame on the screen with its four edges drawn.
 # Screenshots kept with KEEP_TMP=1: $t/overlay.png (edit mode), $t/inspector.png
 # (the handles), $t/copy_list.png (the dropdown), $t/play.png,
 # $t/big.png (kitbob's larger window), $t/big_menu.png (the menu over them all),
-# $t/after.png, $t/auto.png; look at them.
+# $t/after.png, $t/auto.png, $t/edit720.png; look at them.
 #   util/kit_hud_style_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -483,9 +485,20 @@ sync 3000
 quit
 EOF
 sed 's/kitcat/kitdan/; s/after\.png/auto.png/' "$t/kitcat.cmds" > "$t/kitdan.cmds"
+cat > "$t/kitboss720.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 edit mode, hidden in play: "Hotbar"
+frames 10
+screenshot @T@/edit720.png
+quit
+EOF
 serve "$t/srv2.log"
 BUILDAT_JOIN_NAME=kitcat client kitcat 1400x1000 -u 1
 BUILDAT_JOIN_NAME=kitdan client kitdan 1024x700
+BUILDAT_JOIN_NAME=kitboss client kitboss720 1280x720
 stop_server
 c=$t/kitcat.log d=$t/kitdan.log s2=$t/srv2.log
 # 108, 216, 27 at 1080: 10, 20, 2.5 percents
@@ -503,9 +516,40 @@ echo "ok: a version 1 save's pixels converted against 1080 p, once"
 # The dragged hotbar stayed, at the same window
 wantp "$c" "kit: ui own:hotbar own at $hx "
 echo "ok: Kit's own hotbar dragged stays after a restart (at $hx)"
+# 14. [KIT_EDITOR_HOTBAR_CLIP] At 1280x720 (UI scale 2/3) the hotbar's frame
+# whole: its four edges drawn (a 1-unit edge covered no pixel's centre, the
+# bottom one gone: the frame seemed to run past the screen)
+python3 -I - "$t/kitboss720.log" "$t/edit720.png" <<'PY' || fail "the hotbar's frame at 1280x720 ($t/edit720.png, $t/kitboss720.log)"
+import re, sys
+from PIL import Image
+m = re.findall(r"own:hotbar own at (\d+),(\d+) (\d+)x(\d+) in (\d+)x(\d+) .*edit mode",
+	open(sys.argv[1], errors="replace").read())
+assert m, "no hotbar line in edit mode"
+x, y, w, h, rw, rh = map(int, m[-1])
+assert y + h <= rh, ("past the bottom", m[-1])
+im = Image.open(sys.argv[2]).convert("RGB")
+W, H = im.size
+s = W / rw
+def frame(px, py): # the own frames' (0.55, 0.8, 1), not the sky's (140, 173, 217)
+	if not (0 <= px < W and 0 <= py < H):
+		return False
+	r, g, b = im.getpixel((px, py))
+	return 120 <= r <= 160 and 188 <= g <= 216 and b >= 236
+def edge(points): # half the points with a frame pixel within a pixel of it
+	# (the check's other elements cover parts of it; a lost edge has none)
+	return sum(any(frame(px + dx, py + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+		for px, py in points) >= len(points) / 2
+t = [(x + w * k / 10, y) for k in range(1, 10)]
+bt = [(x + w * k / 10, y + h - 0.5) for k in range(1, 10)]
+l = [(x, y + h * k / 10) for k in range(2, 9)]
+r = [(x + w - 0.5, y + h * k / 10) for k in range(2, 9)]
+for name, pts in (("top", t), ("bottom", bt), ("left", l), ("right", r)):
+	assert edge([(int(px * s), int(py * s)) for px, py in pts]), (name, m[-1])
+PY
+echo "ok: at 1280x720 the hotbar's frame on the screen, its four edges drawn"
 # 12. The health bar is a bar of Kit's own
 wantp "$c" "kit: ui own:health bar at \d+,\d+ \d+x\d+ in 1400x1000 font \d+ shapes order 0 shown.*1\.00 full"
-for p in overlay play big after auto; do
+for p in overlay play big after auto edit720; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
 echo "PASS: Kit's HUD styles: four bars, pies, formats, vmin, order, stacking, blink, plain, snapping, handles, Kit's own HUD kept, copy style, the save's conversion, the health bar; screenshots $t/overlay.png $t/play.png $t/big.png $t/after.png $t/auto.png"

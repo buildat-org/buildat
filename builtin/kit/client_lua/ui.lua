@@ -1961,8 +1961,13 @@ local function update()
 							math.floor(h) + 8)
 				end
 			end
-			local bars = {{0, 0, w, 1}, {0, h - 1, w, 1}, {0, 0, 1, h},
-				{w - 1, 0, 1, h}}
+			-- [KIT_EDITOR_HOTBAR_CLIP] at least a screen pixel thick: below
+			-- UI scale 1 a 1-unit edge covered no pixel's centre and was not
+			-- drawn (at 1280x720, scale 2/3, the hotbar's bottom edge: the
+			-- frame seemed to run past the screen's bottom)
+			local e = math.max(1, math.ceil(1 / magic.ui.scale))
+			local bars = {{0, 0, w, e}, {0, h - e, w, e}, {0, 0, e, h},
+				{w - e, 0, e, h}}
 			for i, b in ipairs(r.edge) do
 				b.visible = frame
 				if frame then
