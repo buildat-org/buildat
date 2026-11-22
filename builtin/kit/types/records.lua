@@ -55,7 +55,7 @@ return {
 	},
 	about = {
 		group = "Logic",
-		what = "Each player's best time or score, kept across rounds and restarts, and the top ones as a board.",
+		what = "Each player's best time or score, kept across rounds and restarts, and the top ones as a board. A timed run: its finish to a kit/stopwatch's stop, the stopwatch's elapsed straight to time here, a crash to the stopwatch's reset (no time sent).",
 		inputs = {
 			time = "A player's time. Value: its seconds.",
 			score = "A player's score. Value: the number.",

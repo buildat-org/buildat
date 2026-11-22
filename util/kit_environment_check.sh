@@ -16,7 +16,9 @@
 #     ambient, latitude; its ground lit as the root's, cave_root.png and
 #     cave_sky.png), the main scene keeping the root's. Its season set
 #     summer (the registry back), then inherited again by the inspector's
-#     button (winter swapped in; inspector.png).
+#     button (winter swapped in; inspector.png). Saved and loaded, and
+#     ([KIT_REPORT_1122]) its save row made as before alpha.64 (an ambient
+#     of its own too, no own-param list): its sky and ambient its own.
 #   - played (the round starts on the main scene): the root's set by
 #     signals (try): rain, a day of a minute
 #     from 5.9 o'clock (dawn signalled), a bad weather refused quietly.
@@ -260,6 +262,47 @@ grep -a 'Environment of the scene cave: {' "$t/srv2.log" | tail -1 | grep -aqP \
 	'"from":"scene".*"season":"winter","sky":"#405a78"' ||
 	fail "the cave's sky not its own, or its season not the root's, after the restart ($t/srv2.log)"
 echo "ok: saved and loaded: the cave's sky its own, its ambient and season the root's"
+# [KIT_REPORT_1122] A save of before alpha.64: the cave's environment with
+# a sky and an ambient of its own and no own-param list. Loaded, those two
+# are its own (the rest the root's), and the row is saved so
+python3 -I - "$db" <<'PY' || fail "the old save row not written ($db)"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+a = json.loads(db.execute("select value from store where store='kit' and "
+    "key='authored'").fetchone()[0])
+c = [e for e in a["entities"] if e["id"] == 7][0]["components"][0]
+c.pop("overrides", None)
+c["params"]["ambient"] = "#202030"
+db.execute("update store set value=? where store='kit' and key='authored'",
+    (json.dumps(a),))
+db.commit()
+PY
+server 3
+wait_for_log "$t/srv3.log" 'Environment of the scene cave: \{.*"entity":7' 60 ||
+	fail "the cave's environment not told from the old save ($t/srv3.log)"
+stop
+grep -aqP "Entity 7's kit/environment: (ambient, sky|sky, ambient) its own" \
+	"$t/srv3.log" || fail "the old environment's own params not logged ($t/srv3.log)"
+python3 -I - "$t/srv3.log" "$db" <<'PY' || fail "the old save's environment not its own sky and ambient, the rest the root's ($t/srv3.log)"
+import json, re, sqlite3, sys
+s = open(sys.argv[1], "rb").read().decode(errors="replace")
+k = "Environment of the scene cave: "
+line = s[s.rindex(k) + len(k):].split("\n")[0]
+# (the log line is cut at 400 characters: its keys one by one)
+got = {}
+for n in ("from", "sky", "ambient", "season", "gravity", "fog_end"):
+    m = re.search(r'"%s":("[^"]*"|[-0-9.]+)' % n, line)
+    got[n] = m and json.loads(m.group(1))
+print("the old save's cave: %s" % got)
+assert got == {"from": "scene", "sky": "#405a78", "ambient": "#202030",
+    "season": "winter", "gravity": 0.5, "fog_end": 800}, got
+db = sqlite3.connect("file:%s?mode=ro" % sys.argv[2], uri=True)
+a = json.loads(db.execute("select value from store where store='kit' and "
+    "key='authored'").fetchone()[0])
+c = [e for e in a["entities"] if e["id"] == 7][0]["components"][0]
+assert sorted(c.get("overrides", [])) == ["ambient", "sky"], c
+PY
+echo "ok: an old save's scene environment (no own-param list): its sky and ambient its own, the rest the root's, saved so"
 want "$s" "kit/environment 4: set_weather rain by kitboss" \
 	"kit/environment 4: set_day_minutes 1" "kit/environment 4: dawn"
 grep -aq "set_weather hail" "$s" && fail "a bad weather taken ($s)"

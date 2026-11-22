@@ -842,7 +842,9 @@ elif phase == "zones":
         call("put_type", {"name": name, "source": src})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
     for w in ('c:params_of(type)', 'or "look" (the entity\'s own look', 's.spheres = {{x, y, z, r}...}',
-            'movement.zone = "box"'):
+            'movement.zone = "box"',
+            # [KIT_REPORT_1122] on_timer's player
+            'on_timer(c, name, player) (player: "player:<id>" when c:after(s, name, {player = by}) set it'):
         assert w in d, (w, d)
     call("place", {"type": "kit/spawner", "pos": [0, 2, 0], "params": {"players": True}})
     CT = placed(call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",

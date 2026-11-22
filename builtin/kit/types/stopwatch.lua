@@ -1,6 +1,7 @@
 -- A stopwatch for each player ([KIT_RECORDS]): "start" starts theirs from 0
 -- (again while it runs: from 0 again), "stop" stops it and sends elapsed
--- (its seconds), "reset" stops it at 0, "lap" sends lap (the seconds since
+-- (its seconds), "reset" stops it at 0 without sending elapsed (a failed
+-- run: a crash's), "lap" sends lap (the seconds since
 -- its start or the last lap) and it runs on; each by the player the signal
 -- carries (a stop or reset by no player: everyone's; a start or lap by none
 -- does nothing). "time" is for a kit/ui_text (`to` "player"; its
@@ -47,7 +48,7 @@ return {
 		inputs = {
 			start = "Starts the player's stopwatch from 0 (again while it runs: from 0 again).",
 			stop = "Stops it and sends elapsed. By no player: everyone's.",
-			reset = "Stops it at 0. By no player: everyone's.",
+			reset = "Stops it at 0 without sending elapsed: a failed run (a crash). By no player: everyone's.",
 			lap = "Sends lap, the seconds since its start or the last lap; it runs on.",
 		},
 		outputs = {

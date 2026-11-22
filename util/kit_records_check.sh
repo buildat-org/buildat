@@ -9,13 +9,16 @@
 # the player) the stopwatch's time goes to, a sign 6 the records' board
 # goes to, a text 7 ("N {value}", clear_after 1) its new_best goes to, a
 # sign 8 the stopwatch's lap goes to and a text 9 ("B {value:time1}") its
-# best goes to; kitbob is a builder. Each drives inputs with the
+# best goes to, a sign 10 its elapsed goes to (linked before the
+# records); kitbob is a builder. Each drives inputs with the
 # inspector's Try (by him):
 #   1. both start theirs: each one's 5 counts on, on their own screen,
 #      from the one value the server sent (one "value" each);
 #   2. kitboss stops at about 1 s, kitbob later: elapsed to the records,
 #      each a new best (7: "N <time>", gone a second later), the board
-#      "1. kitboss|2. kitbob"; kitboss's 5 stands at his time;
+#      "1. kitboss|2. kitbob"; kitboss's 5 stands at his time; the
+#      elapsed reaches 10 before 4 (its links' order, not by id) and 4's
+#      best reaches 9 after both ([KIT_REPORT_1122]);
 #   3. kitbob a quicker run: his new best, the board "1. kitbob|2.
 #      kitboss"; kitboss a slower one: no new best, the board as it was;
 #   4. a lap (8: its seconds), the stopwatch running on; a reset by nobody:
@@ -113,14 +116,17 @@ place kit/ui_text '[0, 1, 0]'
 setp 9 text '"B {value:time1}"'
 setp 9 to '"player"'
 setp 9 y 20
+place kit/sign '[0, 1, 8]'
+setp 10 text '"{value}"'
 link 3 time 5 value
+link 3 elapsed 10 value
 link 3 elapsed 4 time
 link 3 lap 8 value
 link 4 board 6 value
 link 4 new_best 7 value
 link 4 best 9 value
 await "$SL" 0 10 "An edit by kitboss: linked 4.best -> 9.value"
-echo "ok: placed: the stopwatch 3, records 4, its texts 5, 7, 9 and signs 6, 8"
+echo "ok: placed: the stopwatch 3, records 4, its texts 5, 7, 9 and signs 6, 8, 10"
 
 client bob "$t/bob.log"
 BOB=$!
@@ -156,7 +162,7 @@ echo "ok: both running: each one's time counted on their own screen from one val
 
 # 2. kitboss stops (~1.2 s), kitbob later
 as boss
-m=$(mark "$SL") mc=$(mark "$CL")
+m=$(mark "$SL") mc=$(mark "$CL") m0=$m
 try stop
 await "$SL" "$m" 10 "kit/stopwatch 3: stopped for kitboss at [0-9.]+ s"
 await "$SL" "$m" 10 "kit/records 4: kitboss has a new best: [0-9.]+ \(the first\)"
@@ -187,7 +193,17 @@ try stop
 await "$SL" "$m" 10 "kit/records 4: kitbob has a new best: [0-9.]+ \(the first\)"
 b=$(num "$SL" "$m" "kitbob has a new best: [0-9.]+")
 await "$SL" "$m" 10 "kit/sign 6: shows \"1. kitboss $a.2. kitbob $b\""
-echo "ok: stopped: kitboss $a, kitbob $b, each a first best; the board 1. kitboss|2. kitbob"
+# [KIT_REPORT_1122] One output's links in their order (10 linked before
+# 4, so not by id), what they set off after both (4's best to 9)
+python3 -I - "$SL" "$m0" <<'PY' || fail "the elapsed's links not delivered in their order ($SL)"
+import sys
+s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
+at = [s.find(k) for k in ("kit/sign 10: shows", "kit/records 4: kitboss has a new best",
+    "kit/ui_text 9: value for kitboss")]
+print("the elapsed's runs at %s" % at)
+assert -1 not in at and at == sorted(at), at
+PY
+echo "ok: stopped: kitboss $a, kitbob $b, each a first best; the board 1. kitboss|2. kitbob; the elapsed to 10 then 4 (its links' order), 4's best to 9 after"
 
 # 3. kitbob quicker: his new best and the board turned; kitboss slower: none
 m=$(mark "$SL")
