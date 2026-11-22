@@ -12415,9 +12415,10 @@ struct Module: public interface::Module, public Interface
 	// [KIT_TRY_INPUTS] {"op": "try", "id": n, "input": i, "value": v}: the
 	// inspector's Try, the input delivered to the entity as a link would,
 	// by the builder; Running only (the editor runs the game first). Its
-	// runs' emits are answered with "kit:tried"
+	// runs' emits are answered with "kit:tried". dry: checked only
+	// (play_input's steps before they run)
 	void try_input(Peer &p, size_t peer, const json::Value &j,
-			std::function<void(const ss_&)> refuse)
+			std::function<void(const ss_&)> refuse, bool dry = false)
 	{
 		ss_ why;
 		Entity *e = entity_arg(j, "id", why);
@@ -12476,6 +12477,8 @@ struct Module: public interface::Module, public Interface
 						"this round (\"nobody\", \"me\" or a player's name)");
 			by = "player:"+itos(pl->second);
 		}
+		if(dry)
+			return;
 		const uint64_t id = e->id;
 		const size_t before = m_queue.size();
 		deliver(id, input, value, by, 0);
@@ -35267,38 +35270,55 @@ struct Module: public interface::Module, public Interface
 				"key of per_player state, not the body's name; and its screen's "
 				"buttons and texts, as play_input's.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"play_input", "play_input", "Sends your body's input for a time, "
-				"as a player's client sends it (keys predicted and all): keys "
-				"held (SDL's names: W, A, S, D, Space, Left Shift, ...; up to "
-				"6), the game's input actions held (actions: up to 4 names), yaw "
-				"and pitch to look first (degrees as get_view's), jump, use (an "
-				"entity's id, as a click on it). seconds: 0.1 to 4 (1 unless "
-				"given). Answers your body's place before and after, how far it "
-				"moved, its components' states (health, score, inventory...), "
-				"alive, its by and its vars (c:body_var's), and the outputs "
-				"entities emitted meanwhile (by \"you\" when your body did it), "
-				"the screen's buttons (id, label; a list's rows) and texts (each "
-				"UI text up for your body, as its client shows it, {value} "
-				"filled: id, text, kind but for a kit/ui_text); picture: also a "
-				"picture of its screen at the end (width, height), its UI laid "
-				"out as a screen of that size shows it; picture_at: pictures at "
-				"up to 3 times after the end (s, 0 to 2: a pop, a fade). press: a "
-				"button on your body's screen pressed first, as a click on it (a "
-				"kit/ui_button, a pause menu item, a kit/ui_scene_list's row: "
-				"Play in a lobby), by its id or its label (a list's row by its "
-				"title, or row from 1). An entity's output emitted again is one "
-				"entry: count, the first value and time t (s from the start), "
-				"last_value and last_t; mute: outputs left out (\"<output>\" or "
-				"\"<id>:<output>\", up to 16; muted: how many emits were left "
-				"out).",
+			{"play_input", "play_input", "Plays your body as a player's client "
+				"does (keys predicted and all): steps, up to 16, in order: "
+				"{keys, seconds, yaw, pitch, jump, use, actions}: keys held "
+				"(SDL's names: W, A, S, D, Space, Left Shift, ...; up to 6) and "
+				"the game's input actions (up to 4) for seconds (0.1 to 4, 1 "
+				"unless given), yaw and pitch looked to first (degrees as "
+				"get_view's), jump, use (an entity's id, as a click on it); "
+				"{press, row}: a button on your body's screen pressed, as a "
+				"click (a kit/ui_button, a pause menu item, a kit/ui_scene_list's "
+				"row: Play in a lobby), by its id or label (a list's row by its "
+				"title, or row from 1; an action's button: held till the end); "
+				"{try_input: {id, input, value}}: try_input as your body; {wait: "
+				"s}; {picture: true, width, height}: its screen then, its UI laid "
+				"out as a screen of that size shows it (a fade, a pop: a wait "
+				"between two). At most 6 s of keys and waits, 4 pictures. "
+				"Without steps, one step's fields as parameters (press first, "
+				"picture: true one at the end). Answers your body's place before "
+				"and after, how far it moved, its components' states (health, "
+				"score, inventory...), alive, its by and vars (c:body_var's), the "
+				"outputs entities emitted meanwhile (by \"you\" when your body "
+				"did it), the screen's buttons (id, label; a list's rows) and "
+				"texts (each UI text up for your body, as its client shows it, "
+				"{value} filled), and pictures: each one's step and t (s from "
+				"the start). An output emitted again is one entry: count, the "
+				"first value and t, last_value and last_t; mute: outputs left "
+				"out (\"<output>\" or \"<id>:<output>\", up to 16; muted: how "
+				"many were).",
 				R"J({"type": "object", "properties": {
+				"steps": {"type": "array", "maxItems": 16, "items": {"type": "object",
+					"description": "One of: keys...; press, row; try_input; wait; picture, width, height",
+					"properties": {
+					"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+					"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+					"seconds": {"type": "number"}, "yaw": {"type": "number"},
+					"pitch": {"type": "number"}, "jump": {"type": "boolean"},
+					"use": {"type": "integer"},
+					"press": {"description": "A button's entity id or its label"},
+					"row": {"type": "integer", "description": "press's list's row, from 1"},
+					"try_input": {"type": "object", "properties": {"id": {"type": "integer"},
+						"input": {"type": "string"}, "value": {"description": "As the input's type is"}},
+					"required": ["id", "input"]},
+					"wait": {"type": "number", "description": "Seconds"},
+					"picture": {"type": "boolean"},
+					"width": {"type": "integer"}, "height": {"type": "integer"}}}},
 				"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
 				"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
 				"seconds": {"type": "number"}, "yaw": {"type": "number"},
 				"pitch": {"type": "number"}, "jump": {"type": "boolean"},
 				"use": {"type": "integer"}, "picture": {"type": "boolean"},
-				"picture_at": {"type": "array", "items": {"type": "number"},
-					"maxItems": 3},
 				"width": {"type": "integer"}, "height": {"type": "integer"},
 				"press": {"description": "A button's entity id or its label"},
 				"row": {"type": "integer", "description": "press's list's row, from 1"},
@@ -37623,8 +37643,8 @@ struct Module: public interface::Module, public Interface
 		bool camera = false, compare = false;
 		// Where the camera loads round
 		double at[3] = {0, 0, 0};
-		// [3a] the play_input answer this picture ends
-		ss_ play;
+		// [KIT_REPORT_1123] the play_input run whose picture step it is
+		ss_ run;
 	};
 	std::map<ss_, ViewWait> m_view_waits; // by the request's id
 	static const int VIEW_MAX_W = 1024, VIEW_MAX_H = 768;
@@ -38144,6 +38164,8 @@ struct Module: public interface::Module, public Interface
 		m_view_waits.erase(it);
 		if(w.camera)
 			m_cam.used = interface::os::time_us();
+		if(!w.run.empty())
+			return play_picture(w, late);
 		const int64_t now = interface::os::time_us();
 		const size_t n = w.png.size();
 		std::deque<LastView> &last = m_view_last[w.account];
@@ -38189,8 +38211,7 @@ struct Module: public interface::Module, public Interface
 				"this server has it loaded round the pose)." : " (the scene that "
 				"client is in, as far as it has loaded it).");
 		if(pngs.empty()){
-			mcp_answer(w.agent, w.play+(first_why.empty() ? late : first_why),
-					!w.play.size());
+			mcp_answer(w.agent, first_why.empty() ? late : first_why, true);
 			return;
 		}
 		// One picture as before ([KIT_AGENT_VISUALS]): "<who> drew this ..."
@@ -38198,7 +38219,7 @@ struct Module: public interface::Module, public Interface
 				where+(w.early[0] ? " Drawn before its loading settled: far parts "
 				"may be missing." : "") : w.who+" drew "+itos(n)+" view"+
 				(n == 1 ? "" : "s")+where+" The pictures in this order:\n"+list;
-		mcp_answer(w.agent, w.play+text, false, pngs);
+		mcp_answer(w.agent, text, false, pngs);
 	}
 
 	// A picture not come in time, or its client gone (left: the peer that
@@ -38234,7 +38255,7 @@ struct Module: public interface::Module, public Interface
 						"how: a release's client, headless)";
 				log_i(MODULE, "A picture for %s's agent: %s", cs(w.account),
 						cs(why));
-				mcp_answer(w.agent, w.play+why, !w.play.size());
+				mcp_answer(w.agent, why, true);
 				m_view_waits.erase(it);
 				continue;
 			}
@@ -38487,6 +38508,14 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		if(!m_play.id.empty() && now > m_play.deadline)
 			play_finish("its input had not ended in time");
+		// [KIT_REPORT_1123] a wait step's end; the run's, its steps all done
+		if(!m_play.id.empty() && m_play.until && now >= m_play.until){
+			m_play.until = 0;
+			m_play.k++;
+			play_go();
+		}
+		if(!m_play.id.empty() && m_play.k >= m_play.steps.size())
+			play_finish(m_play.note, !m_play.note.empty());
 		if(m_hold.agent)
 			play_retry();
 		camera_pace(m_cam.ready && m_cam.play.empty() && !camera_busy() &&
@@ -38598,20 +38627,46 @@ struct Module: public interface::Module, public Interface
 	// "kit:action" would. The round must run in the agent's session. Its
 	// body is "<account>'s agent", a guest's (gone as it leaves): play_leave,
 	// PLAY_IDLE_US unused or its agent gone give it back
+	// [KIT_REPORT_1123] (2) play_input's steps, run in order on the
+	// server's ticks: keys held for seconds (looks, jumps, uses first), a
+	// press on the body's screen, a try_input as the body, a wait, a
+	// picture of its screen ([KIT_PLAY_PICTURE_UI] its UI drawn over it)
+	struct PlayStep
+	{
+		char kind = 'k'; // keys, press, try_input (t), wait, picture (i)
+		sv_<ss_> cmds, actions; // keys': its drive commands, actions held
+		double secs = 0; // keys' or wait's
+		json::Value arg; // press's id or label; try_input's arguments
+		int64_t row = 0;
+		int wh[2] = {512, 384};
+		bool settle = false; // (the flat picture: once its loading settled)
+	};
+	struct PlayPicture
+	{
+		size_t step = 0;
+		double t = 0;
+		int wh[2] = {0, 0};
+		ss_ png, why;
+		bool early = false;
+	};
 	struct PlayWait
 	{
 		size_t agent = 0;
 		ss_ id;
 		int64_t since = 0, deadline = 0;
 		double from[3] = {0, 0, 0};
-		sv_<ss_> actions;
-		bool picture = false;
-		int wh[2] = {512, 384};
-		double secs = 0;
-		// [KIT_PLAY_PICTURE_UI] picture_at's times, ms after the input's end
-		std::vector<int> at;
+		sv_<ss_> actions; // held till the end (a press's action)
+		double secs = 0; // its keys' and waits' time
+		bool flat = false;
+		sv_<PlayStep> steps;
+		size_t k = 0; // the step running
+		int64_t until = 0; // a wait's end
+		ss_ view, note; // a picture's request; why a step could not run
+		std::vector<PlayPicture> pics;
 	};
 	PlayWait m_play; // id "": none
+	static const size_t PLAY_STEPS = 16, PLAY_PICTURES = 4;
+	static constexpr double PLAY_SECONDS = 6;
 
 	// The camera's body now: its place, scene, components' states
 	json::Value play_body()
@@ -39113,12 +39168,146 @@ struct Module: public interface::Module, public Interface
 			return "You play no body: play_join first";
 		if(!m_play.id.empty() || m_mcp_waits.count(peer))
 			return "Your last call is still going: one at a time";
+		static const std::set<ss_> FLAT = {"keys", "actions", "seconds", "yaw",
+				"pitch", "jump", "use", "press", "row", "picture", "width",
+				"height"};
+		bool flat = false;
+		for(json::Iterator it(a); a.is_object() && it; ++it){
+			if(FLAT.count(it.key()))
+				flat = true;
+			else if(it.key() != "steps" && it.key() != "mute")
+				return "play_input has no parameter \""+cut_utf8(it.key(), 32)+
+						"\" (steps: keys, press, try_input, wait and picture)";
+		}
+		sv_<ss_> mute;
+		const json::Value &mv = a.get("mute");
+		for(unsigned i = 0; mv.is_array() && i < mv.size(); i++){
+			const ss_ m = mv.at(i).is_string() ? mv.at(i).as_string() : "";
+			if(m.empty() || m.size() > 64 || mute.size() >= 16)
+				return "mute: up to 16 outputs, \"<output>\" or \"<id>:<output>\"";
+			mute.push_back(m);
+		}
+		if(!mv.is_undefined() && !mv.is_array())
+			return "mute: a list of outputs";
+		PlayWait w;
+		// [KIT_REPORT_1123] (2) steps, or as text (a client keeping an older
+		// schema sends a parameter it doesn't know so): the list as a JSON
+		// string
+		json::Value sl = a.get("steps");
+		if(sl.is_string()){
+			const json::Value l = json::load_string(sl.as_cstring());
+			if(!l.is_undefined())
+				sl = l;
+		}
+		if(!sl.is_undefined()){
+			if(flat)
+				return "steps or the flat parameters (keys, press, picture...), "
+						"not both: put them in a step";
+			if(!sl.is_array() || sl.size() < 1 || sl.size() > PLAY_STEPS)
+				return "steps: a list of 1 to "+itos(PLAY_STEPS)+" steps (or the "
+						"list as a JSON string)";
+			for(unsigned i = 0; i < sl.size(); i++){
+				PlayStep st;
+				const ss_ why = play_step(sl.at(i), st, p, peer, sid);
+				if(!why.empty())
+					return "steps["+itos(i)+"]: "+why;
+				w.steps.push_back(st);
+			}
+		} else {
+			// The flat parameters: press first, the keys, a picture at the end
+			w.flat = true;
+			PlayStep st;
+			if(!a.get("press").is_undefined() || !a.get("row").is_undefined()){
+				json::Value pr = json::object();
+				pr.set("press", a.get("press"));
+				if(!a.get("row").is_undefined())
+					pr.set("row", a.get("row"));
+				const ss_ why = play_step(pr, st, p, peer, sid);
+				if(!why.empty())
+					return why;
+				w.steps.push_back(st);
+			}
+			st = PlayStep();
+			ss_ why = play_keys(a, st, sid);
+			if(!why.empty())
+				return why;
+			w.steps.push_back(st);
+			st = PlayStep();
+			st.kind = 'i';
+			st.settle = true;
+			why = view_size(a, st.wh);
+			if(!why.empty())
+				return why;
+			if(a.get("picture").is_true())
+				w.steps.push_back(st);
+		}
+		// Today's caps over the whole run
+		size_t pics = 0;
+		int64_t pixels = 0;
+		for(const PlayStep &st : w.steps){
+			if(st.kind == 'k' || st.kind == 'w')
+				w.secs += st.secs;
+			if(st.kind == 'i'){
+				pics++;
+				pixels += (int64_t)st.wh[0] * st.wh[1];
+			}
+		}
+		if(w.secs > PLAY_SECONDS + 1e-9)
+			return "steps: "+json::Value(w.secs).stringify()+" s of keys and waits: "+
+					json::Value(PLAY_SECONDS).stringify()+" at most";
+		if(pics > PLAY_PICTURES)
+			return "steps: "+itos(pics)+" pictures: "+itos(PLAY_PICTURES)+
+					" at most";
+		if(pixels > VIEW_CALL_PIXELS)
+			return itos(pics)+" pictures of "+itos(pixels)+" pixels: "+
+					itos(VIEW_CALL_PIXELS)+" pixels at most per call (smaller width "
+					"and height, or fewer)";
+		std::random_device rd;
+		char id[24];
+		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
+		w.agent = peer;
+		w.id = id;
+		w.since = now;
+		// simplified: the camera's whole call time, whatever the steps take;
+		// a stalled camera is said late
+		w.deadline = now + CAMERA_CALL_US;
+		const json::Value body = play_body();
+		for(unsigned k = 0; k < 3 && body.get("pos").is_array(); k++)
+			w.from[k] = body.get("pos").at(k).as_number();
+		m_play = w;
+		m_cam.rec = true;
+		m_cam.rec_session = sid;
+		m_cam.rec_player = (uint64_t)json::jint(body, "entity");
+		m_cam.events = json::array();
+		m_cam.event_at.clear();
+		m_cam.mute = mute;
+		m_cam.muted = 0;
+		m_cam.used = now;
+		log_i(MODULE, "%s plays %zu step%s, %g s", cs(p.name), w.steps.size(),
+				w.steps.size() == 1 ? "" : "s", w.secs);
+		// The first steps now: one that cannot run first refused, as nothing
+		// ran; a later one ends the run (play_go())
+		const ss_ first = play_next();
+		if(!first.empty() && m_play.k == 0){
+			m_play = PlayWait();
+			m_cam.rec = false;
+			return w.flat ? first : "steps[0]: "+first;
+		}
+		if(!first.empty())
+			play_stop(first);
+		m_mcp_defer = peer;
+		failed = false;
+		return "";
+	}
+
+	// A keys step (or the flat parameters'): its drive commands and actions
+	ss_ play_keys(const json::Value &a, PlayStep &st, uint64_t sid)
+	{
 		const json::Value &sv = a.get("seconds");
-		const double secs = sv.is_undefined() ? 1.0 : sv.is_number() ?
-				sv.as_number() : -1;
-		if(!(secs >= 0.1 && secs <= 4))
+		st.secs = sv.is_undefined() ? 1.0 : sv.is_number() ? sv.as_number() : -1;
+		if(!(st.secs >= 0.1 && st.secs <= 4))
 			return "seconds: 0.1 to 4";
-		sv_<ss_> keys, actions;
+		sv_<ss_> keys;
 		const json::Value &kv = a.get("keys"), &av = a.get("actions");
 		for(unsigned i = 0; kv.is_array() && i < kv.size(); i++){
 			const ss_ k = kv.at(i).is_string() ? kv.at(i).as_string() : "";
@@ -39136,49 +39325,14 @@ struct Module: public interface::Module, public Interface
 			SessionScope sc(*this, sid);
 			for(unsigned i = 0; av.is_array() && i < av.size(); i++){
 				const ss_ n = av.at(i).is_string() ? av.at(i).as_string() : "";
-				if(!m_action_names.count(n) || actions.size() >= 4)
+				if(!m_action_names.count(n) || st.actions.size() >= 4)
 					return "actions: up to 4 of the game's input actions (get_state "
 							"lists the types' actions; none: "+n.substr(0, 32)+")";
-				actions.push_back(n);
+				st.actions.push_back(n);
 			}
 		}
 		if(!av.is_undefined() && !av.is_array())
 			return "actions: a list of action names";
-		sv_<ss_> mute;
-		const json::Value &mv = a.get("mute");
-		for(unsigned i = 0; mv.is_array() && i < mv.size(); i++){
-			const ss_ m = mv.at(i).is_string() ? mv.at(i).as_string() : "";
-			if(m.empty() || m.size() > 64 || mute.size() >= 16)
-				return "mute: up to 16 outputs, \"<output>\" or \"<id>:<output>\"";
-			mute.push_back(m);
-		}
-		if(!mv.is_undefined() && !mv.is_array())
-			return "mute: a list of outputs";
-		// [KIT_AGENT_FEEDBACK_1117] 8: a button on the body's screen pressed
-		// first, as its client's click sends it (an action's button: that
-		// action held)
-		int64_t press_id = 0, press_row = 0;
-		ss_ press_action;
-		const json::Value &prv = a.get("press"), &rv = a.get("row");
-		if(!prv.is_undefined()){
-			if(!(prv.is_string() || prv.is_number()) || !(rv.is_undefined() ||
-					rv.is_number()))
-				return "press: a button's id or its label; row: a list's row, "
-						"from 1";
-			press_row = rv.is_number() ? (int64_t)rv.as_number() : 0;
-			SessionScope sc(*this, session_of_peer(cam));
-			auto ci = m_peers.find(cam);
-			if(ci == m_peers.end())
-				return "press: your body is not placed yet";
-			const ss_ why = press_target(ci->second, prv, press_id, press_row,
-					press_action);
-			if(!why.empty())
-				return why;
-			if(!press_action.empty() && std::find(actions.begin(),
-					actions.end(), press_action) == actions.end())
-				actions.push_back(press_action);
-		}
-		sv_<ss_> cmds;
 		const json::Value &yv = a.get("yaw"), &pv = a.get("pitch");
 		if(!yv.is_undefined() || !pv.is_undefined()){
 			if((!yv.is_undefined() && (!yv.is_number() ||
@@ -39189,108 +39343,233 @@ struct Module: public interface::Module, public Interface
 			// The drive's pitch is up, get_view's down
 			snprintf(l, sizeof l, "look %.2f %.2f", yv.is_number() ?
 					yv.as_number() : 0.0, pv.is_number() ? -pv.as_number() : 0.0);
-			cmds.push_back(l);
+			st.cmds.push_back(l);
 		}
 		const json::Value &uv = a.get("use");
 		if(!uv.is_undefined()){
 			if(!uv.is_number() || uv.as_number() < 1)
 				return "use: an entity's id";
-			cmds.push_back("event kit_use "+itos((int64_t)uv.as_number()));
+			st.cmds.push_back("event kit_use "+itos((int64_t)uv.as_number()));
 		}
 		for(const ss_ &k : keys)
-			cmds.push_back("keydown "+k);
-		const int ms = (int)(secs * 1000);
+			st.cmds.push_back("keydown "+k);
+		const int ms = (int)(st.secs * 1000);
 		if(a.get("jump").is_true()){
-			cmds.push_back("keydown Space");
-			cmds.push_back("delay "+itos(std::min(ms, 150)));
-			cmds.push_back("keyup Space");
+			st.cmds.push_back("keydown Space");
+			st.cmds.push_back("delay "+itos(std::min(ms, 150)));
+			st.cmds.push_back("keyup Space");
 			if(ms > 150)
-				cmds.push_back("delay "+itos(ms - 150));
+				st.cmds.push_back("delay "+itos(ms - 150));
 		} else {
-			cmds.push_back("delay "+itos(ms));
+			st.cmds.push_back("delay "+itos(ms));
 		}
 		for(const ss_ &k : keys)
-			cmds.push_back("keyup "+k);
+			st.cmds.push_back("keyup "+k);
+		return "";
+	}
+
+	// One of play_input's steps checked and made; "" or why not
+	ss_ play_step(const json::Value &s, PlayStep &st, Peer &p, size_t peer,
+			uint64_t sid)
+	{
+		static const std::map<ss_, char> FIELDS = {{"keys", 'k'},
+				{"actions", 'k'}, {"seconds", 'k'}, {"yaw", 'k'}, {"pitch", 'k'},
+				{"jump", 'k'}, {"use", 'k'}, {"press", 'p'}, {"row", 'p'},
+				{"try_input", 't'}, {"wait", 'w'}, {"picture", 'i'},
+				{"width", 'i'}, {"height", 'i'}};
+		char kind = 0;
+		for(json::Iterator it(s); s.is_object() && it; ++it){
+			auto f = FIELDS.find(it.key());
+			if(f == FIELDS.end())
+				return "a step has no field \""+cut_utf8(it.key(), 32)+"\"";
+			if(kind && kind != f->second)
+				return "one of keys, press, try_input, wait or picture a step ("+
+						it.key()+" with another's fields)";
+			kind = f->second;
+		}
+		if(!kind)
+			return "a step: {keys, seconds, ...}, {press, row}, {try_input: {id, "
+					"input, value}}, {wait: s} or {picture: true, width, height}";
+		st.kind = kind;
+		if(kind == 'k')
+			return play_keys(s, st, sid);
+		if(kind == 'p'){
+			st.arg = s.get("press");
+			const json::Value &rv = s.get("row");
+			if(!(st.arg.is_string() || st.arg.is_number()) || !(rv.is_undefined() ||
+					rv.is_number()))
+				return "press: a button's id or its label; row: a list's row, "
+						"from 1";
+			st.row = rv.is_number() ? (int64_t)rv.as_number() : 0;
+			return "";
+		}
+		if(kind == 't'){
+			// As the agent's body, as try_input's as "me"
+			const json::Value &tv = s.get("try_input");
+			if(!tv.is_object())
+				return "try_input: {id, input, value}";
+			for(json::Iterator it(tv); it; ++it)
+				if(it.key() != "id" && it.key() != "input" && it.key() != "value")
+					return "try_input: {id, input, value} (as your body), no \""+
+							cut_utf8(it.key(), 32)+"\"";
+			st.arg = tv.deepcopy();
+			st.arg.set("as", ss_("me"));
+			ss_ why;
+			try_input(p, peer, st.arg, [&](const ss_ &w){ why = w; }, true);
+			return why.empty() ? why : "try_input: "+why;
+		}
+		if(kind == 'w'){
+			const json::Value &wv = s.get("wait");
+			st.secs = wv.is_number() ? wv.as_number() : -1;
+			if(!(st.secs >= 0.05 && st.secs <= PLAY_SECONDS))
+				return "wait: seconds, 0.05 to "+json::Value(PLAY_SECONDS).
+						stringify();
+			return "";
+		}
+		if(!s.get("picture").is_true())
+			return "picture: true (width, height)";
+		return view_size(s, st.wh);
+	}
+
+	// play_input's steps from m_play.k on: those done at once run, the next
+	// that takes time started; "" or why step k could not run
+	ss_ play_next()
+	{
+		while(!m_play.id.empty() && m_play.k < m_play.steps.size()){
+			PlayWait &w = m_play;
+			const PlayStep &st = w.steps[w.k];
+			const size_t cam = m_cam.peer;
+			if(st.kind == 'k'){
+				for(const ss_ &n : st.actions)
+					on_action(network::Packet(cam, "kit:action", n+" 1"));
+				for(const ss_ &c : st.cmds)
+					camera_say("cmd "+c);
+				camera_say("cmd event kit_play_done "+w.id+"_"+itos(w.k));
+				return "";
+			}
+			if(st.kind == 'w'){
+				w.until = interface::os::time_us() + (int64_t)(st.secs * 1e6);
+				return "";
+			}
+			if(st.kind == 'i'){
+				play_picture_ask(st);
+				return "";
+			}
+			if(st.kind == 'p'){
+				// [KIT_AGENT_FEEDBACK_1117] 8: a button on the body's screen
+				// pressed as its client's click sends it (an action's button:
+				// that action held till the end)
+				SessionScope sc(*this, session_of_peer(cam));
+				auto ci = m_peers.find(cam);
+				if(ci == m_peers.end())
+					return "press: your body is not placed yet";
+				int64_t id = 0, row = st.row;
+				ss_ action;
+				const ss_ why = press_target(ci->second, st.arg, id, row, action);
+				if(!why.empty())
+					return why;
+				if(!action.empty()){
+					if(std::find(w.actions.begin(), w.actions.end(), action) ==
+							w.actions.end()){
+						w.actions.push_back(action);
+						on_action(network::Packet(cam, "kit:action", action+" 1"));
+					}
+				} else {
+					const ss_ rs = row ? " "+itos(row) : "";
+					ss_ refused;
+					on_ui_press_u(network::Packet(cam, "kit:ui", itos(id)+" 1"+rs),
+							&refused);
+					if(!refused.empty())
+						return "press: "+itos(id)+" refused: "+refused;
+					on_ui_press_u(network::Packet(cam, "kit:ui", itos(id)+" 0"+rs));
+				}
+				log_i(MODULE, "play_input pressed %s%s", cs(itos(id)), row ?
+						cs(" row "+itos(row)) : "");
+			}
+			if(st.kind == 't'){
+				SessionScope sc(*this, session_of_peer(w.agent));
+				auto pi = m_peers.find(w.agent);
+				if(pi == m_peers.end())
+					return "try_input: your agent's peer is gone";
+				ss_ why;
+				try_input(pi->second, w.agent, st.arg, [&](const ss_ &s){
+					why = s; });
+				if(!why.empty())
+					return "try_input: "+why;
+			}
+			w.k++;
+		}
+		return "";
+	}
+
+	// A step that could not run: the run ends there (on the next tick)
+	void play_stop(const ss_ &why)
+	{
+		m_play.note = "steps["+itos(m_play.k)+"] did not run: "+why;
+		m_play.k = m_play.steps.size();
+	}
+
+	void play_go()
+	{
+		const ss_ why = play_next();
+		if(!why.empty())
+			play_stop(why);
+	}
+
+	// A picture step: the server's camera's own view, the player's screen,
+	// [KIT_PLAY_PICTURE_UI] its UI laid out at the picture's size and drawn
+	// over it (client_lua/module.lua's VIEW, magic.picture_ui()); now, or
+	// (the flat picture) once its loading settled
+	void play_picture_ask(const PlayStep &st)
+	{
+		PlayWait &w = m_play;
 		std::random_device rd;
 		char id[24];
 		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
-		cmds.push_back("event kit_play_done "+ss_(id));
-		PlayWait w;
-		w.agent = peer;
-		w.id = id;
-		w.since = now;
-		w.secs = secs;
-		w.deadline = now + ms * 1000LL + 2500000;
-		w.actions = actions;
-		w.picture = a.get("picture").is_true();
-		const ss_ size_why = view_size(a, w.wh);
-		if(!size_why.empty())
-			return size_why;
-		// [KIT_PLAY_PICTURE_UI] pictures at set times after its end (a pop,
-		// a fade)
-		// [KIT_REPORT_1122B] or as text (a client keeping an older schema
-		// sends a parameter it doesn't know so): a JSON list in a string,
-		// or one time; a string not JSON stays one, refused below
-		json::Value atv = a.get("picture_at");
-		if(atv.is_string()){
-			const json::Value l = json::load_string(atv.as_cstring());
-			if(!l.is_undefined())
-				atv = l;
-		}
-		if(atv.is_number())
-			atv = json::array().append(atv);
-		for(unsigned i = 0; atv.is_array() && i < atv.size(); i++){
-			const double s = atv.at(i).is_number() ? atv.at(i).as_number() : -1;
-			if(!(s >= 0 && s <= 2) || atv.size() > 3 ||
-					(!w.at.empty() && s * 1000 < w.at.back() + 50))
-				return "picture_at: 1 to 3 times, seconds after the input's end "
-						"(0 to 2), each 0.05 after the one before";
-			w.at.push_back((int)std::lround(s * 1000));
-		}
-		if(!atv.is_undefined() && (!atv.is_array() || w.at.empty()))
-			return "picture_at: a list of 1 to 3 times (or one time, or the "
-					"list as a JSON string)";
-		if(!w.at.empty() && (int64_t)w.at.size() * w.wh[0] * w.wh[1] >
-				VIEW_CALL_PIXELS)
-			return itos(w.at.size())+" pictures of "+itos(w.wh[0])+"x"+
-					itos(w.wh[1])+": "+itos(VIEW_CALL_PIXELS)+" pixels at most per "
-					"call (smaller width and height, or fewer)";
-		w.picture = w.picture || !w.at.empty();
-		const json::Value body = play_body();
-		for(unsigned k = 0; k < 3 && body.get("pos").is_array(); k++)
-			w.from[k] = body.get("pos").at(k).as_number();
-		m_play = w;
-		m_cam.rec = true;
-		m_cam.rec_session = sid;
-		m_cam.rec_player = (uint64_t)json::jint(body, "entity");
-		m_cam.events = json::array();
-		m_cam.event_at.clear();
-		m_cam.mute = mute;
-		m_cam.muted = 0;
-		m_cam.used = now;
-		if(press_id && press_action.empty()){
-			SessionScope sc(*this, session_of_peer(cam));
-			const ss_ rs = press_row ? " "+itos(press_row) : "";
-			ss_ refused;
-			on_ui_press_u(network::Packet(cam, "kit:ui", itos(press_id)+" 1"+rs),
-					&refused);
-			if(!refused.empty()){
-				m_play = PlayWait();
-				m_cam.rec = false;
-				return "press: "+itos(press_id)+" refused: "+refused;
-			}
-			on_ui_press_u(network::Packet(cam, "kit:ui", itos(press_id)+" 0"+rs));
-		}
-		for(const ss_ &n : actions)
-			on_action(network::Packet(cam, "kit:action", n+" 1"));
-		for(const ss_ &c : cmds)
-			camera_say("cmd "+c);
-		log_i(MODULE, "%s plays %g s: %zu commands, %zu actions%s", cs(p.name),
-				secs, cmds.size(), actions.size(), press_id ? cs(", pressed "+
-				itos(press_id)+(press_row ? " row "+itos(press_row) : ss_())) : "");
-		m_mcp_defer = peer;
-		failed = false;
-		return "";
+		const int64_t now = interface::os::time_us();
+		ViewWait &v = m_view_waits[id];
+		v.agent = w.agent;
+		v.account = m_cam.play;
+		v.session = session_of_peer(m_cam.peer);
+		v.since = now;
+		v.deadline = w.deadline;
+		v.camera = true;
+		v.run = w.id;
+		json::Value view = json::object();
+		view.set("w", (int64_t)st.wh[0]);
+		view.set("h", (int64_t)st.wh[1]);
+		if(!st.settle)
+			view.set("at", (int64_t)0);
+		v.what.push_back(itos(st.wh[0])+"x"+itos(st.wh[1])+" "+view_what(view));
+		v.key.push_back("");
+		v.png.resize(1);
+		v.why.resize(1);
+		v.early.resize(1);
+		v.q = json::object();
+		v.q.set("id", ss_(id));
+		v.q.set("views", json::array().append(view));
+		PlayPicture pp;
+		pp.step = w.k;
+		pp.t = std::round((now - w.since) / 10000.0) / 100;
+		pp.wh[0] = st.wh[0];
+		pp.wh[1] = st.wh[1];
+		w.pics.push_back(pp);
+		w.view = id;
+		camera_send(v);
+	}
+
+	// A picture step's picture come (or why not): the next steps
+	void play_picture(const ViewWait &v, const ss_ &late)
+	{
+		if(m_play.id != v.run || m_play.pics.empty())
+			return;
+		PlayPicture &pp = m_play.pics.back();
+		pp.png = v.png[0];
+		pp.why = !pp.png.empty() ? ss_() : !v.why[0].empty() ? v.why[0] : late;
+		pp.early = v.early[0];
+		m_play.view.clear();
+		m_play.k++;
+		play_go();
 	}
 
 	// An emit while play_input runs, in its session
@@ -39334,19 +39613,31 @@ struct Module: public interface::Module, public Interface
 		m_cam.events.append(o);
 	}
 
+	// A keys step's commands run ("event kit_play_done <id>_<step>", the last
+	// of them): its actions let go, the next steps
 	void on_play_done(const network::Packet &packet)
 	{
-		if(packet.sender == m_cam.peer && !m_play.id.empty() &&
-				packet.data == m_play.id)
-			play_finish("");
+		if(packet.sender != m_cam.peer || m_play.id.empty() ||
+				m_play.k >= m_play.steps.size() ||
+				packet.data != m_play.id+"_"+itos(m_play.k))
+			return;
+		for(const ss_ &n : m_play.steps[m_play.k].actions)
+			on_action(network::Packet(m_cam.peer, "kit:action", n+" 0"));
+		m_play.k++;
+		play_go();
 	}
 
-	// play_input's end: its actions let go, its answer (and its picture)
-	void play_finish(const ss_ &note)
+	// play_input's end: its actions let go, its answer and its pictures
+	void play_finish(const ss_ &note, bool failed = false)
 	{
 		const PlayWait w = m_play;
 		m_play = PlayWait();
 		m_cam.rec = false;
+		if(!w.view.empty())
+			m_view_waits.erase(w.view);
+		if(w.k < w.steps.size())
+			for(const ss_ &n : w.steps[w.k].actions)
+				on_action(network::Packet(m_cam.peer, "kit:action", n+" 0"));
 		for(const ss_ &n : w.actions)
 			on_action(network::Packet(m_cam.peer, "kit:action", n+" 0"));
 		json::Value r = play_body();
@@ -39364,50 +39655,40 @@ struct Module: public interface::Module, public Interface
 		m_cam.events = json::array();
 		m_cam.event_at.clear();
 		m_cam.used = interface::os::time_us();
-		const ss_ text = "Played "+json::Value(w.secs).stringify()+" s"+
-				(note.empty() ? ss_() : " ("+note+")")+": "+r.stringify();
-		log_i(MODULE, "The server's camera played: %s", cs(text.substr(0, 300)));
-		if(!w.picture || !m_cam.peer || !m_mcp_waits.count(w.agent))
-			return mcp_answer(w.agent, text, false);
-		// Its own view at the end, or at picture_at's times after it: the
-		// player's screen, [KIT_PLAY_PICTURE_UI] its UI laid out at the
-		// picture's size and drawn over it (client_lua/module.lua's VIEW,
-		// magic.picture_ui())
-		std::random_device rd;
-		char id[24];
-		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
-		const int64_t now = interface::os::time_us();
-		ViewWait &v = m_view_waits[id];
-		v.agent = w.agent;
-		v.account = m_cam.play;
-		v.session = session_of_peer(m_cam.peer);
-		v.scene = jstr(r, "scene");
-		v.since = now;
-		const std::vector<int> at = w.at.empty() ? std::vector<int>{-1} : w.at;
-		v.deadline = std::max<int64_t>(now + 1000000 +
-				std::max(0, at.back()) * 1000LL, w.since + CAMERA_CALL_US);
-		v.camera = true;
-		v.play = text+"\n";
-		json::Value vl = json::array();
-		for(int ms : at){
-			json::Value view = json::object();
-			view.set("w", (int64_t)w.wh[0]);
-			view.set("h", (int64_t)w.wh[1]);
-			if(ms >= 0)
-				view.set("at", (int64_t)ms);
-			vl.append(view);
-			v.what.push_back(itos(w.wh[0])+"x"+itos(w.wh[1])+" "+view_what(view)+
-					(ms >= 0 ? ", "+json::Value(ms / 1000.0).stringify()+
-					" s after the input" : ss_()));
-			v.key.push_back("");
+		// The pictures in step order, each one's step and time (s from the
+		// start, as it was asked: drawn a few frames after)
+		json::Value pl = json::array();
+		sv_<ss_> pngs;
+		bool early = false;
+		for(const PlayPicture &pp : w.pics){
+			json::Value o = json::object();
+			o.set("step", (int64_t)pp.step);
+			o.set("t", pp.t);
+			o.set("width", (int64_t)pp.wh[0]);
+			o.set("height", (int64_t)pp.wh[1]);
+			if(pp.png.empty()){
+				o.set("none", pp.why.empty() ? ss_("the run ended first") : pp.why);
+			} else {
+				pngs.push_back(pp.png);
+				if(pp.early)
+					o.set("early", true);
+				early = early || pp.early;
+			}
+			pl.append(o);
 		}
-		v.png.resize(at.size());
-		v.why.resize(at.size());
-		v.early.resize(at.size());
-		v.q = json::object();
-		v.q.set("id", ss_(id));
-		v.q.set("views", vl);
-		camera_send(v);
+		if(pl.size())
+			r.set("pictures", pl);
+		const ss_ secs = json::Value(w.secs).stringify();
+		ss_ text = (w.flat ? "Played "+secs+" s" : "Played "+itos(w.steps.size())+
+				" steps in "+secs+" s of keys and waits")+(note.empty() ? ss_() :
+				" ("+note+")")+": "+r.stringify();
+		log_i(MODULE, "The server's camera played: %s", cs(text.substr(0, 300)));
+		if(!pngs.empty())
+			text += "\nThe server's camera drew its pictures (your body's screen) "
+					"in step order: pictures says each one's step and t"+ss_(early ?
+					"; early: drawn before its loading settled, far parts may be "
+					"missing" : "")+".";
+		mcp_answer(w.agent, text, failed, pngs);
 	}
 
 	// A play_input waiting answered: why it ends
@@ -39416,6 +39697,8 @@ struct Module: public interface::Module, public Interface
 		if(m_play.id.empty())
 			return;
 		m_cam.rec = false;
+		if(!m_play.view.empty())
+			m_view_waits.erase(m_play.view);
 		mcp_answer(m_play.agent, "No answer: "+why, true);
 		m_play = PlayWait();
 	}
@@ -42542,12 +42825,15 @@ struct Module: public interface::Module, public Interface
 				// [KIT_AGENT_NEXT_1]
 				"- Play it yourself: play_join gives you a body in your scene "
 				"(the round Running), a guest's, by the server's camera; "
-				"play_input holds keys or the game's actions for up to 4 s, "
-				"looks, jumps, uses an entity, and answers where the body went, "
-				"its state (health, score, inventory) and what entities emitted "
-				"meanwhile (an output emitted again is one entry with its count; "
-				"mute leaves a busy one out; picture: its view at the end); press "
-				"presses a button on its screen first (Play in a lobby); play_leave ends it. "
+				"play_input runs up to 16 steps in order: keys or the game's "
+				"actions held for up to 4 s (looking, jumping, using an entity "
+				"first), a button on its screen pressed (Play in a lobby), "
+				"try_input as your body, a wait, a picture of its screen (two "
+				"with a wait between catch a fade or a pop); it answers where "
+				"the body went, its state (health, score, inventory) and what "
+				"entities emitted meanwhile (an output emitted again is one "
+				"entry with its count; mute leaves a busy one out), the "
+				"pictures in step order; play_leave ends it. "
 				"Walk into what you built and read what fired. try_input as "
 				"\"me\" sends as your body, as a player's name as theirs. The "
 				"body is a player's (its by \"player:<id>\") and its client "
