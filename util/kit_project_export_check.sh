@@ -229,7 +229,9 @@ def defaults(comp, out):
         for c in e.get("components", []):
             if c["type"] not in d:
                 ps = json.loads(call("list_types", {"type": c["type"]})).get("params", {})
-                d[c["type"]] = {k: p.get("default") for k, p in ps.items()}
+                # (a type with no params: [] as Lua's empty table)
+                d[c["type"]] = {k: p.get("default") for k, p in
+                    (ps.items() if isinstance(ps, dict) else [])}
     json.dump(d, open(out, "w"))
 # A composition as Kit loads it: by id, the parent 1 where not written, a
 # turn of 0 or empty links left out, each param its type's default where
