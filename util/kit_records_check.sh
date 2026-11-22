@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1.5 min (2026-11-22)
+# cost: ~2.5 min (2026-11-23)
 # covers: builtin/kit/types/stopwatch.lua builtin/kit/types/records.lua builtin/kit/types/ui_text.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/controls.lua builtin/kit/box/box.c
 # [KIT_RECORDS] kit/stopwatch, kit/records and kit/ui_text's {value:time1}
 # and clear_after, on a fresh Workbench project (flat stone): kitboss (the
@@ -26,7 +26,16 @@
 #   4. a lap (8: its seconds), the stopwatch running on; a reset by nobody:
 #      everyone's at 0;
 #   5. the server restarts: kitboss back, his best on 9 as it was; a
-#      slower run still no new best (the bests kept).
+#      slower run still no new best (the bests kept);
+#   6. ([KIT_REPORT_1123]) on a fresh sample_kit (it has guests; a
+#      Workbench body that goes is an agent's play body, a guest's too):
+#      a stopwatch, a guest's started (Try as them) beside kitboss's, the
+#      guest leaves: their entry gone from the save's runs, kitboss's kept;
+#   7. the save given a gone guest's, a bot's and a non-body key's entry
+#      (as before 6), the server restarts: the two bodies' dropped at the
+#      load, "note" and kitboss's kept; a new guest gets the gone guest's
+#      id again and inherits no run (a reset by nobody resets kitboss's
+#      alone).
 # Screenshot, kept with KEEP_TMP=1: $t/running.png
 #   util/kit_records_check.sh
 set -u
@@ -63,17 +72,20 @@ seen() { tail -c +$(($2 + 1)) "$1" | grep -qaE "$3"; } # <log> <offset> <regex>
 count() { tail -c +$(($2 + 1)) "$1" | grep -caE "$3"; } # <log> <offset> <regex>
 cmd() { printf '%s\n' "$@" >&$FD; }
 ed() { local e; for e in "$@"; do cmd "event kit_edit $e" "sync 5000"; done; }
+SW=3
 try() # <input> [as]: the stopwatch's input by the driven client (or as nobody)
 {
-	ed "{\"op\": \"try\", \"id\": 3, \"input\": \"$1\", \"value\": null${2:+, \"as\": \"$2\"}}"
+	ed "{\"op\": \"try\", \"id\": $SW, \"input\": \"$1\", \"value\": null${2:+, \"as\": \"$2\"}}"
 }
-client() # <name> <log>: its commands from the fifo $t/<name>.cmd
+client() # <name> <log> [guest]: its commands from the fifo $t/<name>.cmd
 {
+	local join=(env BUILDAT_JOIN_NAME=kit$1)
+	[ "${3:-}" = guest ] && join=(env -u BUILDAT_JOIN_NAME)
 	rm -f "$t/$1.cmd"
 	mkfifo "$t/$1.cmd"
 	sleep 900 > "$t/$1.cmd" &
 	CHECK_PIDS+=($!)
-	BUILDAT_JOIN_NAME=kit$1 timeout 300 bin/buildat -C "$t/client_cache_$1" \
+	"${join[@]}" timeout 300 bin/buildat -C "$t/client_cache_$1" \
 		-D "$t/cu_$1" -s localhost:$SERVER_PORT -w 1024x700 -l 3 -c - \
 		< "$t/$1.cmd" > "$2" 2>&1 &
 	CHECK_PIDS+=($!)
@@ -300,11 +312,124 @@ await "$SL" "$m" 10 "kit/stopwatch 3: stopped for kitboss"
 cmd "sync 2000"
 seen "$SL" "$m" "kitboss has a new best" && fail "a slower run a new best after the restart: the bests lost ($SL)"
 echo "ok: after a restart kitboss's best ($a) back on 9, a slower run no new best"
+
+# 6. [KIT_REPORT_1123] A body that goes: a guest's (Workbench has none but
+# its agents' play bodies, the same drop): on sample_kit, a fresh save
 cmd quit
 exec 3>&-
 wait $BOSS 2>/dev/null
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
+db=$t/sk/apps/sample_kit/saves/world/save.sqlite
+runs() # [<json entries to add>]: the save's stopwatch runs' keys (adds first)
+{
+	python3 -I - "$db" "$SW" "${1:-}" <<'PY'
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1], timeout=10)
+v = db.execute("select value from store where store = 'kit' and key = 'runtime'").fetchone()[0]
+rt = json.loads(v if isinstance(v, str) else v.decode())
+st = rt[sys.argv[2]][0]["state"]
+if not isinstance(st.get("runs"), dict):
+    st["runs"] = {}
+if sys.argv[3]:
+    st["runs"].update(json.loads(sys.argv[3]))
+    s = json.dumps(rt)
+    db.execute("update store set value = ? where store = 'kit' and key = 'runtime'",
+        (s if isinstance(v, str) else s.encode(),))
+    db.commit()
+print(" ".join(sorted(st["runs"])))
+PY
+}
+sk() # <log>: the sample_kit server
+{
+	SL=$1
+	start_server "$SL" "Listening at" 300 auto \
+		bin/buildat_server -m ../apps/sample_kit -D "$t/sk" -l 3 ||
+		fail "sample_kit did not come up ($SL)"
+	CHECK_PIDS+=($SERVER_PID)
+	CLIENT=$SERVER_PID
+}
+skboss() # <log> [code]: kitboss on it (the admin by the code), in edit mode
+{
+	if [ -n "${2:-}" ]; then
+		BUILDAT_JOIN_CODE=$2 BUILDAT_JOIN_ADMIN="setting open_registration on" client boss "$1"
+	else
+		client boss "$1"
+	fi
+	BOSS=$!
+	exec 3> "$t/boss.cmd"
+	as boss
+	CL=$1
+	await "$CL" 0 120 "Joined as kitboss"
+	[ -n "${2:-}" ] && cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
+	await "$CL" 0 60 "kit editor: edit rights: yes"
+	ed '{"op": "mode", "on": true}'
+}
+sk "$t/sk1.log"
+wait_for_log "$SL" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
+skboss "$t/sk_boss1.log" "$code"
+bid=$(grep -aoP 'kitboss is entity \K[0-9]+' "$SL" | head -1)
+m=$(mark "$SL")
+place kit/stopwatch '[0, 1, 0]'
+await "$SL" "$m" 10 "placed kit/stopwatch [0-9]+"
+SW=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'placed kit/stopwatch \K[0-9]+' | head -1)
+m=$(mark "$SL")
+client g1 "$t/g1.log" guest
+G1=$!
+exec 5> "$t/g1.cmd"
+await "$SL" "$m" 120 "p[0-9]+ is entity [0-9]+"
+read -r gn gid < <(tail -c +$((m + 1)) "$SL" | grep -aoE "p[0-9]+ is entity [0-9]+" | head -1 | sed 's/ is entity / /')
+try start
+try start "$gn"
+await "$SL" "$m" 10 "kit/stopwatch $SW: started for $gn"
+await "$SL" "$m" 10 "kit/stopwatch $SW: started for kitboss"
+cmd "sync 2000"
+k=$(runs)
+[ "$k" = "player:$bid player:$gid" ] || fail "the runs before $gn leaves: \"$k\" ($SL)"
+printf 'quit\n' >&5
+exec 5>&-
+wait $G1 2>/dev/null
+await "$SL" "$m" 30 "Guest $gn's entity $gid dropped"
+k=$(runs)
+[ "$k" = "player:$bid" ] || fail "the runs after $gn left: \"$k\", not kitboss's alone ($SL)"
+echo "ok: guest $gn (entity $gid) ran stopwatch $SW and left: their entry gone with them, kitboss's ($bid) kept"
+
+# 7. A gone body's entries in the save (as before 6): dropped at the load;
+# the id handed out again (the next player's: one past the bodies kept)
+# inherits nothing
+cmd quit
+exec 3>&-
+wait $BOSS 2>/dev/null
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+k=$(runs "{\"player:$gid\": {\"from\": 0, \"lap\": 0}, \"bot:99999\": {\"from\": 0, \"lap\": 0}, \"note\": {\"at\": 1}}")
+[ "$k" = "bot:99999 note player:$bid player:$gid" ] || fail "the save's runs not as written: \"$k\""
+sk "$t/sk2.log"
+await "$SL" 0 10 "per_player state: 2 entries of bodies not here dropped"
+# (the first body made: kitboss's client is a guest too until it logs in)
+client g2 "$t/g2.log" guest
+G2=$!
+exec 5> "$t/g2.cmd"
+await "$SL" 0 120 "p[0-9]+ is entity [0-9]+"
+read -r gn2 gid2 < <(grep -aoE "p[0-9]+ is entity [0-9]+" "$SL" | head -1 | sed 's/ is entity / /')
+[ "$gid2" = "$gid" ] || fail "the new guest $gn2 is entity $gid2, not $gid again ($SL)"
+k=$(runs)
+[ "$k" = "note player:$bid" ] || fail "the runs after the load: \"$k\", not note and kitboss's ($SL)"
+skboss "$t/sk_boss2.log"
+m=$(mark "$SL")
+try reset nobody
+await "$SL" "$m" 10 "kit/stopwatch $SW: reset for kitboss"
+cmd "sync 2000"
+seen "$SL" "$m" "kit/stopwatch $SW: reset for $gn2" && fail "the new guest $gn2 (entity $gid again) inherited a run ($SL)"
+echo "ok: the load dropped the gone guest's and the bot's entries, note and kitboss's kept; $gn2 is entity $gid again with no run"
+printf 'quit\n' >&5
+exec 5>&-
+cmd quit
+exec 3>&-
+wait $BOSS $G2 2>/dev/null
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
 [ -s "$t/running.png" ] || fail "no $t/running.png"
-echo "PASS: kit/stopwatch, kit/records, {value:time1} and clear_after: two players' own times counted on their screens from one value each, elapsed to the records, new bests and the board's order, one best cleared by key and undone, a lap, a reset by nobody, the bests kept over a restart; screenshot $t/running.png"
+echo "PASS: kit/stopwatch, kit/records, {value:time1} and clear_after: two players' own times counted on their screens from one value each, elapsed to the records, new bests and the board's order, one best cleared by key and undone, a lap, a reset by nobody, the bests kept over a restart, a gone guest's and bot's runs dropped as they leave and at a load (a reused id inherits none); screenshot $t/running.png"
 # vim: set noet ts=4 sw=4:

@@ -205,10 +205,14 @@ namespace interface
 //              c.state.<key>[by] = nil clears one (a table changed in
 //              place is a set); pairs and next on c.state itself list
 //              the state's keys ([KIT_AGENT_FEEDBACK_1117]).
-//              simplified: a player's entry stays until the round's start
-//              resets the state, in a persistent world for good (one a
-//              player who ever set it off); dropping a gone player's is
-//              the upgrade. [CRAG_BEST_RESET] A kept = true one (not
+//              An entry is dropped when the body goes ([KIT_REPORT_1123]:
+//              a guest's as they leave, a bot's as it is removed; at a
+//              game's load those of bodies not there): an id is handed
+//              out again. A player with an account keeps their body, so
+//              their entry stays until the round's start resets the
+//              state, in a persistent world for good. Keys other than
+//              "player:<id>"/"bot:<id>" are left alone.
+//              [CRAG_BEST_RESET] A kept = true one (not
 //              per_player) play never resets: Play, Stop, a round's start,
 //              Restart and a server restart keep it; it is in the runtime
 //              row, never the start's (Save as start leaves it out); a
