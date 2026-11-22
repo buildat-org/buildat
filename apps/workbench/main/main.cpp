@@ -51,6 +51,13 @@
 // the picker, the wait to the rest, and no project reopened at a restart).
 // Drafts and sessions go as at a server stop.
 //
+// [KIT_GAME_NOT_HOSTED] A game Kit does not load (a newer Buildat's, one
+// whose parameter is gone since) is no game: the same reload as a close,
+// the server up, Manage to an admin with why over it and to the rest "No
+// game is loaded"; it stays the one that ran last, so a restart tries it
+// again and comes to the same (a launch's save= too), and one made just
+// now (New, a template, a file) is removed.
+//
 // [KIT_TEMPLATES] New's "Start from": Empty, ours (templates/ beside this
 // module's directory), then those installed. A project from one has its
 // composition as its first start (Kit's Host::composition_path), Stopped, the
@@ -87,6 +94,7 @@
 #include "interface/voxel.h"
 #include <array>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 #include <cmath>
@@ -160,6 +168,9 @@ struct Module: public interface::Module
 	// [WORKBENCH_SWITCH_PROJECT] A switch or a close under way: this
 	// instance is reloaded, and takes its scenes down as it goes
 	bool m_switching = false;
+	// [KIT_GAME_NOT_HOSTED] Why the last game did not load (this instance
+	// is the reload into no game): said to an admin over Manage
+	ss_ m_failed;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -309,7 +320,8 @@ struct Module: public interface::Module
 		const ss_ save = interface::launch_param(u, "save", &refused);
 		if(refused)
 			log_w(MODULE, "workbench: the launch's save refused");
-		if(!save.empty() && start_project(save, false))
+		// (one that did not load: the reload into no game is under way)
+		if(!save.empty() && (start_project(save, false) || m_switching))
 			return;
 		const ss_ menu = interface::launch_param(u, "menu");
 		const ss_ want = interface::launch_param(u, "project");
@@ -330,7 +342,7 @@ struct Module: public interface::Module
 		ss_ last;
 		if(again && server_store() &&
 				server_store()->get("running", last) && !last.empty() &&
-				!start_project(last, false))
+				!start_project(last, false) && !m_switching)
 			log_w(MODULE, "workbench: the project %s that ran last is gone",
 					cs(last));
 	}
@@ -448,7 +460,8 @@ struct Module: public interface::Module
 					"The server is switching to the game "+event.name);
 			return;
 		}
-		if(!start_project(event.name, false, event.created, from))
+		if(!start_project(event.name, false, event.created, from) &&
+				!m_switching)
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(event.peer);
 			});
@@ -717,6 +730,26 @@ struct Module: public interface::Module
 			log_i(MODULE, "workbench: switched to \"%s\"", cs(name));
 			return;
 		}
+		// The switch's game did not load: this instance is reloaded again
+		if(m_switching)
+			return;
+		// [KIT_GAME_NOT_HOSTED] (start_project()'s) the game that did not
+		// load, said to an admin over Manage. One New, a template or a file
+		// made just now goes; one from before stays the one that ran last
+		if(how == "failed"){
+			// "failed", the game, "1" when made just now, then why (from
+			// the fourth line on)
+			ss_ rest((std::istreambuf_iterator<char>(ss)),
+					std::istreambuf_iterator<char>());
+			m_failed = "The game "+name+" did not load: "+from+
+					(rest.empty() ? "" : "\n"+rest);
+			log_i(MODULE, "workbench: no game is loaded: %s", cs(m_failed));
+			if(created != "1")
+				return;
+			storage::access(m_server, [&](storage::Interface *i){
+				i->remove(name);
+			});
+		}
 		log_i(MODULE, "workbench: no project runs: Manage");
 		if(server_store())
 			server_store()->remove("running");
@@ -869,9 +902,10 @@ struct Module: public interface::Module
 	// built on it)
 	// [KIT_TEMPLATES] `from`: a template of m_templates, the composition of a
 	// fresh project, which opens in edit mode with what it says (the World its
-	// own). simplified: one that Kit refuses all the same (a type of a newer
-	// Kit) shuts the server down as any composition's refusal does, saying why;
-	// the project then opens empty
+	// own). [KIT_GAME_NOT_HOSTED] One Kit refuses (a newer Buildat's, a
+	// parameter gone since): false, the reload into no game under way
+	// (m_switching), but a check's BUILDAT_WORKBENCH_PROJECT's, which stops
+	// the server
 	bool start_project(const ss_ &name, bool create, bool fresh = false,
 			const ss_ &from = "")
 	{
@@ -970,9 +1004,26 @@ struct Module: public interface::Module
 				"\"height\": 3, \"width\": 64, \"depth\": 64, "
 				"\"decorations\": false}}" :
 				"{\"kit/terrain\": {\"biome\": \"rock\"}}";
-		if(!kit::host(m_server, h)){
-			m_server->shutdown(1, "workbench: Kit is not hosted");
-			return true;
+		ss_ why;
+		bool hosted = false;
+		kit::access(m_server, [&](kit::Interface *k){
+			hosted = k->host(h, why);
+		});
+		if(!hosted){
+			// A check's project: nobody sits at its server
+			const char *env = getenv("BUILDAT_WORKBENCH_PROJECT");
+			if(env && name == env){
+				m_server->shutdown(1, "workbench: Kit is not hosted");
+				return true;
+			}
+			// [KIT_GAME_NOT_HOSTED] No game: Kit and this module reloaded
+			// as at a close (Kit's half-made state gone, the scenes and the
+			// save closed), the next instance saying why (on_continue()).
+			// "running" stays: a restart tries it again (a Buildat updated
+			// since opens it) and comes to the same
+			reload_for("the game "+name+" did not load", "failed\n"+name+"\n"+
+					(fresh ? "1" : "0")+"\n"+why, "The game "+name+" did not load");
+			return false;
 		}
 		if(!imported.empty())
 			interface::fs::remove_all(imported);
@@ -1019,12 +1070,17 @@ struct Module: public interface::Module
 			manage(peer);
 	}
 
+	// [KIT_GAME_NOT_HOSTED] Over it, to an admin why the last game did not
+	// load, to the rest that none is loaded (over their wait).
+	// simplified: said once, with the list the join gets; the next list
+	// (an admin's New and Back) has no note, the log keeps it
 	void manage(size_t peer)
 	{
 		configure_menu();
 		if(m_waiting.insert(peer).second)
 			world_menu::access(m_server, [&](world_menu::Interface *i){
-				i->show(peer);
+				i->tell(peer, i->is_picker(peer) ? m_failed :
+						ss_("No game is loaded"));
 			});
 	}
 

@@ -138,7 +138,7 @@ namespace interface
 		// pack() writes one (unsigned here)
 		ss_ zip_files(const sv_<std::pair<ss_, ss_>> &files);
 
-		// a < b in SemVer's order (simplified as aitta.cpp says)
+		// a < b in SemVer's order
 		bool version_less(const ss_ &a, const ss_ &b);
 
 		// A SemVer 2.0 version, 40 characters at most

@@ -90,11 +90,13 @@ local fit, narrow = M.fit, M.narrow
 local function text_on(parent, s, width)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
-	t:SetText(s)
+	-- (the width first: a long text set before it widened the window for
+	-- good, its unwrapped width)
 	if width then
 		t:SetWordwrap(true)
 		t:SetFixedWidth(width)
 	end
+	t:SetText(s)
 	return t
 end
 
@@ -224,7 +226,9 @@ end
 
 function M.open(spec)
 	local menu, root = screen(spec, "worlds", not spec.back)
-	text_on(menu.window, spec.title)
+	-- Wrapped to the columns' width: a note under it is long
+	-- ([KIT_GAME_NOT_HOSTED]: why a game did not load)
+	text_on(menu.window, spec.title, narrow() and fit(520) or fit(956))
 	local columns = menu.window:CreateChild("UIElement")
 	columns:SetLayout(narrow() and magic.LM_VERTICAL or magic.LM_HORIZONTAL,
 			16, magic.IntRect(0, 0, 0, 0))
@@ -593,6 +597,11 @@ buildat.sub_packet("world_menu:list", function(data)
 					accounts.start({title = state.title})
 				end
 			end}
+		end
+		-- [KIT_GAME_NOT_HOSTED] the app's note over the wait (Workbench's
+		-- "No game is loaded")
+		if (state.note or "") ~= "" then
+			text = state.note .. "\n" .. text
 		end
 		waiting(text, extra)
 		log:info("world_menu: the wait shown: " .. text)

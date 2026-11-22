@@ -578,9 +578,10 @@ ss_ check_media(const json::Value &m, const ss_ &dir)
 	return "";
 }
 
-// a < b in SemVer's order. simplified: MAJOR.MINOR.PATCH by number and a
-// prerelease below its release; two prereleases compare as strings, not
-// by SemVer's identifiers (1.0.0-beta.11 is below 1.0.0-beta.2 here)
+// a < b in SemVer's order: MAJOR.MINOR.PATCH by number, a prerelease below
+// its release, two prereleases by their dot-separated identifiers (a
+// number by its value and below a word; a set below a longer one it
+// begins): 0.8.0-alpha.9 below 0.8.0-alpha.65 ([KIT_GAME_NOT_HOSTED])
 bool version_less(const ss_ &a, const ss_ &b)
 {
 	auto key = [](const ss_ &v){
@@ -588,8 +589,18 @@ bool version_less(const ss_ &a, const ss_ &b)
 		const size_t dash = head.find('-');
 		long long n[3] = {0, 0, 0};
 		sscanf(head.c_str(), "%lld.%lld.%lld", &n[0], &n[1], &n[2]);
-		return std::make_tuple(n[0], n[1], n[2], dash == ss_::npos,
-				dash == ss_::npos ? ss_() : head.substr(dash + 1));
+		std::vector<std::tuple<bool, long long, ss_>> pre;
+		if(dash != ss_::npos){
+			std::istringstream in(head.substr(dash + 1));
+			ss_ id;
+			while(std::getline(in, id, '.')){
+				const bool word = id.empty() ||
+						id.find_first_not_of("0123456789") != ss_::npos;
+				pre.emplace_back(word, word ? 0 : strtoll(id.c_str(), nullptr,
+						10), word ? id : ss_());
+			}
+		}
+		return std::make_tuple(n[0], n[1], n[2], dash == ss_::npos, pre);
 	};
 	return key(a) < key(b);
 }
