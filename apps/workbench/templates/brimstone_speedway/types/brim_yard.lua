@@ -472,11 +472,10 @@ return {
 		else
 			c:log("no local/brim_race in the scene: no finish line, no checkpoint linked")
 		end
-		-- The checkpoints: in the middle of the straight into each marked
-		-- corner, in the lap's order from the finish line (a zone `size` cells
-		-- from its place, the road's width across).
-		-- simplified: a straight's zone along the world's axis it mostly runs
-		-- along (on a diagonal one a box round its cross-section's middle)
+		-- The checkpoints (kit/checkpoint): in the middle of the straight into
+		-- each marked corner, in the lap's order from the finish line, turned
+		-- to the straight's heading (its zone the road's width across, 2 cells
+		-- along: its corner half of that back from the middle).
 		local cps = {}
 		local n = #C
 		for i = 1, n do
@@ -495,13 +494,13 @@ return {
 		end
 		table.sort(cps, function(a, b) return a[5] < b[5] end)
 		for k, q in ipairs(cps) do
-			local along_x = math.abs(q[3]) >= math.abs(q[4])
 			local wide = 2 * math.floor(W) + 2
-			local size = along_x and {2, 3, wide} or {wide, 3, 2}
 			local h = math.floor(math.atan2(q[3], q[4]) * 180 / PI + 0.5) % 360
-			local id = c:child{type = "local/brim_checkpoint", name = "checkpoint " .. k,
-				pos = {q[1] - math.floor(size[1] / 2), 0, q[2] - math.floor(size[3] / 2)},
-				params = {order = k, size = size, heading = h}}
+			local a, hx, x, z = h * PI / 180, (wide - 1) / 2, q[1] - 0.5, q[2] - 0.5
+			local id = c:child{type = "kit/checkpoint", name = "checkpoint " .. k,
+				pos = {x - hx * math.cos(a) - 0.5 * math.sin(a), 0,
+					z + hx * math.sin(a) - 0.5 * math.cos(a)},
+				yaw = h, params = {order = k, size = {wide, 3, 2}}}
 			if race then
 				c:link(id, "passed", {id = race.id}, "checkpoint")
 			end

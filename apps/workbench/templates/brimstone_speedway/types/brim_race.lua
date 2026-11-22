@@ -31,7 +31,7 @@
 -- value the kind) arms the car with a gun (6 shots ahead), mines (3, dropped
 -- behind: copies of the entity `mine`) or a ram boost (2.5 s, faster; a hit
 -- on a car then hurts it); the fire key (its action "fire", Left Ctrl by
--- default; the left mouse button too: brim_race.client.lua) uses it: a
+-- default; the left mouse button too: the action's mouse = "left") uses it: a
 -- press counts up the car's body var fire, and the car's step says fire with
 -- its heading (linked to fire here). Damage is Kit's
 -- health (c:hurt; kit/game_rules not peaceful, its respawn on_signal): at 0
