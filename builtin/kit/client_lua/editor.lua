@@ -7024,6 +7024,12 @@ end
 -- asked first; this goes on when its Aittas have answered
 -- (kit:publishing's PB.pending)
 function NT.publish_as(what, scene, own)
+	-- [KIT_WORKBENCH_WEB_LOCAL] a server in the page publishes nowhere
+	if E.state and E.state.no_publish then
+		E.status = E.state.no_publish
+		log:info("kit editor: " .. E.status)
+		return people()
+	end
 	PB.pending = function()
 		local I = PB.info
 		local can = I.may and I.key ~= "" and I.bound

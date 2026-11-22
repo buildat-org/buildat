@@ -70,6 +70,16 @@ namespace magic = Urho3D;
 using interface::Event;
 using json::jstr;
 
+// [KIT_WORKBENCH_WEB_LOCAL] A server in the page (util/web_server.cmake)
+// reaches no Aitta: publishing as the server is refused with this, which
+// the editor's Publish entries say (state no_publish)
+#ifdef BUILDAT_WEB_MODULE
+static const char *NO_PUBLISH = "A game running in the page cannot publish: "
+		"use Export this game, and import the file on a server to publish it";
+#else
+static const char *NO_PUBLISH = nullptr;
+#endif
+
 // A signal passed along more links than this is a loop, and cut
 static const int MAX_HOPS = 16;
 static const size_t MAX_QUEUE = 4096;
@@ -1723,12 +1733,18 @@ struct Module: public interface::Module, public Interface
 
 	void init()
 	{
+		// [KIT_WORKBENCH_WEB_LOCAL] Not in the page: a box's instance is
+		// the JS of the thread that made it (src/wasm/engine.cpp, bw_new),
+		// and there is no compile to wait on; start_box() makes it on
+		// Kit's thread
+#ifndef __EMSCRIPTEN__
 		m_early_box = std::async(std::launch::async, [this](){
 			ss_ why;
 			interface::WasmBox *b = m_server->create_wasm_box(MODULE, "box",
 					why);
 			return std::make_pair(b, why);
 		});
+#endif
 		sub(m_server, "core:tick", &Module::on_tick);
 		// [KIT_SHUTDOWN_SAVE] Synchronous, every save still open: what
 		// changed since the last tick (a mark, the runtime) was lost at a
@@ -6082,11 +6098,17 @@ struct Module: public interface::Module, public Interface
 						(ss_(k) == "round" ? m_session.round :
 								m_session.restore).insert(a.at(i).as_string());
 			}
+			// [KIT_WORKBENCH_WEB_LOCAL] Still to open the tools: no builder
+			// came before a restart (a switch in the page reloads it)
+			ss_ ot;
+			m_open_tools = !m_session.running &&
+					m_store->get("open_tools", ot) && ot == "1";
 		} else {
 			// [KIT_TEMPLATES] A template's first start: Stopped, the first
 			// builder to come in the tools
 			m_session.running = !(first && host.opens_in_edit);
 			m_open_tools = !m_session.running;
+			m_store->set("open_tools", m_open_tools ? "1" : "");
 			log_i(MODULE, "%s", m_open_tools ? "A template: Stopped, in edit mode" :
 					had_runtime ? "A save from before Play and "
 					"Stop: Running, its start its types' defaults" :
@@ -10014,7 +10036,9 @@ struct Module: public interface::Module, public Interface
 		auto refuse = [&](const ss_ &s){
 			why = s;
 		};
-		if(op == "get" && !admin && !can_edit(peer))
+		if(NO_PUBLISH)
+			why = NO_PUBLISH;
+		else if(op == "get" && !admin && !can_edit(peer))
 			why = "the publish form is a builder's";
 		else if(op != "get" && !admin)
 			why = "the Publishing page is an admin's";
@@ -10221,6 +10245,8 @@ struct Module: public interface::Module, public Interface
 			std::function<void(const ss_&)> refuse)
 	{
 		ss_ account, why;
+		if(NO_PUBLISH)
+			return refuse(NO_PUBLISH);
 		if(!may_publish(peer, &account))
 			return refuse(p.name+" may not publish as the server (the Host "
 					"gives the right on the Publishing page)");
@@ -34596,6 +34622,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(m_open_tools && can_edit_u(peer)){
 			m_open_tools = false;
+			if(m_store)
+				m_store->set("open_tools", "");
 			tools(p, peer, true);
 			log_i(MODULE, "%s opens the template in edit mode", cs(p.name));
 			// Where its players begin, not the World's middle: in a wall, maybe
@@ -43919,6 +43947,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_SERVER_PUBLISH] the palette's installs through the server
 			// when it lists Aittas
 			j.set("server_aittas", (int64_t)pub_aittas().size());
+			if(NO_PUBLISH)
+				j.set("no_publish", NO_PUBLISH);
 		}
 		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
 		// [KIT_PLANE] the depth of its scene's plane (the editor's Front view's) and

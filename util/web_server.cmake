@@ -36,8 +36,9 @@ endif()
 # The modules: builtin/loader, the app's own, and their dependencies, as
 # the loader resolves them. An app's module goes before a builtin of the
 # same name, as in the loader.
-# simplified: a meta.json's cxxflags are not read (none of these has any);
-# reverse_dependencies are not followed (no builtin has one)
+# simplified: a meta.json's cxxflags_linux/_windows and ldflags are not read
+# (none of these has any); reverse_dependencies are not followed (no
+# builtin has one)
 file(GLOB WS_APP_METAS CONFIGURE_DEPENDS "${WS_APP_DIR}/*/meta.json")
 if(WS_BASE_DIR)
 	file(GLOB WS_BASE_METAS CONFIGURE_DEPENDS "${WS_BASE_DIR}/*/meta.json")
@@ -79,6 +80,12 @@ while(WS_TODO)
 	string(JSON CPP_OFF ERROR_VARIABLE E GET "${J}" disable_cpp)
 	if(NOT CPP_OFF AND NOT SW)
 		list(APPEND WS_CPP_NAMES "${N}")
+	endif()
+	# Its cxxflags on its own source, as rccpp gives them (luanti_mapgen's
+	# -std=c++17)
+	string(JSON WS_CXXFLAGS_${N} ERROR_VARIABLE E GET "${J}" cxxflags)
+	if(E)
+		set(WS_CXXFLAGS_${N} "")
 	endif()
 	# [KIT] A box of its own (Server::create_wasm_box()), built as a
 	# server .wasm is, beside its C++
@@ -142,9 +149,14 @@ foreach(N ${WS_CPP_NAMES})
 	list(FIND WS_NAMES "${N}" I)
 	list(GET WS_DIRS ${I} D)
 	if(EXISTS "${D}/${N}_web.cpp")
-		list(APPEND WS_SRCS "${D}/${N}_web.cpp")
+		set(SRC "${D}/${N}_web.cpp")
 	else()
-		list(APPEND WS_SRCS "${D}/${N}.cpp")
+		set(SRC "${D}/${N}.cpp")
+	endif()
+	list(APPEND WS_SRCS "${SRC}")
+	if(WS_CXXFLAGS_${N})
+		separate_arguments(F UNIX_COMMAND "${WS_CXXFLAGS_${N}}")
+		set_property(SOURCE "${SRC}" APPEND PROPERTY COMPILE_OPTIONS ${F})
 	endif()
 	string(APPEND WS_DECLS "\tvoid* createModule_${N}(interface::Server*);\n")
 	string(APPEND WS_ROWS "\t{\"${N}\", createModule_${N}},\n")

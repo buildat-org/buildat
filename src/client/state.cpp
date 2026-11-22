@@ -883,8 +883,13 @@ struct CState: public State
 		if(m_wss){
 			ss_ got, why;
 			const int n = m_wss->read(got, &why);
-			if(n < 0)
+			// What came before the end first, as below: the goodbye of a
+			// local server that goes on ([KIT_WORKBENCH_WEB_LOCAL]: a
+			// Workbench switch in the page)
+			if(n < 0){
+				handle_socket_buffer();
 				lost_connection(why);
+			}
 			if(n <= 0)
 				return false;
 			m_last_data_us = m_received_us = get_timeofday_us();

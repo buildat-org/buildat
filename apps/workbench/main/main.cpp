@@ -319,9 +319,16 @@ struct Module: public interface::Module
 			else if(!want.empty())
 				i->select(want);
 		});
-		// No launcher: the project that ran last
+		// No launcher: the project that ran last. [KIT_WORKBENCH_WEB_LOCAL]
+		// In the page too (its launch is launcher=1): a reload goes on
+		// where it was, and a switch is a reload there (index.html)
+#ifdef BUILDAT_WEB_MODULE
+		const bool again = true;
+#else
+		const bool again = u.empty();
+#endif
 		ss_ last;
-		if(u.empty() && server_store() &&
+		if(again && server_store() &&
 				server_store()->get("running", last) && !last.empty() &&
 				!start_project(last, false))
 			log_w(MODULE, "workbench: the project %s that ran last is gone",
