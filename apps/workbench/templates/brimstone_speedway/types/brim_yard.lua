@@ -41,16 +41,6 @@ local function sixteenth(v)
 	return math.floor(v * 16 + 0.5) / 16
 end
 
--- A Lehmer generator from the seed, the same on every server: r() in [0, 1)
-local function rng(seed)
-	local s = math.floor(seed) % 2147483646 + 1
-	local function r()
-		s = s * 16807 % 2147483647
-		return (s - 1) / 2147483646
-	end
-	return r, function(a, b) return a + (b - a) * r() end
-end
-
 local function numbers(s)
 	local t = {}
 	for v in tostring(s):gmatch("[-%d.]+") do
@@ -342,12 +332,16 @@ return {
 			end
 			return t
 		end
-		local rand, uniform = rng(c.params.seed)
+		-- (c:random: the same numbers from the seed on every server)
+		local g = c:random(c.params.seed)
+		local function uniform(a, b)
+			return a + (b - a) * g:next()
+		end
 		local function blob(x, z, r)
 			local t = {}
 			for a = 0, 9 do
-				t[#t + 1] = {x + r * (0.7 + 0.5 * rand()) * math.cos(a * 2 * PI / 10),
-					z + r * (0.7 + 0.5 * rand()) * math.sin(a * 2 * PI / 10)}
+				t[#t + 1] = {x + r * (0.7 + 0.5 * g:next()) * math.cos(a * 2 * PI / 10),
+					z + r * (0.7 + 0.5 * g:next()) * math.sin(a * 2 * PI / 10)}
 			end
 			return t
 		end
@@ -434,8 +428,8 @@ return {
 			local pts = {}
 			for q = 0, 13 do
 				local t = q * 2 * PI / 14
-				local fx = 0.85 + 0.3 * rand()
-				local fz = 0.85 + 0.3 * rand()
+				local fx = 0.85 + 0.3 * g:next()
+				local fz = 0.85 + 0.3 * g:next()
 				pts[#pts + 1] = {x + math.sin(a) * l / 2 * math.cos(t) + math.cos(a) * w / 2 * math.sin(t) * fx,
 					z + math.cos(a) * l / 2 * math.cos(t) - math.sin(a) * w / 2 * math.sin(t) * fz}
 			end
@@ -543,11 +537,11 @@ return {
 		for _ = 1, math.floor(10 * j + 0.5) do
 			local x, z = spot(1.5, 2.2)
 			if x then
-				for q = 1, 3 + math.floor(rand() * 4) do
+				for q = 1, g:int(3, 6) do
 					local a = uniform(0, 2 * PI)
 					local d = q == 1 and 0 or uniform(0.9, 1.8)
 					poly("an oil drum", circle(x + d * math.cos(a), z + d * math.sin(a), 0.42), 1.0, 0.95,
-						{color = DRUMS[math.floor(rand() * #DRUMS) + 1], collision = false})
+						{color = DRUMS[g:int(1, #DRUMS)], collision = false})
 				end
 			else
 				missed = missed + 1

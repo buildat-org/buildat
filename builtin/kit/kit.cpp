@@ -2037,7 +2037,8 @@ struct Module: public interface::Module, public Interface
 	static const std::set<ss_> &type_fields()
 	{
 		static const std::set<ss_> F = {"about", "actions", "between_plays",
-				"bot", "builds", "children", "component", "container", "controls",
+				"bot", "builds", "children", "client_params", "component",
+				"container", "controls",
 				"creature", "environment", "equipment", "events", "experimental",
 				"gizmo", "grants", "health", "hud", "inputs", "inventory",
 				"linked_in", "listed", "look", "marker", "movement", "nearby",
@@ -2055,7 +2056,8 @@ struct Module: public interface::Module, public Interface
 	{
 		static const std::set<ss_> H = {"allow", "inventory_add",
 				"inventory_count", "inventory_list", "inventory_take", "migrate",
-				"modify_hit", "on_action", "on_blast", "on_build", "on_daytime",
+				"modify_hit", "on_action", "on_away", "on_blast", "on_build",
+				"on_daytime",
 				"on_died", "on_enter", "on_event", "on_fall", "on_give", "on_hit",
 				"on_input", "on_inventory", "on_item", "on_join", "on_leave",
 				"on_params", "on_reload", "on_remove", "on_session_end",
@@ -2299,11 +2301,31 @@ struct Module: public interface::Module, public Interface
 		const json::Value &acts = t.decl.get("actions");
 		if(!acts.is_undefined()){
 			bool ok = acts.is_array() && acts.size() <= MAX_TYPE_ACTIONS;
-			for(unsigned i = 0; ok && i < acts.size(); i++)
-				ok = acts.at(i).is_object() && acts.at(i).get("name").is_string();
+			for(unsigned i = 0; ok && i < acts.size(); i++){
+				// ([KIT_SMALL_PIECES] mouse: a button doing it too)
+				const json::Value &m = acts.at(i).get("mouse");
+				ok = acts.at(i).is_object() && acts.at(i).get("name").is_string() &&
+						(m.is_undefined() || (m.is_string() && (m.as_string() == "left" ||
+						m.as_string() == "right" || m.as_string() == "middle")));
+			}
 			if(!ok){
 				why = name+": actions is a list of at most "+
-						itos(MAX_TYPE_ACTIONS)+" {name = , key = , label = }";
+						itos(MAX_TYPE_ACTIONS)+" {name = , key = , label = , mouse = "
+						"\"left\"|\"right\"|\"middle\"}";
+				return false;
+			}
+		}
+		// [KIT_SMALL_PIECES] client_params = {"name"...}: those parameters'
+		// values in its client part (show_of()'s params), opted in
+		{
+			const json::Value &cp = t.decl.get("client_params");
+			bool ok = cp.is_undefined() || (cp.is_array() && cp.size() <= 32);
+			for(unsigned i = 0; ok && i < cp.size(); i++)
+				ok = cp.at(i).is_string() &&
+						!t.decl.get("params").get(cp.at(i).as_string()).is_undefined();
+			if(!ok){
+				why = name+": client_params is a list of at most 32 of its "
+						"parameters' names";
 				return false;
 			}
 		}
@@ -16894,6 +16916,9 @@ struct Module: public interface::Module, public Interface
 		const uint64_t scene = scene_entity(p.scene);
 		if(!scene)
 			return;
+		// [KIT_SMALL_PIECES] out of the scene they were in
+		if(e.has_pos && e.parent != scene)
+			away_runs(e);
 		if(e.parent != scene || !e.has_pos){
 			remove_node(e);
 			e.node = 0;
@@ -16937,10 +16962,43 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_peers)
 			if(p.second.player == id)
 				return;
+		if(it->second.has_pos)
+			away_runs(it->second);
 		remove_node(it->second);
 		it->second.node = 0;
 		it->second.has_pos = false;
 		it->second.parent = 1;
+	}
+
+	// [KIT_SMALL_PIECES] on_away(c, by): a placed player out of their scene
+	// (gone from the game, to another scene or session, or by another name),
+	// while Running, on each `reads_players` instance there with it and on
+	// the root's (with no position: each scene they leave, as their on_join
+	// each they come into); before the entity moves, so once a leave
+	void away_runs(const Entity &pe)
+	{
+		ss_ scene;
+		if(!m_session.running || !scene_of(pe, &scene))
+			return;
+		for(auto &p : m_entities){
+			ss_ es;
+			const bool root = p.second.parent == 1 && !p.second.has_pos &&
+					p.second.kind.empty();
+			if(!root && (!scene_of(p.second, &es) || es != scene))
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				const Type &t = m_types[p.second.comps[i].type];
+				if(!t.players || !t.handlers.count("on_away"))
+					continue;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_away";
+				r.by = "player:"+itos(pe.id);
+				r.args.append(r.by);
+				queue_run(r);
+			}
+		}
 	}
 
 	// The cells migrated objects owned: their owner entries emptied (by
@@ -17134,6 +17192,19 @@ struct Module: public interface::Module, public Interface
 			// the state they see
 			if(!m_types[in.type].client.empty())
 				parts.append(in.type);
+			// [KIT_SMALL_PIECES] the parameters its type lets its client part
+			// read (client_params), the first type's of a name
+			// simplified: one table for the entity, all its parts see it
+			const json::Value &cp = d.get("client_params");
+			for(unsigned i = 0; i < cp.size(); i++){
+				const ss_ k = cp.at(i).as_string();
+				json::Value ps = show.get("params").is_object() ?
+						show.get("params") : json::object();
+				if(ps.get(k).is_undefined() && !in.params.get(k).is_undefined()){
+					ps.set(k, in.params.get(k));
+					show.set("params", ps);
+				}
+			}
 			// [KIT_CLIENT_REACT] (1) its zones, for its client parts' on_enter
 			// (module.lua's update_zones meets them as zone_shape() has them):
 			// a position parameter's cells or "look" (the look is above), 4
@@ -17706,9 +17777,11 @@ struct Module: public interface::Module, public Interface
 				lua_lit(pv_->state, o);
 				o += "}";
 			}
-		} else if(r.handler == "on_leave" && r.by.compare(0, 7, "player:") == 0){
+		} else if((r.handler == "on_leave" || r.handler == "on_away") &&
+				r.by.compare(0, 7, "player:") == 0){
 			// [KIT_GUEST_NO_LEAVE] A guest's entity dropped: who left it, by
 			// the id they had (no inventory: it went with the entity)
+			// ([KIT_SMALL_PIECES] on_away's too)
 			names.set(r.by, player_of(r.by));
 			o += ",player_id="+r.by.substr(7)+",player=";
 			lua_lit(json::Value(r.by), o);
@@ -33822,6 +33895,9 @@ struct Module: public interface::Module, public Interface
 					v = jstr(in.params, v.substr(6).c_str());
 				o.set(k, v.substr(0, 64));
 			}
+			// ([KIT_SMALL_PIECES] its mouse button, load_type() checked)
+			if(a.at(i).get("mouse").is_string())
+				o.set("mouse", a.at(i).get("mouse"));
 			if(action_name_ok(jstr(o, "name")))
 				out.push_back(o);
 		}

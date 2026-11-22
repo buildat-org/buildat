@@ -601,7 +601,7 @@ return {
 		dice = {default = 0},
 		said_left = {default = 0},
 	},
-	actions = {{name = "fire", key = "Left Ctrl", label = "Fire"}},
+	actions = {{name = "fire", key = "Left Ctrl", label = "Fire", mouse = "left"}},
 	inputs = {entered = "none", left = "none",
 		start = "none", checkpoint = "number", lap = "none", fire = "number",
 		crate = "string", mine = "entity", ram = "string", back = "none"},

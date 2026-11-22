@@ -30,7 +30,8 @@
 --     along the plane
 --   math in its file is M.math on both sides (controls.lua and box.c's define
 --     run the file with it): floor, ceil, sqrt, abs, fmod, min, max, huge, pi
---     and this file's sin, cos, atan, atan2, the same bits there; no random
+--     and this file's sin, cos, atan, atan2, [KIT_SMALL_PIECES] exp and pow,
+--     the same bits there; no random (x ^ y is not the same bits: math.pow)
 --   s.events = {"name" | {"name", value}...} set by a step (nil before each,
 --     MAX_EVENTS a batch): the server's steps' are outputs of the movement's
 --     component on the app root (its `outputs`), as by the body's player; the
@@ -93,9 +94,10 @@
 -- factor for the body as it is now: 1, 0 frozen; a seated player's theirs, a
 -- steered vehicle's 1, a driving bot's its own; the `speed` param is scaled
 -- by it on the body's own movement, not a seat's); dt seconds; p its
--- parameters; w the world. [KIT_API_1] (item 4) Kit API 1's w is these 10
+-- parameters; w the world. [KIT_API_1] (item 4) Kit API 1's w is these 11
 -- methods, w:cell, w:walk, w:move, w:ray, w:down, w:under, w:contacts,
--- w:circle, w:segment and w:unbury, and the fields w.sin, w.cos, w.atan2,
+-- w:circle, w:segment, w:unbury and ([KIT_SMALL_PIECES]) w:resolve_circle,
+-- and the fields w.sin, w.cos, w.atan2,
 -- w.sqrt, w.PI, w.plane, w.horizontal and w.bodies (below; atan is the
 -- file's math.atan). The other 18 methods a step can reach (W's:
 -- w:pose_at, deck_velocity, height, ground_max, sweep, sweep_turned,
@@ -147,6 +149,15 @@
 --     middle and how far in it reaches ({}: free)
 --   w:segment(x0, y0, x1, y1, z) -> t (0...1 of the way), nx, ny, info: the first
 --     solid the segment meets, the normal out of it toward the start (nil: none)
+--   [KIT_SMALL_PIECES] w:resolve_circle(x, y, r, vx, vy, e, mu, z) -> x, y, vx,
+--     vy, hits: a circle moving at vx, vy (a wheel, a ball) pushed out of the
+--     deepest of w:circle's hits, its speed into it gone and e (0...1) of it
+--     bounced back, its speed along it slowed by friction (at most mu times the
+--     hit's info.friction times the push back; enough stops its sliding), again
+--     while another is still in (4 rounds at most); hits each round's w:circle
+--     hits in turn (one may be there twice), each pushed out of with vn, the
+--     speed into it before (negative: it came in). crag_bike's wheels use it
+--     with mu 0 and their own tyre on the hits' vn
 -- They meet the voxels of the plane's layer (a whole cell's side against a solid
 -- neighbour is no surface: nothing catches on a floor's seams), the shapes' and the
 -- solid looks' boxes through z, the heightmap's profile along z and the polygons'
@@ -273,13 +284,128 @@ function M.atan2(y, x)
 end
 M.sqrt = sqrt
 M.PI = PI
+
+-- ---- [KIT_SMALL_PIECES] exp and pow of its own, as sin's: + - * / and floor,
+-- the same bits on every side. The constants are integers over powers of two
+-- (the box's number parsing is exact for those, not for long decimals).
+-- exp good to 1e-15 relative; pow is exp(y log x), good to about 1e-13 relative
+-- where y log x is large; a whole y up to 2^31 is multiplications.
+-- simplified: no extended-precision log in pow (fdlibm's pow is the upgrade)
+local LN2_HI = 2977044471 / 4294967296
+local LN2_LO = 3691024475790907 / 4398046511104 / 4398046511104
+local INV_LN2 = 1 / (LN2_HI + LN2_LO)
+-- 2^(2^(i - 1)) and 2^(i - 1), i = 1...10
+local TWO, BIT = {}, {}
+do
+	local v, b = 2, 1
+	for i = 1, 10 do
+		TWO[i], BIT[i], v, b = v, b, v * v, b * 2
+	end
+end
+-- 2^k, a whole k within 1023 either way, exact
+local function pow2(k)
+	local r, n = 1, abs(k)
+	for i = 1, 10 do
+		if n % 2 == 1 then
+			r = r * TWO[i]
+		end
+		n = floor(n / 2)
+	end
+	return k < 0 and 1 / r or r
+end
+
+function M.exp(x)
+	if x ~= x then
+		return x
+	elseif x > 710 then
+		return math.huge
+	elseif x < -746 then
+		return 0
+	end
+	local k = floor(x * INV_LN2 + 0.5)
+	local r = (x - k * LN2_HI) - k * LN2_LO
+	local s = 1
+	for n = 17, 1, -1 do
+		s = 1 + s * r / n
+	end
+	-- (in two halves: 2^k itself may be past a double either way)
+	local h = floor(k / 2)
+	return s * pow2(h) * pow2(k - h)
+end
+
+-- x > 0 and finite: x = m 2^e, m within 0.7...1.42, then the series of atanh
+local function log(x)
+	local e = 0
+	if x >= 2 then
+		for i = 10, 1, -1 do
+			if x >= TWO[i] then
+				x, e = x / TWO[i], e + BIT[i]
+			end
+		end
+	elseif x < 1 then
+		-- (twice: a subnormal is past 2^-1023)
+		for _ = 1, 2 do
+			for i = 10, 1, -1 do
+				if x * TWO[i] < 2 then
+					x, e = x * TWO[i], e - BIT[i]
+				end
+			end
+		end
+	end
+	if x > 1.4142 then
+		x, e = x / 2, e + 1
+	end
+	local f = (x - 1) / (x + 1)
+	local s, t = f * f, 1 / 29
+	for n = 13, 0, -1 do
+		t = 1 / (2 * n + 1) + s * t
+	end
+	return 2 * f * t + e * LN2_LO + e * LN2_HI
+end
+
+-- C's pow on its edges: 1 for y 0 or x 1, NaN for a negative x and a fractional y
+function M.pow(x, y)
+	if y == 0 or x == 1 then
+		return 1
+	elseif x ~= x or y ~= y then
+		return x + y
+	end
+	if y == floor(y) and abs(y) < 2147483648 then
+		local n, r, b = abs(y), 1, x
+		while n > 0 do
+			if n % 2 == 1 then
+				r = r * b
+			end
+			b, n = b * b, floor(n / 2)
+		end
+		return y < 0 and 1 / r or r
+	end
+	local ax = abs(x)
+	if ax == math.huge then
+		return y > 0 and ax or 0
+	elseif x == 0 then
+		return y < 0 and math.huge or 0
+	elseif x < 0 then
+		if y ~= floor(y) then
+			return 0 / 0
+		end
+		-- (|y| past 2^31: odd or even; from 2^53 on a double is even)
+		local r = M.exp(y * log(ax))
+		return y % 2 == 1 and -r or r
+	end
+	return M.exp(y * log(x))
+end
+
 -- [KIT_PLANE] stage 4: a movement's `math` on both sides (its file is run with it:
 -- controls.lua, box.c's define), the same bits there: what IEEE makes exact and
--- this file's sin, cos, atan and atan2; no random, nor exp, log or tan.
--- simplified: x ^ y is each side's own pow (it may differ in the last bit): x * x
+-- this file's sin, cos, atan, atan2, [KIT_SMALL_PIECES] exp and pow; no random,
+-- nor log or tan.
+-- simplified: x ^ y is each side's own pow (it may differ in the last bit):
+-- math.pow(x, y), or x * x
 M.math = {floor = floor, ceil = math.ceil, sqrt = sqrt, abs = abs,
 	fmod = math.fmod, min = math.min, max = math.max, huge = math.huge, pi = PI,
-	sin = M.sin, cos = M.cos, atan = atan, atan2 = M.atan2}
+	sin = M.sin, cos = M.cos, atan = atan, atan2 = M.atan2, exp = M.exp,
+	pow = M.pow}
 
 -- ---- [KIT_GUIDE_STATIONS] A gun's shot (kit/turret's; kit.cpp's projectiles
 -- fly it): its arc's height over the muzzle at d metres out along the ground,
@@ -2180,6 +2306,53 @@ function W:circle(x, y, r, z)
 		end
 	end
 	return out
+end
+
+-- [KIT_SMALL_PIECES] A circle (a wheel, a ball) moving at vx, vy out of what it
+-- meets: pushed out of the deepest hit, its speed into it gone (e the share
+-- bounced back), friction along it (mu times the hit's info.friction times the
+-- push back, at most what stops it sliding), then again while another hit is
+-- still in, 4 rounds at most. Each hit it pushed out of has vn, the speed into
+-- it before (negative: coming in). hits: each round's w:circle hits in turn (one
+-- may be there twice)
+function W:resolve_circle(x, y, r, vx, vy, e, mu, z)
+	e, mu = tonumber(e) or 0, tonumber(mu) or 0
+	local all = {}
+	for _ = 1, 4 do
+		local hits = self:circle(x, y, r, z)
+		local h = hits[1]
+		if not h then
+			break
+		end
+		for _, o in ipairs(hits) do
+			all[#all + 1] = o
+		end
+		local nx, ny = h.nx, h.ny
+		x, y = x + nx * h.depth, y + ny * h.depth
+		local vn = vx * nx + vy * ny
+		h.vn = vn
+		if vn < 0 then
+			local j = -(1 + e) * vn
+			-- (along t = (-ny, nx))
+			local vt = vy * nx - vx * ny
+			local lim = mu * (h.info and tonumber(h.info.friction) or 1) * j
+			local jt = vt > lim and lim or vt < -lim and -lim or vt
+			vx, vy = vx + nx * j + ny * jt, vy + ny * j - nx * jt
+		end
+		-- (another still in after this push: a round more)
+		local again = false
+		for k = 2, #hits do
+			local o = hits[k]
+			if o.depth - h.depth * (nx * o.nx + ny * o.ny) > EPS then
+				again = true
+				break
+			end
+		end
+		if not again then
+			break
+		end
+	end
+	return x, y, vx, vy, all
 end
 
 -- The first solid along the segment

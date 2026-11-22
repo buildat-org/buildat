@@ -443,7 +443,9 @@ done
 # prediction and the server's steps (the other's pose, by name and as [8]);
 # p the movement's params; the public vars set on a node once, not per
 # tick; c.players' heading the bike's facing. Then a second version: its
-# draw on a node made anew (the first's child gone); then the template's own
+# draw on a node made anew (the first's child gone), [KIT_SMALL_PIECES] its
+# step's math.pow, math.exp and w:resolve_circle the same bits in the
+# server's steps and the client's prediction; then the template's own
 probe() # <version> <letter>: the probe's put as a kit_type event
 {
 	python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_bike.lua" \
@@ -465,6 +467,36 @@ if x != "-":
 		end
 	end,
 """, 1).replace("tl = wl[6], tr = wr[6]}", "tl = wl[6], tr = i.speed}", 1)
+    if x == "b":
+        # [KIT_SMALL_PIECES] math.pow, math.exp and w:resolve_circle in the
+        # step: their bits (exponent:high 26:low 26) in the state's km
+        head = "step = function(s, i, dt, w, p)\n"
+        assert head in s
+        # (each step: the own prediction's its client's, not the server's kept)
+        s = s.replace(head, head + """		do
+			local function bits(v)
+				if v == 0 then return "0" end
+				local sg, e = v < 0 and ":-" or "", 0
+				v = math.abs(v)
+				while v >= 1 do v, e = v / 2, e + 1 end
+				while v < 0.5 do v, e = v * 2, e - 1 end
+				local hi = math.floor(v * 67108864)
+				return e .. ":" .. hi .. ":" .. (v * 67108864 - hi) * 67108864 .. sg
+			end
+			local x, y, vx, vy, hits = w:resolve_circle(-60.3, 0.2, 0.36, 3, -2, 0.1, 0.5)
+			local km = ""
+			for _, v in ipairs({math.pow(1.7, 0.3), math.pow(23.5, 0.4),
+					math.pow(0.81, -2.5), math.pow(-2, 3), math.exp(-3.21),
+					math.exp(4.4), x, y, vx, vy, #hits}) do
+				km = km .. " " .. bits(v)
+			end
+			-- (the server's print: its log; a client's step has none)
+			if km ~= s.km and print then
+				print("km" .. km)
+			end
+			s.km = km
+		end
+""", 1)
     a = cl.rindex("\nreturn {")
     cl = cl[:a] + "\nlocal T = {" + cl[a + 9:] + """
 local inner, said = T.draw, {}
@@ -479,6 +511,9 @@ T.draw = function(s, node, yaw, p)
 		who, tostring(q.tr), tostring(q[8]), tostring(v.flag), tostring(v.secret),
 		tostring(p.wheel), node:GetChild("probe_a", false) and " probe_a" or "",
 		node:GetChild("probe_b", false) and " probe_b" or "")
+	if s.km then
+		line = line .. " km" .. s.km
+	end
 	if said[who] ~= line then
 		said[who] = line
 		log:info(line)
@@ -532,7 +567,38 @@ put_bike 3 b
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 await "$CL" "$mc" 10 "kit: player [0-9]+'s movement node made anew \(its draw changed\)"
 await "$CL" "$mc" 10 "crag_bike probe b: other tr 1 \[8\] 1 flag nil secret nil wheel 0.36 children probe_b$"
-await "$CL" "$mc" 10 "crag_bike probe b: own tr 1 \[8\] 1 flag nil secret nil wheel 0.36 children probe_b$"
+await "$CL" "$mc" 10 "crag_bike probe b: own tr 1 \[8\] 1 flag nil secret nil wheel 0.36 children probe_b km( [-0-9:]+){11}$"
+# [KIT_SMALL_PIECES] the step's math.pow, math.exp and w:resolve_circle: the
+# server's bits (its step's print) those of kitboss's client (his own
+# prediction's state), and near what Python's libm says
+await "$SL" "$m" 10 "local/crag_bike: km( [-0-9:]+){11}$"
+python3 -I - "$CL" "$SL" <<'PY' || fail "the step's math.pow, math.exp or w:resolve_circle not the same bits on the server and the client ($CL, $SL)"
+import math, re, sys
+km = {}
+for l in open(sys.argv[1], errors="replace"):
+    m = re.search(r"crag_bike probe b: own .* km((?: [-0-9:]+){11})$", l.rstrip("\n"))
+    if m:
+        km.setdefault("own", m[1].split())
+for l in open(sys.argv[2], errors="replace"):
+    m = re.search(r"local/crag_bike: km((?: [-0-9:]+){11})$", l.rstrip("\n"))
+    if m:
+        km.setdefault("server", set()).add(m[1].strip())
+# (the server's put tries a step in no world: its resolve_circle no hit)
+assert km.get("own") and " ".join(km["own"]) in km.get("server", ()), km
+assert {tuple(k.split()[:6]) for k in km["server"]} == {tuple(km["own"][:6])}, km
+def val(b):
+    if b == "0":
+        return 0.0
+    f = b.split(":")
+    e, hi, lo = map(int, f[:3])
+    return (-1 if f[3:] else 1) * (hi + lo / 2 ** 26) / 2 ** 26 * 2.0 ** e
+v = [val(b) for b in km["own"]]
+want = [1.7 ** 0.3, 23.5 ** 0.4, 0.81 ** -2.5, -8, math.exp(-3.21), math.exp(4.4)]
+assert all(abs(a - b) <= 1e-13 * abs(b) for a, b in zip(v, want)), (v, want)
+x, y, vx, vy, n = v[6:]
+assert n >= 1 and y > 0.2 and vy > -2 and vx <= 3, v[6:]
+print("ok: the step's math.pow, math.exp and w:resolve_circle the same bits on the server and the client:", " ".join(km["own"][:2]), "...; resolve_circle", x, y, vx, vy, int(n))
+PY
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
 put_bike 4 -
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'

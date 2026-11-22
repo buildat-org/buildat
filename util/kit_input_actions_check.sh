@@ -23,6 +23,8 @@
 #   3b. [KIT_KEY_ACTIONS_CAP] the check's types workbench/acts_a (8
 #      actions) and acts_b (7) placed: with fire the world's 16 actions;
 #      each key pressed reaches the server; the store has the 16th;
+#      [KIT_SMALL_PIECES] b7's mouse = "middle": the middle button presses
+#      it too;
 #   3c. [WB_MUTE_KEY] Workbench's M in the editor mutes, again unmutes; M
 #      in an inspector field does not, nor in play where the world's b1 is
 #      on M (b1 is pressed);
@@ -52,11 +54,13 @@ acts_type() # <name> <prefix> <key>...
 		echo "acts[$i] = {name = \"$p$i\", key = \"$k\", label = \"$p$i\"}" >> "$f"
 		i=$((i + 1))
 	done
+	# ([KIT_SMALL_PIECES] the last one's mouse button: MOUSE_LAST)
+	[ -z "${MOUSE_LAST:-}" ] || echo "acts[$((i - 1))].mouse = \"$MOUSE_LAST\"" >> "$f"
 	echo "return {version = 1, actions = acts}" >> "$f"
 }
 ACTS_A="Y U O P J K L N" ACTS_B="M F4 F5 F7 F8 Home End"
 acts_type acts_a a $ACTS_A
-acts_type acts_b b $ACTS_B
+MOUSE_LAST=middle acts_type acts_b b $ACTS_B
 export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 cd "$here/Build"
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
@@ -172,6 +176,11 @@ EOF
 	cat <<'EOF'
 wait_log_any 10000 kit: action b7 released
 frames 10
+mouse_down middle
+frames 5
+mouse_up middle
+wait_log 10000 kit: action b7 released
+frames 10
 keypress Escape
 frames 5
 click Button "Settings..."
@@ -254,6 +263,10 @@ done
 grep -aqP '^action\t[^\t]+\tb7\tEnd\t' "$t/cu_kitboss/keys.txt" ||
 	fail "the key store lacks the world's 16th action"
 echo "ok: the world's 16 actions: each key reached the server"
+# [KIT_SMALL_PIECES] b7's mouse = "middle": the middle button pressed it again
+[ "$(grep -ac 'Action b7 pressed by kitboss' "$s")" -ge 2 ] ||
+	fail "the middle mouse button did not press b7 (mouse = \"middle\") ($s)"
+echo "ok: an action's mouse button (b7's middle) presses it"
 # [WB_MUTE_KEY] M in the editor muted and unmuted; in a field, and in play
 # where the world's action b1 has M, it did not
 m=$(grep -aoP "workbench: the mute key: sound \K\S+" "$c" | tr '\n' ' ')

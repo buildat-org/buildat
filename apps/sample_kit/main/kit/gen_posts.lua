@@ -1,8 +1,8 @@
 -- [KIT_GENERATORS] (4z37f) A generator for util/kit_generators_check.sh: a
 -- kit/sign at each of its corners (a level points param, each point's
--- `h` its sign's height) and `count` signs scattered by `seed` in a 20 m
--- square, none within 3 m of another entity of the scene (c.entities);
--- past the default cap of 63. In play `reseed` (not 0) builds it again
+-- `h` its sign's height) and `count` signs scattered by `seed`
+-- (c:random) in a 20 m square, none within 3 m of another entity of the
+-- scene (c.entities); past the default cap of 63. In play `reseed` (not 0) builds it again
 -- live from that seed at the round's start (c:generate on itself). Its log
 -- says whether c.move_lib (move.lua) is there. [KIT_BUILD_SLICED] `work`
 -- (not 0) draws that many numbers first (a build some ticks long), its log
@@ -20,21 +20,21 @@ return {
 			default = 1}}, default = {{-8, -8, 1}, {8, -8, 1}, {0, 8, 2}}},
 	},
 	on_build = function(c)
-		local s = math.floor(c.params.seed) % 2147483646 + 1
-		local function r()
-			s = s * 16807 % 2147483647
-			return (s - 1) / 2147483646
-		end
+		local g = c:random(c.params.seed)
+		-- ([KIT_SMALL_PIECES] c:random's int, its own generator)
+		local d = c:random(c.params.seed)
+		c:log(string.format("gen_posts: seed %d's int(1, 6), int(-3, 3), int(5, 5): %d %d %d",
+			c.params.seed, d:int(1, 6), d:int(-3, 3), d:int(5, 5)))
 		local o = c.pos or {0, 0, 0}
 		for _, p in ipairs(c.params.corners) do
 			c:child{type = "kit/sign", name = "corner", pos = {p[1], p[3], p[2]}}
 		end
 		for _ = 1, c.params.work do
-			r()
+			g:next()
 		end
 		local made, clear, last = 0, 0, ""
 		for _ = 1, c.params.count do
-			local x, z = r() * 20 - 10, r() * 20 - 10
+			local x, z = g:next() * 20 - 10, g:next() * 20 - 10
 			local ok = true
 			for _, e in ipairs(c.entities) do
 				local dx, dz = e.pos and e.pos[1] - o[1] - x, e.pos and e.pos[3] - o[3] - z
