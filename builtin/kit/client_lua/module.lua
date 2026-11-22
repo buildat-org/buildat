@@ -1196,7 +1196,7 @@ end
 
 -- The entity as its client parts have it
 local function entity_view(id, n)
-	local e = {id = id, node = n.node, state = {}}
+	local e = {id = id, node = n.node, state = {}, params = {}}
 	function e:shown(key)
 		return value(n, key)
 	end
@@ -1564,6 +1564,12 @@ local function update_play(_, data)
 		if #parts > 0 then
 			n.e = n.e or entity_view(id, n)
 			local e = n.e
+			-- [KIT_SMALL_PIECES] its types' client_params, as the server shows
+			-- them (an edit's change in the next show)
+			if n.params_show ~= n.show then
+				n.params_show = n.show
+				e.params = type(show.params) == "table" and show.params or {}
+			end
 			if not n.added then
 				n.added, n.vals = true, {}
 				for _, part in ipairs(parts) do

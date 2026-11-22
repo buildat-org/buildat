@@ -40,6 +40,8 @@
 #      7: Play builds it again live (its on_start's c:generate), some ticks
 #      long: seed 7's posts in the round, the sign under it kept; Stop: the
 #      authored ones back (the save's).
+#      [KIT_SMALL_PIECES] gen_posts draws by c:random: its int(a, b) logged
+#      as Python draws it.
 #   6. (4z37i) Generating...: in part 1 for the runaways; in the wasm
 #      interpreter gen_runaway's shown, then hidden as
 #      its place is undone, its build dropped ($t/generating.png).
@@ -328,6 +330,19 @@ want "$s" "placed sample_kit/gen_posts $G at [-30,1,30], built $G again: $((3 + 
 	"ran $G's sample_kit/gen_posts, built $G again: $((3 + P1C)) children ($((3 + P1C)) kept, 0 new, $((P1 - P1C)) gone)" \
 	"ran $G's sample_kit/gen_posts, count 40, seed 2, built $G again: $((3 + P2C)) children"
 echo "ok: a generator past 63 children; Run keeps it clear of a sign beside it, its own last posts replaced; Run with params, one undo"
+# [KIT_SMALL_PIECES] c:random(seed):int(a, b) as Python draws it (the posts
+# above are its :next())
+DICE=$(python3 -I - <<'PY'
+s = 1 % 2147483646 + 1
+def r():
+    global s
+    s = s * 16807 % 2147483647
+    return (s - 1) / 2147483646
+print(*[a + int(r() * (b - a + 1)) for a, b in ((1, 6), (-3, 3), (5, 5))])
+PY
+)
+want "$s" "gen_posts: seed 1's int(1, 6), int(-3, 3), int(5, 5): $DICE"
+echo "ok: c:random's next (the posts) and int ($DICE) as Python draws them"
 want "$t/boss2.log" "points [x, y, h] within 256 of its place" "(point 2's h: a number from 0 to 5)"
 echo "ok: a corner without its height, one out of its range, refused"
 want "$s" "Entity $G's build under way dropped" \

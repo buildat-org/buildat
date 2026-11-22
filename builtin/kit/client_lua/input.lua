@@ -28,7 +28,10 @@
 --   kit.press_action(name, down): a world action pressed (true) or let go,
 --     sent to the server (its keys, its touch button, a gamepad's; a UI's)
 -- A world action named as one of Kit's or the app's (jump, use) has that
--- key. Escape and the mouse's buttons are not actions.
+-- key. Escape and the mouse's buttons are not actions; [KIT_SMALL_PIECES] a
+-- world action's mouse ("left", "right", "middle") is a button doing it too,
+-- held as its key is (not rebound: the keys page names it, as use's left
+-- click), off a touchscreen.
 return function(K)
 local M, E, O = K.M, K.E, K.O
 local magic = require("buildat/extension/urho3d")
@@ -108,9 +111,15 @@ for i = 1, 10 do
 end
 -- The world's actions take the gamepad's free buttons in order: Y, LB, RB
 local PAD_FREE = {3, 9, 10}
+-- [KIT_SMALL_PIECES] A world action's mouse (its `mouse`): the button, its
+-- name where the key is unbound
+local MOUSE = {left = {magic.MOUSEB_LEFT, "Left click"},
+	right = {magic.MOUSEB_RIGHT, "Right click"},
+	middle = {magic.MOUSEB_MIDDLE, "Middle click"}}
 
 local S = {label = nil, app = {}, world = {}, list = {}, by_id = {},
-	code = {}, name = {}, pad = {}, held = {}, pad_was = {}, version = 0}
+	code = {}, name = {}, pad = {}, button = {}, held = {}, pad_was = {},
+	version = 0}
 
 local function declare()
 	local list, by_id = {}, {}
@@ -125,15 +134,18 @@ local function declare()
 	local free = 1
 	for _, a in ipairs(S.world) do
 		if not by_id[a.name] then
+			local m = MOUSE[a.mouse]
 			add({id = a.name, label = "This world: " .. (a.label ~= "" and
-					a.label or a.name), default = a.key, pad = PAD_FREE[free],
-					world = true})
+					a.label or a.name) .. (m and " (also " .. m[2] .. ")" or ""),
+					default = a.key, pad = PAD_FREE[free],
+					world = true, mouse = m and m[2], button = m and m[1]})
 			free = free + 1
 		end
 	end
 	local names = buildat.declare_keys and
 			buildat.declare_keys(nil, S.label, list) or nil
 	S.list, S.by_id, S.code, S.name, S.pad = list, by_id, {}, {}, {}
+	S.button = {}
 	for _, k in ipairs(list) do
 		local n = type(names) == "table" and names[k.id] or nil
 		if type(names) ~= "table" then
@@ -142,6 +154,7 @@ local function declare()
 		S.name[k.id] = n or ""
 		S.code[k.id] = n and magic.input:GetKeyFromName(n) or 0
 		S.pad[k.id] = k.pad
+		S.button[k.id] = k.button
 	end
 	S.version = S.version + 1
 	return names
@@ -191,6 +204,11 @@ log:info("kit: the gamepad " .. (HAS_PAD and "read" or
 		"not read (no Input:GetControllerAxis)"))
 local function pad_button(b)
 	return b ~= nil and HAS_PAD and magic.input:GetControllerButtonDown(b)
+end
+-- [KIT_SMALL_PIECES] a world action's mouse button held (not on a touchscreen:
+-- a tap reads as the left button)
+local function mouse_button(b)
+	return b ~= nil and not TOUCH and magic.input:GetMouseButtonDown(b)
 end
 -- An axis (0, 1: the left stick's x and y; 2, 3: the right's), -1..1, 0
 -- inside a dead zone
@@ -275,7 +293,7 @@ buildat.sub_packet("kit:actions", function(data)
 	for _, a in ipairs(type(l) == "table" and l or {}) do
 		if type(a) == "table" and type(a.name) == "string" then
 			w[#w + 1] = {name = a.name, key = tostring(a.key or ""),
-				label = tostring(a.label or "")}
+				label = tostring(a.label or ""), mouse = a.mouse}
 		end
 	end
 	S.world = w
@@ -307,7 +325,8 @@ magic.SubscribeToEvent("KeyUp", function(_, data)
 	local key = data:GetInt("Key")
 	for _, a in ipairs(S.world) do
 		-- (let go while a screen has the keys too)
-		if is_key(a.name, key) and not pad_button(S.pad[a.name]) then
+		if is_key(a.name, key) and not pad_button(S.pad[a.name]) and
+				not mouse_button(S.button[a.name]) then
 			M.press_action(a.name, false)
 		end
 	end
@@ -322,9 +341,9 @@ end
 magic.SubscribeToEvent("Update", function()
 	local play = playing()
 	for _, k in ipairs(S.list) do
-		local b = S.pad[k.id]
-		if b then
-			local down = pad_button(b) and play
+		local b, m = S.pad[k.id], S.button[k.id]
+		if b or m then
+			local down = (pad_button(b) or mouse_button(m)) and play
 			if down ~= (S.pad_was[k.id] or false) then
 				S.pad_was[k.id] = down
 				if k.world then
