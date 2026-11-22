@@ -729,11 +729,17 @@ assert off(D[-1][0], 270) < 20, D[-1]
 most = max(off(c, b) for c, b in D)
 assert most < 45, "the camera %.0f degrees off the car: %r" % (most, D)
 assert off(D[-1][0], D[-1][1]) < 4, D[-1]
-# (the right drag, 40 degrees' worth in mouse look: the camera still behind
-# the car, turned as the coasting car turned and no more)
-drag = off(M[1][0] - M[0][0], M[1][1] - M[0][1])
-assert all(off(c, b) < 4 for c, b in M) and drag < 3, M
-print("ok: the chase camera followed the car from %.0f to %.0f degrees, at most %.0f off, %.1f once straight; a right drag turned it %.1f more than the car" %
+# (the right drag, 40 degrees' worth in mouse look: the camera turned only
+# as it follows the car -- from where it was towards the car's yaw after,
+# never past it; the car may still be turning as it coasts, and the camera
+# still closing on it, so neither is the drag's)
+def signed(a, b):
+    return (a - b + 540) % 360 - 180
+to_car, turned = signed(M[1][1], M[0][0]), signed(M[1][0], M[0][0])
+lo, hi = min(0, to_car) - 3, max(0, to_car) + 3
+assert off(M[0][0], M[0][1]) < 10 and lo <= turned <= hi, M
+drag = max(lo - turned, turned - hi, 0) + 0.0
+print("ok: the chase camera followed the car from %.0f to %.0f degrees, at most %.0f off, %.1f once straight; a right drag turned it %.1f past its following" %
       (D[0][0], D[-1][0], most, off(D[-1][0], D[-1][1]), drag))
 PY
 echo "ok: Brimstone with camera chase and chase_follow 0.3: $t/chase_east.png, $t/chase_west.png"
