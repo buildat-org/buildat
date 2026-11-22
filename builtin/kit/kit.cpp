@@ -22612,6 +22612,19 @@ struct Module: public interface::Module, public Interface
 			add_log(e.id, ss_("a teleport refused: ")+why);
 			return;
 		}
+		// [KIT_TEMPLATE_CLEANUP] onto a spawner of players with no yaw given:
+		// facing its way, as a join there does (Crag Trial's start)
+		if(te && !yaw.is_number())
+			for(auto &in : te->comps){
+				const Type &t = m_types[in.type];
+				if(t.spawn && (t.spawn_param.empty() ||
+						in.params.get(t.spawn_param).is_true())){
+					double w[3];
+					Turn q;
+					world_of(*te, w, &q);
+					spawn_look = norm_yaw(q.yaw());
+				}
+			}
 		const double look = yaw.is_number() && std::isfinite(yaw.as_number()) ?
 				norm_yaw(yaw.as_number()) : spawn_look;
 		const ss_ in = other ? " in the scene "+target : "";

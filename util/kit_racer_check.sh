@@ -91,7 +91,8 @@ scene = {e["name"]: e["id"] for e in d["entities"] if e.get("kind") == "scene"}
 def find(name, s):
     return [e["id"] for e in d["entities"] if e.get("name") == name and
             e.get("parent") == scene[s]]
-print("RACE=%d TRIAL=%d CRATE=%d CONTROLS=%d" % (find("the race", "world")[0],
+print("RACE=%d WEAPONS=%d TRIAL=%d CRATE=%d CONTROLS=%d" % (find("the race", "world")[0],
+      find("the weapons", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1],
       [e["id"] for e in d["entities"] if any(c["type"] == "kit/controls"
        for c in e.get("components", []))][0]))
@@ -282,13 +283,13 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Brimstone Speedway"'
 step 120 "kit editor: edit mode on" "frames 3" 'click Button "Create"'
 for re in "The template's type local/brim_car \([0-9]+ bytes\)" "The template's type local/brim_race " \
-		"The template's type local/brim_mine "; do
+		"The template's type local/brim_mine " "The template's type local/brim_weapons "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 n=0
 # (time_out 90: kitbob, wrecked and slow, finishes some 43 s after kitboss,
 # and a loaded box once made it 46, over the default 45's "out of time")
-for e in "$RACE laps 1" "$RACE mine_damage 30" "$RACE time_out 90" "$CRATE value \"mines\"" "$TRIAL trial_laps 1"; do
+for e in "$RACE laps 1" "$WEAPONS mine_damage 30" "$RACE time_out 90" "$CRATE value \"mines\"" "$TRIAL trial_laps 1"; do
 	set -- $e
 	n=$((n + 1))
 	step 10 "entities, $n to undo" "event kit_edit {\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
@@ -386,8 +387,8 @@ mgo=$(mark "$CL")
 # Kit's input.lua, no client part of the race's): a press of the action
 m=$(mark "$SL")
 step 5 "kit: action fire pressed" "mouse_down left" "frames 3" "mouse_up left"
-await "$SL" "$m" 5 "local/brim_race $RACE: kitboss presses fire"
-echo "ok: the left mouse button presses the race's fire"
+await "$SL" "$m" 5 "local/brim_weapons $WEAPONS: kitboss presses fire"
+echo "ok: the left mouse button presses the weapons' fire"
 
 # 2. (8) kitbob at kitboss's car standing on the grid: pushed by the server
 body
@@ -411,7 +412,7 @@ print("ok: kitbob drove into kitboss's standing car: pushed %.1f m (the server's
 PY
 
 # 2b. [KIT_RACE_PIECES] Each wreck its own wait (c:respawn_waiting(by)): on
-# the grid, kitbob wrecked (rams: the race's input, the builder's Try as
+# the grid, kitbob wrecked (rams: the weapons' input, the builder's Try as
 # him on himself, 6 of his 20 hit points each, one in 0.5 s at most),
 # kitboss a second later (his first three rams beside kitbob's); kitbob
 # back alone 2 s after his wreck (no checkpoint passed yet: at his grid
@@ -420,7 +421,7 @@ BOSS_ID=$(grep -aoP 'kit: this player is entity \K[0-9]+' "$t/boss.log" | tail -
 BOB_ID=$(grep -aoP 'kit: this player is entity \K[0-9]+' "$t/bob.log" | tail -1)
 ram() # <name> <entity id>
 {
-	cmd "event kit_edit {\"op\": \"try\", \"id\": $RACE, \"input\": \"ram\", \"value\": \"player:$2\", \"as\": \"$1\"}"
+	cmd "event kit_edit {\"op\": \"try\", \"id\": $WEAPONS, \"input\": \"ram\", \"value\": \"player:$2\", \"as\": \"$1\"}"
 }
 as boss
 # (a Try is the tools': on for it, nothing of the play reset)
@@ -469,7 +470,7 @@ as bob
 AIM_FILE=$t/mine_at drive bob 130 'panel .* shown, layer [0-9]+: "The flag is down' &
 DO=$!
 as boss
-await "$SL" "$m" 60 "local/brim_race $RACE: kitboss drops a mine"
+await "$SL" "$m" 60 "local/brim_weapons $WEAPONS: kitboss drops a mine"
 # (kitbob's driver aims at its zone's middle: a lap's line is a metre or two
 # off another's. The zone is 2x2 cells from the place's, cells round whole
 # numbers (as kit/checkpoint's middle() has an unturned one): the middle is
@@ -477,7 +478,7 @@ await "$SL" "$m" 60 "local/brim_race $RACE: kitboss drops a mine"
 tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss drops a mine [0-9]+ at \K-?[0-9.]+ -?[0-9.]+' | head -1 |
 	awk '{ printf "%.2f,%.2f", int($1 + 1000) - 999.5, int($2 + 1000) - 999.5 }' > "$t/mine_at.tmp" &&
 	mv "$t/mine_at.tmp" "$t/mine_at"
-await "$SL" "$m" 40 "local/brim_race $RACE: kitbob hits a mine"
+await "$SL" "$m" 40 "local/brim_weapons $WEAPONS: kitbob hits a mine"
 await "$SL" "$m" 2 "local/brim_race $RACE: kitbob wrecked by mine"
 printf "%s\n" "frames 5" "screenshot $t/wreck.png" >&4 # (kitbob's view)
 await "$SL" "$m" 2 "Entity $RACE made a copy of entity:[0-9]+"

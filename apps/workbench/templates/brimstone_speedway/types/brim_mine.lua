@@ -1,7 +1,7 @@
--- Brimstone Speedway's mine: a copy of it is dropped behind a car (the
--- race's c:spawn of its `mine` entity) and sent "arm"; armed a moment later,
--- a car driving onto it (its zone) says "touched" with its id, linked to the
--- race's mine by name (a copy keeps only links by name or into itself),
+-- Brimstone Speedway's mine: a copy of it is dropped behind a car
+-- (brim_weapons' c:spawn of its `mine` entity) and sent "arm"; armed a moment
+-- later, a car driving onto it (its zone) says "touched" with its id, linked
+-- to the weapons' mine by name (a copy keeps only links by name or into itself),
 -- which blows it up there. The one placed in the scene is the
 -- pattern the copies are made of, never armed.
 return {
@@ -9,7 +9,7 @@ return {
 	zone = "size",
 	about = {
 		group = "Game",
-		what = "A mine in Brimstone Speedway's race: dropped behind a car and armed, it goes off when a car drives onto it (the race's mine).",
+		what = "A mine in Brimstone Speedway's race: dropped behind a car and armed, it goes off when a car drives onto it (brim_weapons' mine).",
 		inputs = {arm = "Arms it after a moment."},
 		outputs = {touched = "A car drove onto it while it was armed. Value: the mine."},
 		params = {

@@ -303,7 +303,7 @@ namespace interface
 //           text_facing = "flat"|"camera", text_back = true (flat text on
 //           the back too, kit/sign's both_sides) [KIT_AGENT_FEEDBACK_1117],
 //           extent = "<position param>", depth = n, solid = true,
-//           voxel = "<voxel material>",
+//           voxel = "<voxel material>", edge = "#rrggbb",
 //           state = "<shared state key>", when = {color, solid, scale =
 //           {x, y, z}, swing = true, mirror = true, vanish = "fly"}}
 //                            -- drawn where it
@@ -317,7 +317,12 @@ namespace interface
 //                               (its colour unused; "": none)
 //                               [KIT_LOOK_MATERIAL]; kit/door, key_door,
 //                               gate, sign and mover's `material`,
-//                               kit/part's `voxel`. Its z side
+//                               kit/part's `voxel`. [KIT_COLLECTIBLE]
+//                               edge: a box's twelve edges as boards of
+//                               that colour, an eighth of its shortest
+//                               side wide (a crate's frame; module.lua's
+//                               draw_look; "": none), kit/collectible's
+//                               `edge`. Its z side
 //                               `depth` in its first cells' middle when
 //                               given. solid: a collision shape on the
 //                               clients (client-side, as the voxels').
@@ -491,7 +496,9 @@ namespace interface
 // so one on a player's entity follows them), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player; [KIT_SCENE_PACKAGES]
 // c:teleport(nil, {scene = name}) onto that scene's spawner of players, its
-// last, else its World's spawn; from the root, wherever the player is),
+// last, else its World's spawn; from the root, wherever the player is;
+// [KIT_TEMPLATE_CLEANUP] c:teleport(nil, {entity = id}) onto a spawner of
+// players with no yaw given: facing its way, as a join there),
 // c:set_param(id, type,
 // param, value) ([KIT_VEHICLE_MOVEMENTS] a parameter of a component on an
 // entity it reaches, until Stop, checked as an edit's, the row keeping its
@@ -1993,7 +2000,8 @@ namespace interface
 // seconds (0: never by itself) and by its "reset" input (set off by a
 // player or a bot: theirs; by anything else: everyone's). Its client part
 // hides it at once (e:predict), its look's when.vanish (`vanish`: "fly"
-// or "none") drawing the going. A run counts a player's takes by linking
+// or "none") drawing the going; its box may wear a `voxel` material and
+// `edge` boards (Brimstone Speedway's wooden crates). A run counts a player's takes by linking
 // pickup to an input of its own and resets the ones linked to it there
 // (c.linked_in, c:send(id, "reset", nil, by): Crag Trial's crag_run).
 // [KIT_RECORDS] kit/stopwatch (its file says how): each player's own, by
