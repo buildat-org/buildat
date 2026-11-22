@@ -26,7 +26,11 @@
 #      (the default: by "app", nothing reached), as kitboss (the world's
 #      target), as "me" (the body's scene's, moon) and refusals (5);
 #   4. [KIT_SIDE_SCENERY] (5) play_join's body in the first scene, then
-#      moved to moon by play_join while editing moon;
+#      moved to moon by play_join while editing moon; [KIT_AGENT_PLAY_TEXTS]
+#      each play_join held while the camera starts or moves (in, or "Still
+#      starting" after 7 s; the move in one call), the moon's kit/ui_text
+#      in play_join's and play_input's texts as shown ({value:int},
+#      {value:time}, | a new line; a hidden one not);
 #      play_input's press (8): a kit/ui_button by its label, a
 #      kit/ui_scene_list's row by its title (its "picked"), an unknown one
 #      refused naming the screen's buttons; an output emitted every tick
@@ -286,18 +290,22 @@ def to_start():
     if state(ids=[])["running"]:
         call("stop")
 def join():
-    """play_join until in: its answers, its body"""
+    """play_join until in: its answers, its body. [KIT_AGENT_PLAY_TEXTS]
+    each held while the camera starts or moves: in, or "Still starting"
+    after 7 s"""
     t0, said = time.time(), []
     while True:
+        t1 = time.time()
         r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
         text = r["content"][0]["text"]
         said.append(text)
-        print("  play_join ->", text[:400])
+        print("  play_join ->", text[:400], "(%.1f s)" % (time.time() - t1))
         if not r["isError"]:
             break
-        assert "is starting" in text or "on its way" in text, text
+        assert re.match(r"(Your body left the scene \S+\. )?Still starting after 7 s: "
+            "the server's camera is (starting|on its way)", text), text
+        assert time.time() - t1 > 7, ("answered before its hold", text)
         assert time.time() - t0 < 150, "the camera not in in 150 s"
-        time.sleep(0.5)
     return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
 def played(args):
     return json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
@@ -485,6 +493,11 @@ PMOVE_CL = '''local log = buildat.Logger("pmove")
 local said = {}
 return {draw = function(s, node)
 	local k = s.n and "predicted" or "posed"
+	-- (its own body's first frames, before its physics is on, are posed;
+	-- another body's would be every frame)
+	if k == "posed" and said.predicted then
+		k = "posed after a predicted"
+	end
 	if not said[k] then
 		said[k] = true
 		log:info("kit check: pmove draws a " .. k .. " body")
@@ -612,6 +625,11 @@ elif phase == "links":
     call("place", {"type": "kit/scene_info", "pos": [0, 0, 0], "params": {"title": "Moon run"}})
     B = placed(call("place", {"type": "kit/ui_button", "pos": [0, 0, 0], "params": {"label": "Go"}}))
     L = placed(call("place", {"type": "kit/ui_scene_list", "pos": [0, 0, 0]}))
+    # [KIT_AGENT_PLAY_TEXTS] the screen's texts: one shown, one hidden
+    TX = placed(call("place", {"type": "kit/ui_text", "pos": [0, 0, 0],
+        "params": {"text": "Moon|{value:int} rocks, {value:time}"}}))
+    TH = placed(call("place", {"type": "kit/ui_text", "pos": [0, 0, 0],
+        "params": {"text": "Hidden", "shown": False}}))
     call("new_scene", {"name": "attic"})
     call("switch_scene", {"name": main})
     WT = placed(call("place", {"type": "kit/counter", "pos": [2, 1, 0]}))
@@ -640,7 +658,7 @@ elif phase == "links":
     assert any(o == "who" and re.match(r"^player:\d+$", v) for o, v in em), em
     until(lambda: count(WT) == 7, "the world's target reached")
     assert count(MT) == 0
-    save(MT=MT, WT=WT, B=B, L=L, T=T)
+    save(MT=MT, WT=WT, B=B, L=L, T=T, TX=TX, TH=TH)
 elif phase == "play":
     rpc("initialize", init)
     H, MT, WT, B, L = s["H"], s["MT"], s["WT"], s["B"], s["L"]
@@ -653,6 +671,15 @@ elif phase == "play":
     said, body = join()
     assert body["scene"] == "moon", body
     assert any(x.startswith("Your body left the scene %s. " % s["main"]) for x in said), said
+    # [KIT_AGENT_PLAY_TEXTS] the move held, not answered "on its way"; the
+    # moon's texts as the client shows them, the hidden one not
+    assert len(said) == 1, said
+    tx = {x["id"]: x for x in body.get("texts", [])}
+    assert tx.get(s["TX"], {}).get("text") == "Moon\n0 rocks, ", body
+    assert s["TH"] not in tx, body
+    call("try_input", {"id": s["TX"], "input": "value", "value": 75})
+    until(lambda: any(x["id"] == s["TX"] and x["text"] == "Moon\n75 rocks, 1:15"
+        for x in played({"seconds": 0.1}).get("texts", [])), "the text's value", 3)
     assert refused("play_join").startswith("You play a body already: "), "play_join in its scene"
     # The screen's buttons (the list's rows filled within a second)
     def buttons():
@@ -1047,7 +1074,7 @@ elif phase == "client":
     # (8) its client predicts its own body: the movement's draw gets the
     # predicted state (s.n, its steps' own), no other body there
     camsays("kit check: pmove draws a predicted body")
-    assert "kit check: pmove draws a posed body" not in camlog()
+    assert "kit check: pmove draws a posed after a predicted body" not in camlog()
     # [KIT_BODY_VARS] (1) c:body_var: 16 keys on the body, the 17th refused;
     # in get_state's round.bodies, play_input's body and the state its client
     # predicts from; bad keys and values err, a player not here refused;
@@ -1195,4 +1222,4 @@ CLIENT=$SERVER_PID
 for k in "${tok#bat_}" "${tok2#bat_}" "${tok3#bat_}" "${adm#bat_}"; do
 	grep -rqaF "$k" "$t"/*.log && fail "a token in a log"
 done
-echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
+echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_join held while the camera starts or moves, the screen's texts, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
