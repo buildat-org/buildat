@@ -14,8 +14,9 @@
 #   - the user's two reports: one POST at once, one more at the window's
 #     end saying 1 more and 2 open; neither has the user's name or the
 #     reason in it; nothing to the user's topic.
-# Aitta: its admin's suggested topic not the Hearth moderator's; a report
-# on a release one POST to the admin's topic.
+# Aitta: its admin's suggested topic not the Hearth moderator's; a publish
+# and a report on the release one POST each to the admin's topic (a window
+# of 0, so the report's is not held behind the publish's).
 #   util/admin_notify_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -138,7 +139,7 @@ echo "ok: two reports, one push at once and one at the window's end, no content"
 mkdir -p "$t/a/shared"
 cp "$t/cert.pem" "$t/a/shared/check_ca.pem"
 BUILDAT_CA_FILE=$t/a/shared/check_ca.pem BUILDAT_CONNECT_PORTS=$(cat "$t/ntfy.port") \
-start_server "$t/a.log" "setup code" 120 auto \
+BUILDAT_NTFY_BATCH_S=0 start_server "$t/a.log" "setup code" 120 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/a" -l 3 ||
 	fail "Aitta did not start ($t/a.log)"
 CHECK_PIDS+=($SERVER_PID)
@@ -166,6 +167,13 @@ zip=$("$b" aitta pack "$t/app" "$t/akey" "$t/out" 2>/dev/null) || fail "pack"
 grep -q "listed: tester/pk" "$t/publish.log" || fail "publish ($t/publish.log)"
 curl -s -X POST -d '{"release":"tester/pk/1.0.0","reason":"broken","text":"zzsecrettext"}' \
 	"http://127.0.0.1:$AP/api/v1/aitta/report" | grep -q '"ok":true' || fail "the report"
-for _ in $(seq 50); do [ -n "$(posts /aitta)" ] && break; sleep 0.2; done
-[ "$(posts /aitta)" = "Aitta: a new report, 1 open" ] || fail "Aitta's push: '$(posts /aitta)'"
+# Each push on its own thread: picked by content, in either order
+for _ in $(seq 50); do [ "$(posts /aitta | wc -l)" -ge 2 ] && break; sleep 0.2; done
+posts /aitta > "$t/aitta.posts"; cat "$t/aitta.posts"
+grep -qFx "Aitta: tester/pk/1.0.0 published, 1 to review" "$t/aitta.posts" ||
+	fail "Aitta's publish push ($t/aitta.posts)"
+grep -qFx "Aitta: a new report, 1 open" "$t/aitta.posts" ||
+	fail "Aitta's report push ($t/aitta.posts)"
+[ "$(wc -l < "$t/aitta.posts")" = 2 ] || fail "more than two Aitta pushes"
+grep -q "zzsecret" "$t/aitta.posts" && fail "content in an Aitta push"
 echo "PASS: reports pushed to the moderators' ntfy topics, batched, without content; the login's question"
