@@ -358,6 +358,11 @@ client e.node
 client e.params
 client e.state
 client e.swing
+client e.ui
+client e.ui.rect | ()
+client e.ui.screen | ()
+client e.ui.set | (t) color dx dy height opacity size text width
+client e.ui.text | ()
 client e.you
 client e:log | (text)
 client e:near | (d)

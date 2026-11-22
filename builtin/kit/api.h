@@ -752,7 +752,8 @@ namespace interface
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
 //   client's log only; [KIT_SMALL_PIECES] e.params: the values of the
-//   parameters its type names in `client_params`, below, {} with none);
+//   parameters its type names in `client_params`, below, {} with none;
+//   [KIT_UI_CLIENT_PART] e.ui, below);
 //   `local kit = require("buildat/module/kit")`,
 //   [KIT_API_1] these 16 names of the client's Kit and no others (another
 //   is nil; module.lua's, controls.lua's and input.lua's heads say more):
@@ -831,6 +832,41 @@ namespace interface
 //   keep_own_body: the player's own body stays drawn for them out of play,
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
+//   [KIT_UI_CLIENT_PART] **A UI element's client part**: the client part of
+//   a type with a `ui` (kit/ui_*, a builder's own) moves and changes its
+//   own entity's element on this client, each frame if it likes (its
+//   on_update runs before the frame's layout), as a movement's draw does
+//   its node: a lobby's elements animated, a value's text styled, with no
+//   server round trip. e.ui (ui.lua's M.ui_api), in UI units (percent of
+//   the screen's shorter side, as the ui's x, y, width, height and size):
+//   e.ui.rect() -> x, y (from the screen's top left), w, h, shown: the
+//   element as last drawn (nil: none drawn yet, or no `ui`);
+//   e.ui.screen() -> w, h: the screen's (100 the shorter side);
+//   e.ui.text() -> the text as last drawn ({value} filled), a bar's fill
+//   0...1 (nil for others);
+//   e.ui.set{...}: dx, dy (-400...400: an offset from where the layout
+//   puts it, kept in its box: the screen or its panel), width, height
+//   (0...400; 0 from its contents), size (0.5...30: its text's), opacity
+//   (0...1, times its own; its text too, a panel's children's shapes but
+//   not their texts: Urho3D's Text keeps its own opacity), color
+//   ("#rrggbb" or "#rrggbbaa": a text's, a bar's fill), text (as the ui's
+//   `text`: {value} filled, | a new line; 200 characters). Each kept till
+//   set again, false: its own again; its part put again (an edited type)
+//   drops them all; another field or a bad value is an error (the part
+//   switched off, as a handler's). width, height, size, color and text go
+//   over the ui's own fields and a player's own (c:set_param {player}),
+//   so the layout fits it to them. Drawn in play and unframed edit mode;
+//   framed edit mode draws the element as authored (a drag places it, a
+//   handle sizes it). Kept to its own element: e.ui knows only its
+//   entity's id, gives no element, and nothing names another's or Kit's
+//   own HUD (simplified: the sandbox's urho3d ui.root still reaches every
+//   element, as the scene does above; a part is asked to touch only its
+//   own).
+//   Cost (2026-11-22, 61 elements bobbing and fading each frame, setting
+//   their text and colour once a second): the UI's layout 6.2 ms a frame
+//   against 5.7 with no parts (~10 us an element); an element with no part
+//   costs nothing more. An element whose part moves it logs its line
+//   twice a second at most.
 //   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
 //   c:child, c:link, c:voxel_box, c.entities, c.move_lib, c:generate and the
 //   "points" keys `values` and `level` may change in any release; publishing
