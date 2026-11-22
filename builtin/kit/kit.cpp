@@ -34949,7 +34949,9 @@ struct Module: public interface::Module, public Interface
 				"(lower z, the foreground), which is never drawn; a text's "
 				"{<word>:...} of a word Kit has no meaning for (drawn as "
 				"written: {<word>:...} is reserved, Kit has {key:<action>} and "
-				"{value:time}, {value:time1}, {value:int}).",
+				"{value:time}, {value:time1}, {value:int}); a link into a "
+				"kit/ui_text's or kit/sign's value whose text has no {value}, "
+				"which drops every value.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "
@@ -39954,7 +39956,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_TEXT_PLACEHOLDER] The authored texts' {<word>:...} of a word Kit
-	// has no meaning for: drawn as written, the word Kit's to give one later.
+	// has no meaning for: drawn as written, the word Kit's to give one later;
+	// [KIT_LINK_DROPPED] a value linked into a text with no {value}.
 	// At Play, in get_goal_warnings and (only: those) after an edit.
 	// simplified: every string parameter read as a text, drawn or not
 	sv_<ss_> placeholder_warnings(const std::set<uint64_t> *only = nullptr)
@@ -39975,6 +39978,41 @@ struct Module: public interface::Module, public Interface
 									" "+it.key()+": {"+w+":...} is no text "
 									"placeholder of Kit's, shown as written ("
 									"{<word>:...} is reserved; Kit has "+known+")");
+		}
+		// [KIT_LINK_DROPPED] a link into the value of a type that shows it
+		// only in its text (an input value and a string param text: kit/
+		// ui_text, kit/sign), its text with no {value...}: every value
+		// dropped. Warned for an entity in `only` at either end of the link.
+		// simplified: links by id; a to_name link is not followed
+		std::map<uint64_t, std::set<uint64_t>> into;
+		for(auto &x : m_entities)
+			if(authored(x.second))
+				for(const Instance &in : x.second.comps)
+					for(const Link &l : in.links)
+						if(l.input == "value" && l.name.empty())
+							into[l.to].insert(x.first);
+		for(auto &v : into){
+			auto e = m_entities.find(v.first);
+			bool asked = !only || only->count(v.first);
+			for(uint64_t f : v.second)
+				asked = asked || only->count(f);
+			if(e == m_entities.end() || !authored(e->second) || !asked)
+				continue;
+			for(const Instance &in : e->second.comps){
+				auto t = m_types.find(in.type);
+				if(t == m_types.end() || !t->second.inputs.count("value") ||
+						jstr(t->second.decl.get("params").get("text"), "type") !=
+						"string" || jstr(in.params, "text").find("{value") !=
+						ss_::npos)
+					continue;
+				ss_ from;
+				for(uint64_t f : v.second)
+					from += (from.empty() ? "" : ", ")+itos(f);
+				out.push_back("entity "+itos(v.first)+" takes value, but its "
+						"text has no {value} ("+in.type+", linked from "+from+
+						"): every value is dropped; put {value} in its text");
+				break;
+			}
 		}
 		return out;
 	}
