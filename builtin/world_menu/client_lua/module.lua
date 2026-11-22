@@ -24,10 +24,10 @@
 -- delete_text(name), delete_yes; trash = {{entry, name, date}} (what
 -- delete moved to the trash, listed after the worlds), trash_restore(entry)
 -- and trash_delete(entry) ([WORLD_MENU_TRASH]); play_label(name); back() (Escape and the
--- ×); push(kind) -> root, the app's own screen pushed for "worlds" and
--- "rename"; and what the app adds: footer(left) under the list,
--- under(add, left) after New, panel(add, right, name, head) before Play,
--- where add(label, action) is a button in the screen's keyboard walk.
+-- ×); push(kind, keep_taps) -> root, the app's own screen pushed for
+-- "worlds" and "rename" (keep_taps: a tap beside it is not Back); and
+-- what the app adds: footer(left) under the list, under(add, left) after
+-- New, panel(add, right, name, head) before Play, where add(label, action) is a button in the screen's keyboard walk.
 -- The server's way in: M.running_panel(add, close), the app's buttons on
 -- the running world's right column; a field's file choice is the list's
 -- Import ... from a file... too.
@@ -68,7 +68,8 @@ local function close()
 end
 
 -- keep_taps: a tap beside it is not Back ([UI_MODAL_DIM]: the boot list,
--- whose Back leaves the server)
+-- whose Back leaves the server; [UI_MODAL_DIM_LEFT] a name screen, whose
+-- Back loses what was typed)
 local function own_push(kind, keep_taps)
 	pop()
 	own_root = uistack.main:push({desc = "world menu: " .. kind,
@@ -172,7 +173,7 @@ end
 
 -- A world's new name
 local function draw_rename(spec, name)
-	local menu, root = screen(spec, "rename")
+	local menu, root = screen(spec, "rename", true)
 	text_on(menu.window, "Rename " .. name .. " to:")
 	-- Empty: what is typed is the whole name
 	local edit = edit_on(menu.window, "")
@@ -204,7 +205,7 @@ local function draw_copy(spec, name)
 	while taken[name .. "_" .. n] do
 		n = n + 1
 	end
-	local menu, root = screen(spec, "copy")
+	local menu, root = screen(spec, "copy", true)
 	text_on(menu.window, "Copy " .. name .. " as:")
 	local edit = edit_on(menu.window, name .. "_" .. n)
 	local function ok()
@@ -459,7 +460,7 @@ local served = {}
 -- `typed` the name typed before it was picked; `start` options set where
 -- no preset is (the list's Import: the file choice)
 local function draw_new(state, preset, typed, start)
-	local menu, root = screen(served, "new world")
+	local menu, root = screen(served, "new world", true)
 	-- A preset picked (draw_new again), a file being picked
 	-- ([KIT_PROJECT_EXPORT]: {name, options})
 	local picked, picking = nil, nil

@@ -443,10 +443,11 @@ function draw(saves, save_games)
 			one("main:trash_delete", entry)
 		end,
 		-- Over the HUD and the hotbar (priority 10) when over the world
-		push = function(kind)
+		push = function(kind, keep_taps)
 			close()
 			root = uistack.main:push({desc = "vanilla menu: " ..
-					(kind == "worlds" and "saves" or kind)})
+					(kind == "worlds" and "saves" or kind),
+					tap_outside = not keep_taps})
 			root.priority = 100
 			return root
 		end,
