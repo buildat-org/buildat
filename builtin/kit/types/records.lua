@@ -76,9 +76,9 @@ return {
 		board(c, true)
 		c:after(1, "board")
 	end,
-	-- simplified: a builder's Clear kept state (and its undo) runs no
-	-- handler, so the board is looked at once a second; a player's best on
-	-- their HUD stays till their next value. A Kit call on a kept state
+	-- simplified: a builder's Clear kept state, a clear_kept of one name
+	-- (and their undo) run no handler, so the board is looked at once a
+	-- second; a player's best on their HUD stays till their next value. A Kit call on a kept state
 	-- set would make this a run at the change.
 	on_timer = function(c, name)
 		if name == "board" then

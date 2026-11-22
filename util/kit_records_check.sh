@@ -21,6 +21,8 @@
 #      best reaches 9 after both ([KIT_REPORT_1122]);
 #   3. kitbob a quicker run: his new best, the board "1. kitbob|2.
 #      kitboss"; kitboss a slower one: no new best, the board as it was;
+#      (3b) clear_kept with key kitbob: the board "1. kitboss" (his best
+#      alone gone), a key none has refused, undo: the board as before;
 #   4. a lap (8: its seconds), the stopwatch running on; a reset by nobody:
 #      everyone's at 0;
 #   5. the server restarts: kitboss back, his best on 9 as it was; a
@@ -223,6 +225,22 @@ seen "$SL" "$m" "kitboss has a new best" && fail "kitboss's slower run a new bes
 seen "$SL" "$m" "kit/sign 6: shows" && fail "the board changed for a slower run ($SL)"
 echo "ok: kitbob's quicker run his new best ($b), the board 1. kitbob|2. kitboss; kitboss's slower run none"
 
+# 3b. [KIT_REPORT_1122B] clear_kept of one key: only kitbob's best gone
+# (the board, made from bests, within its second), undo brings it back,
+# a key no kept table has refused
+m=$(mark "$SL")
+ed '{"op": "clear_kept", "id": 4, "comp": 0, "key": "kitbob"}'
+await "$SL" "$m" 5 "kit/records: its kept state entry kitbob cleared by kitboss"
+await "$SL" "$m" 10 "kit/sign 6: shows \"1. kitboss $a\""
+seen "$SL" "$m" "kit/sign 6: shows \"\"" && fail "clear_kept with a key cleared the whole board ($SL)"
+m=$(mark "$SL")
+ed '{"op": "clear_kept", "id": 4, "comp": 0, "key": "nobody"}'
+await "$SL" "$m" 5 "An edit \(clear_kept\) by peer [0-9]+ refused: no kept entry nobody in kit/records"
+ed '{"op": "undo"}'
+await "$SL" "$m" 5 "kit/records: its kept state put back by kitboss's undo"
+await "$SL" "$m" 10 "kit/sign 6: shows \"1. kitbob $b.2. kitboss $a\""
+echo "ok: clear_kept key kitbob took only his best (the board 1. kitboss), undo put it back, an unknown key refused"
+
 # 4. A lap, running on; a reset by nobody: everyone's
 m=$(mark "$SL") mc=$(mark "$CL")
 try start
@@ -288,5 +306,5 @@ wait $BOSS 2>/dev/null
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 [ -s "$t/running.png" ] || fail "no $t/running.png"
-echo "PASS: kit/stopwatch, kit/records, {value:time1} and clear_after: two players' own times counted on their screens from one value each, elapsed to the records, new bests and the board's order, a lap, a reset by nobody, the bests kept over a restart; screenshot $t/running.png"
+echo "PASS: kit/stopwatch, kit/records, {value:time1} and clear_after: two players' own times counted on their screens from one value each, elapsed to the records, new bests and the board's order, one best cleared by key and undone, a lap, a reset by nobody, the bests kept over a restart; screenshot $t/running.png"
 # vim: set noet ts=4 sw=4:

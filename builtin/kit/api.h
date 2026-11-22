@@ -1467,10 +1467,13 @@ namespace interface
 //       the default and in each game session
 //   {"op": "restart", "id": n, "comp": i}  -- Running: the instance's
 //       state from the start again, and its on_start (its kept state stays)
-//   {"op": "clear_kept", "id": n, "comp": i}  -- [CRAG_BEST_RESET] the
-//       instance's kept state (state.kept) at its defaults, Running or not,
-//       one undo (the values before back); logged, the inspector's "Clear
-//       kept state"
+//   {"op": "clear_kept", "id": n, "comp": i, "key": k}  -- [CRAG_BEST_RESET]
+//       the instance's kept state (state.kept) at its defaults, Running or
+//       not, one undo (the values before back); logged, the inspector's
+//       "Clear kept state". [KIT_REPORT_1122B] With key (MCP's, no button):
+//       only k removed from each kept value that is a table (a player's
+//       name in kit/records' bests), the rest kept; refused ("no kept entry
+//       k in <type>") when none has it
 //   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
 //       what the builder has selected and where their cursor is, which
 //       the other builders see (no edit, no undo)
