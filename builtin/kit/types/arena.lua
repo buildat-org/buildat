@@ -51,7 +51,8 @@
 -- win), "scores" (the scores; the result at the round's end too), "time"
 -- (the time, "Overtime" or the result) or "none" (no line, the lobby's
 -- neither). Output `status` and the `status` state are the full line
--- whatever it is.
+-- whatever it is. [KIT_UI_EMPHASIS] `hud_on_change`: the line pops as it
+-- changes, as a kit/ui_text's on_change.
 -- [KIT_ARENA_INSTANT_ROUND] `after_round`: after a round's end the next
 -- countdown lasts at least this many seconds (0: `countdown` alone), so
 -- the round's players, back in the lobby, have time to step into the
@@ -442,7 +443,9 @@ return {
 		hud_border = {cat = "hud", type = "string", default = "#808080a0"},
 		hud_order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
-		size = {type = "position", default = {4, 3, 4}},
+		hud_on_change = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "pop", "pop_words"}},
+		size ={type = "position", default = {4, 3, 4}},
 		-- The minimum (version 1's only one)
 		players = {type = "number", default = 2, min = 1, max = 16},
 		max_players = {type = "number", default = 8, min = 1, max = 64},
@@ -511,7 +514,8 @@ return {
 		height = "param:hud_height", size = "param:hud_size",
 		color = "param:hud_color", background = "param:hud_background",
 		border = "param:hud_border", style = "param:hud_style",
-		order = "param:hud_order", prefix = "hud_"},
+		order = "param:hud_order", on_change = "param:hud_on_change",
+		prefix = "hud_"},
 	-- Its pad, the zone's first cell's floor, seen in play
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	about = {
@@ -544,6 +548,7 @@ return {
 			hud_background = "Its background, #rrggbb or #rrggbbaa, or none.",
 			hud_border = "Its border, #rrggbb or #rrggbbaa, or none.",
 			hud_order = "Over (higher) or under (lower) other screen elements it overlaps.",
+			hud_on_change = "pop: the status line pops as it changes; pop_words: as its words do, not its numbers alone (the clock's tick); none: never.",
 			size = "The queue's zone in cells, from its pad's cell up and on.",
 			players = "The least players in the queue for a countdown to start.",
 			max_players = "The most players a round takes; the rest keep waiting.",

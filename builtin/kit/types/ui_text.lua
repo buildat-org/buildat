@@ -17,7 +17,9 @@
 -- each value shown for that long, then as none, on the client (a note,
 -- an announcer's line; the same value again shows it again: `sets`
 -- counts them). Edit mode draws every UI component where it
--- would be, to click on
+-- would be, to click on. [KIT_UI_EMPHASIS] `appear` (fade, slide, pop) as
+-- it is shown, `on_change` pop as its text changes (pop_words: not as its
+-- numbers alone do), on the client (client_lua/ui.lua)
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -50,7 +52,8 @@ return {
 		height = "param:height", size = "param:size", color = "param:color",
 		background = "param:background", border = "param:border",
 		style = "param:style", order = "param:order",
-		clear_after = "param:clear_after"},
+		clear_after = "param:clear_after", appear = "param:appear",
+		on_change = "param:on_change"},
 	params = {
 		text = {cat = "hud", type = "string", default = "Score: {value}"},
 		anchor = {cat = "hud", type = "string", default = "top",
@@ -77,6 +80,10 @@ return {
 		shown = {cat = "hud", type = "bool", default = true},
 		clear_after = {cat = "hud", type = "number", default = 0, min = 0,
 			max = 3600},
+		appear = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "fade", "slide", "pop"}},
+		on_change = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "pop", "pop_words"}},
 	},
 	state = {
 		shown = {default = true, shared = true, param = "shown"},
@@ -111,6 +118,8 @@ return {
 			to = "Who sees a change: everyone, the player who set it off, or that player's team.",
 			shown = "Whether it is up at the start.",
 			clear_after = "Seconds each value is shown before it is cleared on the screen (0: never).",
+			appear = "How it comes up as it is shown: at once (none), fading in, sliding in or popping up.",
+			on_change = "pop: it pops as its text changes; pop_words: as its words do, not its numbers alone (a clock's tick); none: never.",
 		},
 	},
 	inputs = {value = "any", clear = "none", show = "none", hide = "none",

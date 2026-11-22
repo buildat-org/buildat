@@ -364,7 +364,11 @@ namespace interface
 //                               direction, blink_below, source, a panel's
 //                               layout, gap and ([KIT_UI_KEYS]) keyboard
 //                               ("auto", "on", "off": it goes by the
-//                               keys); x, y and the sizes in
+//                               keys); [KIT_UI_EMPHASIS] appear ("none",
+//                               "fade", "slide", "pop"; a panel's not
+//                               pop), on_change ("none", "pop",
+//                               "pop_words"), a bar's pulse_below (a
+//                               fraction); x, y and the sizes in
 //                               percent of the screen's shorter side;
 //                               prefix: its parameters' names' start, for
 //                               edit mode's drags (kit/arena's "hud_").

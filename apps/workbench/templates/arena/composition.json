@@ -7,7 +7,7 @@
 		{"id": 4, "parent": 2, "name": "spawn", "pos": [0, 1, -8], "components": [{"type": "kit/spawner", "version": 2, "params": {"players": true, "spread": 1}}]},
 		{"id": 5, "parent": 2, "name": "plaza", "pos": [0, 0.53, 0], "components": [{"type": "kit/part", "version": 1, "params": {"size": [24, 0.06, 24], "voxel": "kit/cobble", "collision": false}}]},
 		{"id": 6, "parent": 2, "name": "the pad", "pos": [0, 0.56, 3], "components": [{"type": "kit/part", "version": 1, "params": {"size": [7, 0.06, 7], "color": "#e0b030", "material": "glow", "collision": false}}]},
-		{"id": 7, "parent": 2, "name": "the arena", "pos": [-3, 1, 0], "components": [{"type": "kit/arena", "version": 3, "params": {"own_look": false, "size": [7, 3, 7], "players": 1, "max_players": 8, "countdown": 10, "duration": 180, "results": 5, "after_round": 10, "maps": "meadow, dunes", "time_up": "most", "score_to_win": 3, "late_join": "join", "join_window": 30}, "links": [{"output": "status", "to": 52, "input": "value"}, {"output": "status", "to": 90, "input": "value"}]}]},
+		{"id": 7, "parent": 2, "name": "the arena", "pos": [-3, 1, 0], "components": [{"type": "kit/arena", "version": 3, "params": {"own_look": false, "size": [7, 3, 7], "players": 1, "max_players": 8, "countdown": 10, "duration": 180, "results": 5, "after_round": 10, "maps": "meadow, dunes", "time_up": "most", "score_to_win": 3, "late_join": "join", "join_window": 30, "hud_on_change": "pop"}, "links": [{"output": "status", "to": 52, "input": "value"}, {"output": "status", "to": 90, "input": "value"}]}]},
 		{"id": 8, "parent": 2, "name": "sign: how to play", "pos": [0, 2.4, 9], "components": [{"type": "kit/sign", "version": 1, "params": {"board": [6, 1.8, 0.1], "size": 0.32, "text": "Stand on the golden pad to join the next round.|Press the other team's beacon.|Score the most points before time runs out."}}]},
 		{"id": 9, "parent": 2, "name": "sign: for the builder", "pos": [-7.2, 2.4, 9], "components": [{"type": "kit/sign", "version": 1, "params": {"board": [4.4, 1.6, 0.1], "size": 0.24, "background": "#503a20", "text": "This lobby and its two maps are yours to change.|The maps are scenes: the top bar switches scenes.|Play mode (top bar) tries it out.|{key:edit} brings you back here."}}]},
 		{"id": 10, "parent": 2, "name": "lobby's corner post", "pos": [-11, 2.5, -11], "components": [{"type": "kit/part", "version": 1, "params": {"size": [1, 4, 1], "voxel": "kit/stone"}}]},
@@ -52,7 +52,7 @@
 		{"id": 49, "parent": 14, "name": "crate", "pos": [5, 2.0, -4], "components": [{"type": "kit/part", "version": 1, "params": {"size": [2, 3, 2], "voxel": "kit/planks"}}]},
 		{"id": 50, "parent": 14, "name": "crate", "pos": [-11, 2.0, 0], "components": [{"type": "kit/part", "version": 1, "params": {"size": [2, 3, 2], "voxel": "kit/planks"}}]},
 		{"id": 51, "parent": 14, "name": "crate", "pos": [11, 2.0, 0], "components": [{"type": "kit/part", "version": 1, "params": {"size": [2, 3, 2], "voxel": "kit/planks"}}]},
-		{"id": 52, "parent": 14, "name": "the round's status", "components": [{"type": "kit/ui_text", "version": 2, "params": {"text": "{value}", "anchor": "top", "y": 2, "size": 2.2}}]},
+		{"id": 52, "parent": 14, "name": "the round's status", "components": [{"type": "kit/ui_text", "version": 2, "params": {"text": "{value}", "anchor": "top", "y": 2, "size": 2.2, "on_change": "pop_words"}}]},
 		{"id": 53, "parent": 14, "name": "the rule", "components": [{"type": "kit/ui_text", "version": 2, "params": {"anchor": "bottom", "y": 16, "size": 1.8, "text": "Press the other team's beacon. Its own team can't."}}]},
 		{"id": 54, "name": "dunes", "kind": "scene"},
 		{"id": 55, "parent": 54, "name": "the ground", "components": [{"type": "kit/terrain", "version": 2, "params": {"dig": "none", "place": "none", "generator": "flat", "surface": "voxels", "biome": "desert", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
@@ -90,7 +90,7 @@
 		{"id": 87, "parent": 54, "name": "long wall", "pos": [5, 1.5, 0], "components": [{"type": "kit/part", "version": 1, "params": {"size": [1, 2, 12], "voxel": "kit/stone"}}]},
 		{"id": 88, "parent": 54, "name": "dune block", "pos": [-11, 1, -6], "components": [{"type": "kit/part", "version": 1, "params": {"size": [3, 1, 3], "voxel": "kit/sand"}}]},
 		{"id": 89, "parent": 54, "name": "dune block", "pos": [11, 1, 6], "components": [{"type": "kit/part", "version": 1, "params": {"size": [3, 1, 3], "voxel": "kit/sand"}}]},
-		{"id": 90, "parent": 54, "name": "the round's status", "components": [{"type": "kit/ui_text", "version": 2, "params": {"text": "{value}", "anchor": "top", "y": 2, "size": 2.2}}]},
+		{"id": 90, "parent": 54, "name": "the round's status", "components": [{"type": "kit/ui_text", "version": 2, "params": {"text": "{value}", "anchor": "top", "y": 2, "size": 2.2, "on_change": "pop_words"}}]},
 		{"id": 91, "parent": 54, "name": "the rule", "components": [{"type": "kit/ui_text", "version": 2, "params": {"anchor": "bottom", "y": 16, "size": 1.8, "text": "Press the other team's beacon. Its own team can't."}}]}
 	],
 	"next_id": 92

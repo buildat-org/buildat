@@ -306,16 +306,16 @@ look = next(l for l in of(flag) if "showing look" in l)
 assert look.endswith(": color lift marker_color marker_label marker_lift marker_style own_look"), look
 # Kept: Look on the flag, All on the rules (no Look there), Look on the flag
 order = [l for l in par if ("showing look" in l and l.startswith(flag)) or l.startswith(rules)]
-assert " kit/game_rules: chips All Behaviour HUD, showing all, 42 of 42" in order[1], order[:3]
+assert " kit/game_rules: chips All Behaviour HUD, showing all, 43 of 43" in order[1], order[:3]
 assert "showing look" in order[2], order[:3]
 # 4. The bar's click over the kept Look; the own ones; All; HUD
 assert any("chips All Behaviour HUD, showing hud" in l for l in of(bar)), of(bar)
 hb = [l for l in of(rules) if "chips [hotbar]" in l]
-assert hb and "showing hotbar_*, 3 of 42: hotbar_anchor hotbar_x hotbar_y" in hb[0], hb
+assert hb and "showing hotbar_*, 3 of 43: hotbar_anchor hotbar_x hotbar_y" in hb[0], hb
 hl = [l for l in of(rules) if "chips [health]" in l]
-assert hl and re.search(r"showing health_\*, 15 of 42: health_anchor", hl[0]), hl
+assert hl and re.search(r"showing health_\*, 16 of 43: health_anchor", hl[0]), hl
 i = par.index(hb[0])
-assert "chips All Behaviour HUD, showing all, 42 of 42" in par[i + 1], par[i + 1]
+assert "chips All Behaviour HUD, showing all, 43 of 43" in par[i + 1], par[i + 1]
 assert "showing hud" in par[i + 2], par[i + 2]
 # [KIT_LOBBY] The tool panel at the right, the frame the room left of it;
 # its parameters the selected element's (Kit's own too)
@@ -328,7 +328,7 @@ shows = [l.split("the HUD panel shows ")[1] for l in lines if "the HUD panel sho
 assert "own:hotbar" in shows and "own:health" in shows, shows
 ph = [l.split("parameters: ")[1] for l in lines if "the HUD panel's parameters: " in l]
 assert "hotbar_anchor hotbar_x hotbar_y" in ph, ph
-assert any(p.startswith("anchor background blink_below border color") and "source" not in p for p in ph), ph
+assert any(p.startswith("anchor appear background blink_below border color") and "source" not in p for p in ph), ph
 # The order of the clicks: on nothing in the frame the selection let go, on
 # the element taken again; out by the views dropdown
 ev = [l for l in lines if re.search(r"the HUD panel shows|the HUD panel closed|the view is |own:hotbar dragged|selected Kit's own", l)]

@@ -9,7 +9,9 @@
 -- the fill's, `background` and `border` each a colour with alpha or "none";
 -- `blink_below` a fraction of the range under which it blinks (0 off);
 -- `source` "health": the player's own kit/health instead of signals (Kit's
--- health bar, kit/game_rules' show_health, gives way to one up)
+-- health bar, kit/game_rules' show_health, gives way to one up).
+-- [KIT_UI_EMPHASIS] `appear` and `on_change` (its value) as kit/ui_text's;
+-- `pulse_below` a fraction under which it pulses (0 off)
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -44,7 +46,8 @@ return {
 		border = "param:border", style = "param:style", form = "param:form",
 		direction = "param:direction", size = "param:size",
 		blink_below = "param:blink_below", order = "param:order",
-		source = "param:source"},
+		source = "param:source", appear = "param:appear",
+		on_change = "param:on_change", pulse_below = "param:pulse_below"},
 	params = {
 		label = {cat = "hud", type = "string", default = "{value}"},
 		min = {type = "number", default = 0, min = -1000000, max = 1000000},
@@ -78,6 +81,12 @@ return {
 		border = {cat = "hud", type = "string", default = "#808080a0"},
 		blink_below = {cat = "hud", type = "number", default = 0, min = 0,
 			max = 1},
+		pulse_below = {cat = "hud", type = "number", default = 0, min = 0,
+			max = 1},
+		appear = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "fade", "slide", "pop"}},
+		on_change = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "pop"}},
 		order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
 		to = {type = "string", default = "everyone",
@@ -117,6 +126,9 @@ return {
 			background = "The background's colour, as #rrggbbaa, or none.",
 			border = "The border's colour, as #rrggbbaa, or none.",
 			blink_below = "Blinks under this fraction of its range (0: never).",
+			pulse_below = "Pulses, swelling and dimming softly, under this fraction of its range (0: never).",
+			appear = "How it comes up as it is shown: at once (none), fading in, sliding in or popping up.",
+			on_change = "pop: it pops as its value changes; none: never.",
 			order = "Drawn over what it overlaps with a lower order.",
 			to = "Who sees a change: everyone, the player who set it off, or that player's team.",
 			shown = "Whether it is up at the start.",
