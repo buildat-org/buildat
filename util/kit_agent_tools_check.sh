@@ -40,7 +40,9 @@
 #   6. get_goal_warnings' level lines: default names, a scene with no way
 #      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
 #      wholly in front of a side view's clip, placed and moved there: in the
-#      answers and a line;
+#      answers and a line; [KIT_LINK_DROPPED] a counter linked into a
+#      kit/ui_text's value, its text with no {value}: in the link's answer,
+#      get_goal_warnings and a text edit's, none with {value:int};
 #   7. get_history: the edits by who, limit, since (11);
 #   8. restore_checkpoint puts a heightmap's samples back (4z26): kitboss
 #      raises a sample after a checkpoint, the restore lowers it, the
@@ -773,6 +775,21 @@ elif phase == "goals":
     w = json.loads(call("get_goal_warnings"))
     assert any(l.startswith("scene attic: 1 entities " + CLIP) and
         l.endswith(": %d" % P1) for l in w), w
+    # [KIT_LINK_DROPPED] a value linked into a text with no {value}: the
+    # link's answer, the text edit's, get_goal_warnings; none with {value:int}
+    UT = placed(call("place", {"type": "kit/ui_text", "pos": [0, 0, 0],
+        "params": {"text": "Lives"}}))
+    C = placed(call("place", {"type": "kit/counter", "pos": [4, 1, 0]}))
+    DROP = "entity %d takes value, but its text has no {value} (kit/ui_text, linked from %d)" % (UT, C)
+    r = call("link", {"id": C, "output": "changed", "to": UT, "input": "value"})
+    assert DROP in r, r
+    assert any(l.startswith(DROP) for l in json.loads(call("get_goal_warnings"))), DROP
+    r = call("set_param", {"id": UT, "param": "text", "value": "Lives {value:int}"})
+    assert "takes value" not in r, r
+    assert not any("takes value" in l for l in json.loads(call("get_goal_warnings")))
+    r = call("set_param", {"id": UT, "param": "text", "value": "Lives"})
+    assert DROP in r, r
+    call("undo")
 elif phase == "history":
     rpc("initialize", init)
     h = json.loads(call("get_history"))
