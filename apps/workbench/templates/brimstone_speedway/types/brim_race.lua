@@ -21,8 +21,9 @@
 -- showing the places so far (`result`, then the lobby's over); `time_out`
 -- seconds after the winner the rest are out (DNF). Who picks Race while
 -- one is on waits for the next.
--- Laps: every checkpoint (local/brim_checkpoint, linked to checkpoint: its
--- value its order) passed in order opens the lap on the car's body
+-- Laps: every checkpoint (kit/checkpoint, its passed linked to checkpoint:
+-- its value its order; a pass out of order it does not send) passed in
+-- order opens the lap on the car's body
 -- (c:body_var lap_open, [KIT_BODY_VARS]); the car's own step then counts
 -- the finish line as a lap (its event lap, linked here) on the server and
 -- in its prediction alike, and this closes it again.
@@ -30,13 +31,13 @@
 -- value the kind) arms the car with a gun (6 shots ahead), mines (3, dropped
 -- behind: copies of the entity `mine`) or a ram boost (2.5 s, faster; a hit
 -- on a car then hurts it); the fire key (its action "fire", Left Ctrl by
--- default; the left mouse button too: brim_race.client.lua) uses it: a
+-- default; the left mouse button too: the action's mouse = "left") uses it: a
 -- press counts up the car's body var fire, and the car's step says fire with
 -- its heading (linked to fire here). Damage is Kit's
 -- health (c:hurt; kit/game_rules not peaceful, its respawn on_signal): at 0
 -- a wreck (on_died: an explosion, fire, debris, a scorch mark: a copy of
--- `scorch`), then 2 s later back on the road at the last checkpoint passed
--- (its own teleport) with full health.
+-- `scorch`), then 2 s later (each wreck its own wait) back on the road at
+-- the last checkpoint passed (its respawn) with full health.
 -- The announcer (`announce`, to a kit/ui_text for everyone) calls the start,
 -- the leader, the wrecks and the finish.
 -- (4z37i) go, to each racer at GO (a trial's at its own): the run's song
@@ -272,6 +273,11 @@ local function enter(c, by)
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
 	c:body_var(by, "wreck", nil)
+	-- (the checkpoints' progress: one reset does all, they share it)
+	local cps = c.linked_in.checkpoint or {}
+	if cps[1] then
+		c:send(cps[1], "reset", nil, by)
+	end
 	-- (the car's client part clears the tyre marks on a new run)
 	r.run = (r.run or 0) + 1
 	c:body_var(by, "run", r.run)
@@ -427,14 +433,15 @@ local function lap_done(c, by, r, record)
 end
 
 -- Back on the road where they wrecked: full health (the game rules'
--- respawn is on_signal: c:respawn_waiting(), the "wrecked" timer's), at the
--- last checkpoint passed (the grid's slot before any)
+-- respawn is on_signal: c:respawn_waiting(by), the "wrecked" timer's), at
+-- the last checkpoint passed (each one told: theirs puts them there; the
+-- grid's slot before any)
 local function back(c, by, r)
 	r.wrecked = nil
 	c:body_var(by, "wreck", nil)
 	if (r.last or 0) > 0 then
 		for _, id in ipairs(c.linked_in.checkpoint or {}) do
-			c:send(id, "respawn", r.last, by)
+			c:send(id, "respawn", nil, by)
 		end
 	else
 		c:teleport(slot(c, r.slot or 1), {yaw = c.yaw or 0})
@@ -632,15 +639,12 @@ return {
 			show(c, by, r)
 			return
 		elseif name == "wrecked" then
-			-- simplified: c:respawn_waiting() puts every wrecked car back,
-			-- so one wrecked a moment after another waits less than 2 s;
-			-- a respawn per player in Kit would make each wait its own.
-			-- (each back as that player: a run by them, for the teleport)
-			c:respawn_waiting()
-			for by, r in pairs(c.state.runs) do
-				if r.wrecked then
-					c:send(c.id, "back", nil, by)
-				end
+			-- That car alone back (as its player: a run by them, for the
+			-- teleport)
+			local by = tostring(player)
+			c:respawn_waiting(by)
+			if view(c, by).wrecked then
+				c:send(c.id, "back", nil, by)
 			end
 			return
 		elseif name == "trial" then

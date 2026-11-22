@@ -160,7 +160,7 @@ server c:propose_move | (g)
 server c:random | (seed)
 server c:region_at | (pos)
 server c:remove | (id)
-server c:respawn_waiting | ()
+server c:respawn_waiting | (player)
 server c:send | (id, input, value, by)
 server c:session_end | (id, result)
 server c:session_move | (player, id)
@@ -649,6 +649,14 @@ type kit/car param suspension | {"default": 60, "kind": "number", "max": 1000, "
 type kit/car param top_speed | {"default": 22, "kind": "number", "max": 150, "min": 0}
 type kit/car input steer | number
 type kit/car input throttle | number
+type kit/checkpoint | version 1
+type kit/checkpoint handlers | on_enter on_input
+type kit/checkpoint param order | {"default": 1, "kind": "number", "max": 64, "min": 1}
+type kit/checkpoint param size | {"default": [12, 3, 2], "kind": "position"}
+type kit/checkpoint input reset | none
+type kit/checkpoint input respawn | none
+type kit/checkpoint output passed | number
+type kit/checkpoint state last | per_player
 type kit/chest | version 1
 type kit/chest handlers | on_start on_use
 type kit/chest param items | {"default": "", "kind": "string"}

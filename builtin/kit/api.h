@@ -1865,7 +1865,10 @@ namespace interface
 // their health's hp at its max, through the spawn kits; "on_signal": the
 // player waits, their health's state "waiting" true (shared), until a
 // c:respawn_waiting() -- game_rules' input `respawn` -- puts every
-// waiting player of the round back so. A waiting player does nothing:
+// waiting player of the round back so; [KIT_RACE_PIECES]
+// c:respawn_waiting(player) (an id, "player:<id>" or "bot:<id>"; 16 a
+// run) that one alone, if waiting (each wreck its own wait: Brimstone's
+// race). A waiting player does nothing:
 // Kit refuses their hit, shot, draw, reload, use, item use, hold,
 // inventory move and action presses, and allows() everything but
 // "enter" ("Waiting to respawn": no dig, place or damage); the server
@@ -2014,6 +2017,18 @@ namespace interface
 // them: the run's outputs start and stop the stopwatch, its elapsed (or
 // lap) goes to the records' time and back to the run, the records' best
 // back to the run for its result card.
+// [KIT_RACE_PIECES] kit/checkpoint (its file says how): an unseen gate of a
+// course, `order` its place (1, 2...), its zone `size` cells from its own
+// along its own axes turned by its yaw (x across, z the way through: a
+// gate across a road its heading's). Each player's last one passed (its
+// per_player state `last`) is the scene's: Kit copies a run's change of it
+// to every kit/checkpoint there (one course a scene). A pass counts in
+// order, the one after the last or 1 at any time (the next lap, a fresh
+// start); out of order (3 before 2) it does nothing. A counted pass sends
+// "passed" (its order, by the player); "respawn" (by a player or bot, sent
+// to each checkpoint) puts them at the middle of their last one facing its
+// yaw; "reset" clears that player's progress, everyone's from no player.
+// Laps are the course's own: Brimstone's brim_race counts them.
 //
 // **The World** ([KIT] stage 4e; terrain.h says how it is made): one
 // game-wide kit/terrain on the app root, its parameters the choices -- the

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-18)
-# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/types/controls.lua util/kit_racer_drive.py builtin/kit/client_lua/music.lua builtin/kit/types/mute_button.prefab.json builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
+# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/types/controls.lua util/kit_racer_drive.py builtin/kit/client_lua/music.lua builtin/kit/types/mute_button.prefab.json builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp builtin/kit/types/checkpoint.lua
 # [KIT_TOP_DOWN] (7), (8) The Brimstone Speedway template (a top-down racer:
 # local/brim_car in kit/controls' plane horizontal, its race, checkpoints,
 # crates and mines) on Workbench; one server, kitboss (the admin) and kitbob
@@ -19,6 +19,9 @@
 #   2. (8) bodies colliding: kitbob drives from his slot through the middle
 #      of kitboss's standing car: kitboss pushed a metre or more
 #      (the server's steps; his own client corrected) (push.png);
+#   2b. [KIT_RACE_PIECES] each wreck its own wait: kitbob wrecked on the
+#      grid (the builder's Try), kitboss a second later: kitbob back alone
+#      after his 2 s, kitboss after his own (c:respawn_waiting(by));
 #   3. the race: kitboss round first, a handbrake drift into the bend
 #      after checkpoint 1 (turned through it, never spun, then straight
 #      again: drift.png; the slide itself util/kit_racer_sim_check.lua's), the crate's mines
@@ -27,7 +30,8 @@
 #      he aims; dropped at the crates he came on it 6 m out of that bend
 #      and missed, 0a7l), kitbob after him onto it: the
 #      mine's blast, his wreck (kit/health's death: the effects, a scorch
-#      mark, wreck.png), back on the road at checkpoint 2 two seconds later;
+#      mark, wreck.png), back on the road at checkpoint 2 two seconds later
+#      (kit/checkpoint's respawn), kitboss driving on meanwhile;
 #      kitboss 1st, kitbob 2nd, the race over; the result card (result.png);
 #   4. the time trial (its own scene): kitboss over the line at the start
 #      with no checkpoint passed: no lap (the car's step meets the line with
@@ -40,7 +44,9 @@
 #   (4z37h) The pause menu (Escape) in a run: Retry and To lobby to kitboss
 #   alone on the grid, To lobby alone with kitbob there too, neither in the
 #   lobby; in the trial Retry starts it again, To lobby takes him to the
-#   lobby. The joins and the runs' starts not running the Bone Yard's
+#   lobby. [KIT_RACE_PIECES] Before that To lobby, kitboss put into the
+#   checkpoints 2, 1, 3, 2 in turn (walk_here): 1 and 2 counted, the others
+#   out of order not. The joins and the runs' starts not running the Bone Yard's
 #   generator (its output kept in the composition); in that output, the
 #   east straight's two bends' run-off joined, no wall stub between.
 #   [MUSIC_SYNTH] The music (kit/music, played by jam): the lobby's song
@@ -62,7 +68,7 @@
 #      chase_west.png), a right drag not turning it.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lobby_sound.png, $t/grid.png, $t/push.png,
 # $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png,
-# $t/chase_east.png, $t/chase_west.png
+# $t/chase_east.png, $t/chase_west.png, $t/checkpoint.png
 #   util/kit_racer_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -89,6 +95,9 @@ print("RACE=%d TRIAL=%d CRATE=%d CONTROLS=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1],
       [e["id"] for e in d["entities"] if any(c["type"] == "kit/controls"
        for c in e.get("components", []))][0]))
+# [KIT_RACE_PIECES] the trial's checkpoint 1 (linked to its race)
+print("CP1=%d" % [e["id"] for e in d["entities"] if e.get("name") == "checkpoint 1" and
+      e["components"][0]["links"][0]["to"] == find("the race", "trial")[0]][0])
 # (4z37h) Two bends' run-off on one side close together joined: on the
 # east straight between corners 7 and 8 (x 95, both 5 m) the outside wall
 # out at 6 + 5 m all along, none at the road's edge (6 m)
@@ -273,7 +282,7 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Brimstone Speedway"'
 step 120 "kit editor: edit mode on" "frames 3" 'click Button "Create"'
 for re in "The template's type local/brim_car \([0-9]+ bytes\)" "The template's type local/brim_race " \
-		"The template's type local/brim_checkpoint " "The template's type local/brim_mine "; do
+		"The template's type local/brim_mine "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 n=0
@@ -401,6 +410,53 @@ assert d > 1, d
 print("ok: kitbob drove into kitboss's standing car: pushed %.1f m (the server's steps, his client corrected %d times)" % (d, c1 - c0))
 PY
 
+# 2b. [KIT_RACE_PIECES] Each wreck its own wait (c:respawn_waiting(by)): on
+# the grid, kitbob wrecked (rams: the race's input, the builder's Try as
+# him on himself, 6 of his 20 hit points each, one in 0.5 s at most),
+# kitboss a second later (his first three rams beside kitbob's); kitbob
+# back alone 2 s after his wreck (no checkpoint passed yet: at his grid
+# slot), kitboss still waiting then, back 2 s after his own
+BOSS_ID=$(grep -aoP 'kit: this player is entity \K[0-9]+' "$t/boss.log" | tail -1)
+BOB_ID=$(grep -aoP 'kit: this player is entity \K[0-9]+' "$t/bob.log" | tail -1)
+ram() # <name> <entity id>
+{
+	cmd "event kit_edit {\"op\": \"try\", \"id\": $RACE, \"input\": \"ram\", \"value\": \"player:$2\", \"as\": \"$1\"}"
+}
+as boss
+# (a Try is the tools': on for it, nothing of the play reset)
+step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+m=$(mark "$SL")
+for i in 1 2 3; do
+	ram kitbob "$BOB_ID"
+	ram kitboss "$BOSS_ID"
+	cmd "delay 700"
+done
+ram kitbob "$BOB_ID"
+await "$SL" "$m" 5 "local/brim_race $RACE: kitbob wrecked by ram"
+cmd "delay 1000"
+ram kitboss "$BOSS_ID"
+await "$SL" "$m" 5 "local/brim_race $RACE: kitboss wrecked by ram"
+await "$SL" "$m" 5 "local/brim_race $RACE: kitboss back on the road at checkpoint 0"
+step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
+python3 -I - "$SL" "$m" "$RACE" "$BOB_ID" "$BOSS_ID" <<'PY' || fail "the wrecks' waits ($SL)"
+import re, sys
+L = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace").splitlines()
+race, bob, boss = sys.argv[3:6]
+def at(text):
+    l = next(l for l in L if text in l)
+    h, m, s = re.search(r"(\d+):(\d+):([\d.]+) ", l).groups()
+    return int(h) * 3600 + int(m) * 60 + float(s)
+w = {n: at("local/brim_race %s: %s wrecked by ram" % (race, n)) for n in ("kitbob", "kitboss")}
+b = {n: at("local/brim_race %s: %s back on the road at checkpoint 0" % (race, n)) for n in ("kitbob", "kitboss")}
+k = {i: at("respawns waiting player %s: back" % i) for i in (bob, boss)}
+assert w["kitbob"] + 0.5 < w["kitboss"] < b["kitbob"] < b["kitboss"], (w, b)
+for n in w:
+    assert 1.8 < b[n] - w[n] < 3.5, (n, w, b)
+assert k[bob] <= b["kitbob"] + 0.2 and k[boss] > b["kitbob"], (k, b)
+print("ok: each wreck its own wait: kitbob back %.1f s after his, kitboss (wrecked %.1f s after him) %.1f s after his own" %
+      (b["kitbob"] - w["kitbob"], w["kitboss"] - w["kitbob"], b["kitboss"] - w["kitboss"]))
+PY
+
 # 3. The race: kitboss round, the mines dropped; kitbob after him onto one
 as boss
 m=$(mark "$SL")
@@ -416,8 +472,8 @@ as boss
 await "$SL" "$m" 60 "local/brim_race $RACE: kitboss drops a mine"
 # (kitbob's driver aims at its zone's middle: a lap's line is a metre or two
 # off another's. The zone is 2x2 cells from the place's, cells round whole
-# numbers (brim_checkpoint's middle()): the middle is the place floored plus
-# a half)
+# numbers (as kit/checkpoint's middle() has an unturned one): the middle is
+# the place floored plus a half)
 tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss drops a mine [0-9]+ at \K-?[0-9.]+ -?[0-9.]+' | head -1 |
 	awk '{ printf "%.2f,%.2f", int($1 + 1000) - 999.5, int($2 + 1000) - 999.5 }' > "$t/mine_at.tmp" &&
 	mv "$t/mine_at.tmp" "$t/mine_at"
@@ -426,6 +482,11 @@ await "$SL" "$m" 2 "local/brim_race $RACE: kitbob wrecked by mine"
 printf "%s\n" "frames 5" "screenshot $t/wreck.png" >&4 # (kitbob's view)
 await "$SL" "$m" 2 "Entity $RACE made a copy of entity:[0-9]+"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob back on the road at checkpoint 2"
+# [KIT_RACE_PIECES] put there by checkpoint 2 (his last: kit/checkpoint's
+# respawn), kitboss driving on meanwhile (not put anywhere)
+await "$SL" "$m" 2 "kit/checkpoint [0-9]+: kitbob back at 2"
+! tail -c +$((m + 1)) "$SL" | grep -aqE "local/brim_race $RACE: kitboss (wrecked|back on the road)" ||
+	fail "kitboss wrecked or put back in kitbob's wreck ($SL)"
 wait $DB || fail "kitboss's driver: $(tail -2 "$t/drive_boss.log")"
 cp "$t/drive_boss.log" "$t/drive_boss_race.log" # (the trial's drive writes over it)
 # The drift: within 3 s of the handbrake, turned over 60 degrees (a 90 degree
@@ -581,6 +642,30 @@ step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+# [KIT_RACE_PIECES] A checkpoint out of order does not count: kitboss put
+# (walk_here) into checkpoint 2 first (his last none: the run's start reset
+# it, his earlier trial's 3 gone): not passed; then 1: passed; 3: not; 2:
+# passed. The trial's run told 1 and 2 alone
+step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+for e in "71.5 54.5 kitboss passed 2 out of order: the last 0" "61.5 -0.5 kitboss passed 1$" \
+		"-100.5 -39.5 kitboss passed 3 out of order: the last 1" "71.5 54.5 kitboss passed 2$"; do
+	set -- $e
+	x=$1 z=$2
+	shift 2
+	m=$(mark "$SL")
+	cmd "event kit_edit {\"op\": \"walk_here\", \"pos\": [$x, 0.6, $z]}"
+	await "$SL" "$m" 5 "kit/checkpoint [0-9]+: $*"
+done
+step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
+python3 -I - "$SL" "$m" "$TRIAL" <<'PY' || fail "the trial's checkpoints out of order ($SL)"
+import sys
+s = open(sys.argv[1], "rb").read().decode(errors="replace")
+s = s[s.rindex("local/brim_race %s: kitboss starts a time trial" % sys.argv[3]):]
+got = [l.split("kitboss ", 1)[1] for l in s.splitlines()
+       if "local/brim_race %s: kitboss passed checkpoint" % sys.argv[3] in l]
+assert got == ["passed checkpoint 1 of 3", "passed checkpoint 2 of 3"], got
+print("ok: checkpoints out of order not counted: 2, then 1, 3, 2 passed: the run told %s" % ", ".join(got))
+PY
 pause_open "Retry, To lobby"
 step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "To lobby"'
 pause_items "Continue" "Retry|To lobby"
@@ -602,6 +687,10 @@ echo "ok: the joins and the runs' starts did not run the Bone Yard's generator"
 # once straight), a right drag not turning it
 mc=$(mark "$CL")
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
+# [KIT_RACE_PIECES] (for a look: the checkpoints in the editor, checkpoint 1
+# selected, its zone across the road; checkpoint.png)
+cmd "event kit_plan 61.5 -0.5 40 5" "event kit_select $CP1"
+step 10 "Wrote screenshot $t/checkpoint.png" "frames 20" "screenshot $t/checkpoint.png"
 for e in 'camera "chase"' 'chase_follow 0.3'; do
 	set -- $e
 	step 10 "entities, [0-9]+ to undo" "event kit_edit {\"op\": \"set\", \"id\": $CONTROLS, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"
@@ -651,5 +740,5 @@ echo "ok: Brimstone with camera chase and chase_follow 0.3: $t/chase_east.png, $
 cmd "quit"
 as bob
 cmd "quit"
-echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a handbrake drift, a trial's lap only over every checkpoint with no correction, the top speed approached slowly, the car's smoke, dust and marks, a chase camera behind the car by two params; screenshots $t/lobby.png $t/grid.png $t/push.png $t/drift.png $t/wreck.png $t/result.png $t/track.png $t/trial.png $t/chase_east.png $t/chase_west.png"
+echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), each wreck its own wait, kitboss's mine and kitbob's wreck and respawn at the checkpoint, checkpoints out of order not counted, the places by who finished first, a handbrake drift, a trial's lap only over every checkpoint with no correction, the top speed approached slowly, the car's smoke, dust and marks, a chase camera behind the car by two params; screenshots $t/lobby.png $t/grid.png $t/push.png $t/drift.png $t/wreck.png $t/result.png $t/track.png $t/trial.png $t/chase_east.png $t/chase_west.png $t/checkpoint.png"
 # vim: set noet ts=4 sw=4:
