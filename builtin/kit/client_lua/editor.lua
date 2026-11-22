@@ -1899,6 +1899,9 @@ function NT.items(w)
 		for _, n in ipairs(groups[g] or {}) do
 			local r = row(w)
 			local b = button(r, M.shown(n), function()
+				if NT.screen_over() then
+					return
+				end
 				-- (a drag into the world was not a click)
 				if S.palette_dragged then
 					S.palette_dragged = nil
@@ -2477,6 +2480,10 @@ function NT.components(w)
 			local b
 			local function make(r)
 			b = button(r, it.label, function()
+				-- [UI_MODAL_DIM_LEFT] not under the pause menu's shade
+				if NT.screen_over() then
+					return
+				end
 				-- A click: armed, or no longer (a drag was not a click)
 				if S.palette_dragged then
 					S.palette_dragged = nil

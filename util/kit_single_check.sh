@@ -6,10 +6,11 @@
 # [KIT_SINGLE] (kit_plan 4z37z) A type with single = true, one a holder
 # (the app root, a scene), on Workbench's server of Brimstone Speedway
 # (scenes world and trial; kit/game_rules 3 and kit/controls 4 on the
-# root), a second kit/game_rules (1331) put on the root in its file;
+# root), a second kit/game_rules (the template's next id) put on the root
+# in its file;
 # kitboss (the admin) on a headless weston's Xwayland of the check's own
 # (its clipboard carries the agent token):
-#   1. The load warns of the saved duplicate, 1331 named ignored.
+#   1. The load warns of the saved duplicate, its id named ignored.
 #   2. By MCP: kit/controls on the root refused naming 4; on world's own
 #      (on "scene") placed, the root's and the scene's both; a second
 #      there refused naming it. kit/environment on world (a game of two
@@ -28,10 +29,13 @@
 #      was eaten before). (0a84) The click that closes the pause menu is
 #      not the view's too; a plain ui_utils dialog over the editor (event
 #      message_dialog) has a click beside it and its own Escape (the pause
-#      menu opened over it).
+#      menu opened over it). (4z37zzb) A click on a palette button under
+#      the pause menu does not open the palette's menu.
 #   5. (0a84) The launcher (-a app/workbench/play, a local server): a tap
 #      on the start's stripes does not cancel it, one beside the boot list
-#      does not leave the server, one off the pause menu leaves it closed
+#      does not leave the server, one beside the name screen with a name
+#      typed leaves it up and the name kept (4z37zzb), one off the pause
+#      menu leaves it closed
 #      (TAP_BACK's Escape opened it again), one beside a dialog over the
 #      editor closes it and is not the view's.
 # Screenshots, kept with KEEP_TMP=1: $t/selected.png (the inspector on it),
@@ -109,7 +113,7 @@ clip() # the clipboard once it holds a token
 # before single = true)
 mkdir -p "$t/tpl" "$t/user/shared"
 cp -r "$here/apps/workbench/templates/brimstone_speedway/." "$t/tpl/"
-python3 -I - "$t/tpl/composition.json" <<'PY' || fail "the template's duplicate"
+python3 -I - "$t/tpl/composition.json" > "$t/dup_id" <<'PY' || fail "the duplicate"
 import json, sys
 p = sys.argv[1]
 c = json.load(open(p))
@@ -122,6 +126,7 @@ c["next_id"] += 1
 json.dump(c, open(p, "w"), indent=1)
 print(dup["id"])
 PY
+dup=$(cat "$t/dup_id")
 (cd "$t/tpl" && zip -qrX "$t/user/shared/brim.zip" .) || fail "the template not zipped"
 SL=$t/server.log
 BUILDAT_WORKBENCH_PROJECT=brim BUILDAT_WORKBENCH_FROM=$t/user/shared/brim.zip \
@@ -132,7 +137,7 @@ SRV=$SERVER_PID
 CHECK_PIDS+=($SRV)
 wait_for_log "$SL" "workbench: .*brim" 120 || true
 # 1. The saved duplicate warned
-wait_for_log "$SL" "the app root has kit/game_rules 3 and 1331: one on the app root, that ignored" 30 ||
+wait_for_log "$SL" "the app root has kit/game_rules 3 and $dup: one on the app root, that ignored" 30 ||
 	fail "no warning of the second kit/game_rules ($SL)"
 
 url() { echo "http://localhost:$SERVER_PORT/api/v1/mcp"; }
@@ -344,6 +349,15 @@ step 10 "show_message_dialog: closed" "frames 3" "keypress Escape"
 shot eaten3
 tail -c +$((m + 1)) "$CL" | grep -aq "pause: the menu shown" &&
 	fail "Escape on the dialog opened the pause menu ($CL)"
+# 4z37zzb: a click on a palette button under the pause menu is not the
+# palette's (it opened the palette's menu over the pause menu)
+cmd "$(pal_find kit/environment)"
+menu
+m=$(mark "$CL")
+cmd "frames 3" 'click Button "kit/environment"'
+shot eaten4
+tail -c +$((m + 1)) "$CL" | grep -aq "kit editor: the palette's menu of" &&
+	fail "a click on a palette button under the pause menu opened its menu ($CL)"
 cmd "quit"
 exec 3>&-
 wait $CLIENT
@@ -380,7 +394,17 @@ step 10 "scan boot: done" "frames 3" "${TAP[@]}" "frames 5" "event scan boot"
 tail -c +$((m + 1)) "$CL" | grep -aq 'scan boot: menu ".*world menu: worlds"' ||
 	fail "a tap beside the boot list left it ($CL)"
 step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
+# 4z37zzb: a tap beside the name screen with a name typed leaves it up and
+# the name as typed (it went back to the list, the name lost)
+m=$(mark "$CL")
+step 10 "scan boot: done" "frames 3" "text tapkept" "frames 3" "${TAP[@]}" \
+	"frames 5" "event scan boot"
+tail -c +$((m + 1)) "$CL" | grep -aq 'scan boot: menu ".*world menu: new world"' ||
+	fail "a tap beside the name screen left it ($CL)"
+m=$(mark "$CL")
 step 120 "kit editor: in session" "frames 3" 'click Button "Create"'
+tail -c +$((m + 1)) "$CL" | grep -aq "world_menu: create .*tapkept" ||
+	fail "the typed name lost after a tap beside the name screen ($CL)"
 step 10 "pause: the menu shown" "frames 10" "keypress Escape"
 m=$(mark "$CL")
 step 10 "pause: a click off the menu" "frames 3" "${TAP[@]}"
@@ -400,4 +424,4 @@ cmd "quit"
 exec 3>&-
 wait $CLIENT
 CLIENT=
-echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it; a click off the pause menu or a dialog is eaten, the dialog's Escape its own; on the launcher a tap does not cancel the start nor leave the boot list, and the pause menu stays closed after one off it"
+echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it; a click off the pause menu or a dialog is eaten, the dialog's Escape its own; on the launcher a tap does not cancel the start nor leave the boot list, and the pause menu stays closed after one off it; a palette button under the pause menu and a tap beside the name screen with a name typed do nothing"
