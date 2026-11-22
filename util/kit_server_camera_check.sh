@@ -23,7 +23,8 @@
 #      ([KIT_AGENT_FEEDBACK_1117]; its idle CPU printed); unused for
 #      BUILDAT_CAMERA_IDLE_S (10 here) it stops, its process gone;
 #   5. play: play_join refused while Stopped; start; play_join (the camera
-#      started again); a trigger zone placed ahead; play_input walks into
+#      started again; [KIT_AGENT_PLAY_TEXTS] each answer held till it is
+#      in, or "Still starting" after 7 s); a trigger zone placed ahead; play_input walks into
 #      it: the zone's "entered" among the events, the body moved, a picture
 #      at the end; play_leave;
 #   6. the server stopped: its camera gone with it;
@@ -365,9 +366,9 @@ elif phase == "play":
         if not r["isError"]:
             break
         print("  play_join ->", text[:200], "(%.1f s)" % took)
-        assert "is starting" in text or "on its way" in text, text
+        # [KIT_AGENT_PLAY_TEXTS] held while it starts or moves: in, or this
+        assert text.startswith("Still starting after 7 s: ") and took > 7, text
         assert time.time() - t0 < 150, "the camera not in in 150 s"
-        time.sleep(0.5)
     print("  play_join ->", text[:300])
     body = json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
     assert body["name"] == "kitboss's agent", body

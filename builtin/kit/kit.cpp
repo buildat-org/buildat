@@ -34890,11 +34890,12 @@ struct Module: public interface::Module, public Interface
 				"by the scene's spawner of players (kit/spawner with players: "
 				"true) as a joining player would be, else at the scene's spawn. "
 				"If you already play in another scene, the body moves to yours. "
-				"The round must be Running (start). The first call may answer "
-				"that the camera is starting or on its way: call again. One "
-				"agent plays at a time. Its answer names the body's by "
-				"(\"player:<id>\"): the key of per_player state, not the body's "
-				"name.",
+				"The round must be Running (start). Its answer waits while the "
+				"camera starts or goes to your scene, up to 7 s, then says "
+				"\"Still starting\" (an error): call again. One agent plays at "
+				"a time. Its answer names the body's by (\"player:<id>\"): the "
+				"key of per_player state, not the body's name; and its screen's "
+				"buttons and texts, as play_input's.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"play_input", "play_input", "Sends your body's input for a time, "
 				"as a player's client sends it (keys predicted and all): keys "
@@ -34906,7 +34907,10 @@ struct Module: public interface::Module, public Interface
 				"moved, its components' states (health, score, inventory...), "
 				"alive, its by and its vars (c:body_var's), and the outputs "
 				"entities emitted meanwhile (by \"you\" when your body did it), "
-				"the screen's buttons (id, label; a list's rows); picture: also "
+				"the screen's buttons (id, label; a list's rows) and texts (each "
+				"UI text up for your body, as its client shows it, {value} "
+				"filled: id, text, kind but for a kit/ui_text; the picture draws "
+				"no UI); picture: also "
 				"a picture of its own view at the end (width, height). press: a "
 				"button on your body's screen pressed first, as a click on it (a "
 				"kit/ui_button, a pause menu item, a kit/ui_scene_list's row: "
@@ -38080,6 +38084,8 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		if(!m_play.id.empty() && now > m_play.deadline)
 			play_finish("its input had not ended in time");
+		if(m_hold.agent)
+			play_retry();
 		camera_pace(m_cam.ready && m_cam.play.empty() && !camera_busy() &&
 				now - m_cam.used > 2000000);
 		if(!m_cam.running || now - m_cam.checked < 1000000)
@@ -38262,6 +38268,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value b = screen_buttons(p);
 		if(b.size())
 			r.set("buttons", b);
+		const json::Value tx = screen_texts(p);
+		if(tx.size())
+			r.set("texts", tx);
 		return r;
 	}
 
@@ -38318,6 +38327,165 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		return r;
+	}
+
+	// [KIT_AGENT_PLAY_TEXTS] A text as a player's client draws it (ui.lua's
+	// shown_text): {value}, {value:time}, {value:time1}, {value:int} (a
+	// kit/stopwatch's running value counted on), | a new line, {key:<action>}
+	// a game action's key. simplified: {key:} of Kit's own actions (forward,
+	// jump, use...) and a player's own bindings are left as written: the
+	// keys are the client's
+	ss_ shown_text(ss_ s, const json::Value &value)
+	{
+		auto replace = [&](const ss_ &what, const std::function<ss_()> &with){
+			for(size_t at = s.find(what); at != ss_::npos; at = s.find(what, at)){
+				const ss_ w = with();
+				s.replace(at, what.size(), w);
+				at += w.size();
+			}
+		};
+		auto fmt = [](const char *f, double a, double b = 0){
+			char buf[64];
+			snprintf(buf, sizeof buf, f, a, b);
+			return ss_(buf);
+		};
+		ss_ v;
+		double n = 0;
+		bool has_n = false;
+		if(value.is_object() && value.get("since").is_number()){
+			n = std::floor(std::max(0.0, motion_t() - value.get("since").as_number()) *
+					10) / 10;
+			has_n = true;
+			v = fmt("%.1f", n);
+		} else if(value.is_string()){
+			v = value.as_string();
+		} else if(value.is_number()){
+			v = fmt("%.14g", value.as_number());
+		} else if(value.is_boolean()){
+			v = value.is_true() ? "true" : "false";
+		} else if(value.is_object() || value.is_array()){
+			v = value.stringify();
+		}
+		if(!has_n && !v.empty()){
+			char *end = nullptr;
+			n = strtod(v.c_str(), &end);
+			while(end && isspace((unsigned char)*end))
+				end++;
+			has_n = end && !*end && std::isfinite(n);
+		}
+		v = v.substr(0, 200);
+		replace("{value:time}", [&]{
+			if(!has_n)
+				return v;
+			const double t = std::max(0.0, std::floor(n + 0.5));
+			return fmt("%.0f:%02.0f", std::floor(t / 60), std::fmod(t, 60));
+		});
+		replace("{value:time1}", [&]{
+			if(!has_n && !v.empty())
+				return v;
+			const double t = std::max(0.0, std::floor((has_n ? n : 0) * 10 + 0.5) /
+					10), m = std::floor(t / 60);
+			return m > 0 ? fmt("%.0f:%04.1f", m, t - m * 60) : fmt("%.1f", t);
+		});
+		replace("{value:int}", [&]{
+			return has_n ? fmt("%.0f", n) : v.empty() ? ss_("0") : v;
+		});
+		replace("{value}", [&]{ return v; });
+		std::replace(s.begin(), s.end(), '|', '\n');
+		for(size_t at = s.find("{key:"); at != ss_::npos; at = s.find("{key:", at + 1)){
+			const size_t end = s.find('}', at);
+			if(end == ss_::npos)
+				break;
+			const ss_ name = s.substr(at + 5, end - at - 5);
+			ss_ key;
+			for(auto &x : m_entities)
+				for(const Instance &in : x.second.comps)
+					for(const json::Value &a : actions_of(in))
+						if(key.empty() && jstr(a, "name") == name)
+							key = jstr(a, "key");
+			if(!key.empty())
+				s.replace(at, end - at + 1, key);
+		}
+		return s;
+	}
+
+	// [KIT_AGENT_PLAY_TEXTS] The texts on a player's screen beside its
+	// buttons (screen_buttons()): each UI element up for them in their scene
+	// or the root's but a button or a pause menu item, its text (a
+	// kit/ui_text's, a bar's label, a panel's title...) as their client
+	// shows it, their own value (to "player", "team") over everyone's;
+	// [{id, name, kind (but "text"), text, clear_after, when_holding}], 30
+	// at most. A full screen up (a lobby): its own alone, as the client
+	// hides the rest. simplified: a clear_after's clearing and a goal's
+	// when_holding are the client's (said, not applied); kit/ui_chat's lines
+	// and a player list's rows not listed
+	json::Value screen_texts(const Peer &pe)
+	{
+		json::Value r = json::array();
+		sv_<uint64_t> full;
+		sv_<sv_<uint64_t>> in_panels;
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			if(!e.kind.empty() || r.size() >= 30)
+				continue;
+			for(const Instance &in : e.comps){
+				const json::Value &d = m_types[in.type].decl.get("ui");
+				if(!d.is_object())
+					continue;
+				const json::Value u = look_of(in, d);
+				const ss_ kind = jstr(u, "kind");
+				ss_ scene;
+				scene_of(e, &scene);
+				if(kind == "button" || kind == "menu" || (scene != pe.scene &&
+						!root_ui(e)) || !ui_visible(e.id, pe.player))
+					break;
+				if(kind == "panel" && jstr(u, "screen") == "full")
+					full.push_back(e.id);
+				json::Value value = in.state.get("value");
+				const json::Value &owns = in.state.get("own");
+				const json::Value &own = owns.is_object() ? owns.get("player:"+
+						itos(pe.player)) : json::Value();
+				if(own.is_object() && !own.get("value").is_undefined() &&
+						!own.get("value").is_null())
+					value = own.get("value");
+				auto pi = m_entities.find(pe.player);
+				if(jstr(u, "source") == "health" && pi != m_entities.end())
+					for(const Instance &pin : pi->second.comps)
+						if(m_types[pin.type].health && pin.state.get("hp").is_number())
+							value = pin.state.get("hp");
+				const ss_ text = shown_text(jstr(u, "text"), value);
+				if(text.empty())
+					break;
+				json::Value o = json::object();
+				o.set("id", (int64_t)e.id);
+				if(!e.name.empty())
+					o.set("name", e.name);
+				if(kind != "text")
+					o.set("kind", kind);
+				o.set("text", cut_utf8(text, 200));
+				if(row_num(u, "clear_after") > 0)
+					o.set("clear_after", row_num(u, "clear_after"));
+				if(!jstr(u, "holding").empty())
+					o.set("when_holding", jstr(u, "holding"));
+				sv_<uint64_t> chain(1, e.id);
+				for(uint64_t pid = panel_of(e); pid && chain.size() < 9;){
+					chain.push_back(pid);
+					auto pi = m_entities.find(pid);
+					pid = pi != m_entities.end() ? panel_of(pi->second) : 0;
+				}
+				in_panels.push_back(chain);
+				r.append(o);
+				break;
+			}
+		}
+		if(full.empty())
+			return r;
+		json::Value only = json::array();
+		for(unsigned i = 0; i < r.size(); i++)
+			if(std::find(in_panels[i].begin(), in_panels[i].end(), full[0]) !=
+					in_panels[i].end())
+				only.append(r.at(i));
+		return only;
 	}
 
 	// play_input's press: the button (and the list's row, from 1) on the
@@ -38385,6 +38553,71 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
+	// [KIT_AGENT_PLAY_TEXTS] play_join held while the camera starts or goes
+	// to the agent's scene (its answer later, as a publish's: m_mcp_defer),
+	// tried again each tick (play_retry()) and answered once it plays, or
+	// after CAMERA_CALL_US "Still starting" (an error: call again); the
+	// scene the body left said in the answer. The other play ops need no
+	// hold: play_input and play_leave have a body only once the camera is in
+	struct PlayHold
+	{
+		size_t agent = 0;
+		ss_ moved, why;
+	};
+	PlayHold m_hold; // agent 0: none
+
+	ss_ play_hold(size_t peer, const ss_ &moved, const ss_ &why, bool &failed)
+	{
+		if(m_hold.agent != peer || !m_mcp_waits.count(peer))
+			m_hold = PlayHold();
+		m_hold.agent = peer;
+		if(!moved.empty())
+			m_hold.moved = moved;
+		m_hold.why = (m_hold.moved.empty() ? ss_() : "Your body left the scene "+
+				m_hold.moved+". ")+"Still starting after "+
+				itos(CAMERA_CALL_US / 1000000)+" s: "+why;
+		m_mcp_defer = peer;
+		m_mcp_late = m_hold.why;
+		auto w = m_mcp_waits.find(peer);
+		if(w != m_mcp_waits.end())
+			w->second.late = m_hold.why;
+		failed = false;
+		return "";
+	}
+
+	void play_retry()
+	{
+		const size_t peer = m_hold.agent;
+		auto w = m_mcp_waits.find(peer);
+		if(!peer || w == m_mcp_waits.end()){
+			m_hold = PlayHold();
+			return;
+		}
+		if(interface::os::time_us() - w->second.since > CAMERA_CALL_US){
+			const ss_ why = m_hold.why;
+			m_hold = PlayHold();
+			log_i(MODULE, "play_join held: %s", cs(why));
+			return mcp_answer(peer, why, true);
+		}
+		SessionScope sc(*this, session_of_peer(peer));
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end()){
+			m_hold = PlayHold();
+			return mcp_answer(peer, "Your agent's peer is gone", true);
+		}
+		bool failed = true;
+		m_mcp_defer = 0;
+		const ss_ text = agent_play("play_join", pi->second, peer, json::object(),
+				failed);
+		const bool held = m_mcp_defer == peer;
+		m_mcp_defer = 0;
+		m_mcp_late.clear();
+		if(held)
+			return;
+		m_hold = PlayHold();
+		mcp_answer(peer, text, failed);
+	}
+
 	ss_ agent_play(const ss_ &op, Peer &p, size_t peer, const json::Value &a,
 			bool &failed)
 	{
@@ -38413,20 +38646,27 @@ struct Module: public interface::Module, public Interface
 			return "The round is Ended in your session (Stopped): nothing plays. "
 					"start runs it; then "+op;
 		}
+		// (a body is the camera's while it is in: none to play, none started)
+		if(op != "play_join" && m_cam.play != account)
+			return "You play no body: play_join first";
+		if(m_hold.agent && m_hold.agent != peer && m_mcp_waits.count(m_hold.agent))
+			return "The server's camera is starting for another agent's play_join: "
+					"one at a time";
 		const ss_ why = camera_start();
 		if(!why.empty())
 			return "The server's camera cannot play: "+why;
 		const int64_t now = interface::os::time_us();
 		if(!m_cam.ready)
-			return m_cam.running ? "The server's camera is starting ("+
-					itos((now - m_cam.started) / 1000000)+" s so far): call "+op+
-					" again in a few seconds" : "The server's camera could not "
-					"start: "+m_cam.failed;
+			return m_cam.running ? play_hold(peer, "", "the server's camera is "
+					"starting (its first start loads the game's files): call "
+					"play_join again in a few seconds", failed) :
+					"The server's camera could not start: "+m_cam.failed;
 		const size_t cam = m_cam.peer;
 		if(op == "play_join"){
 			// [KIT_SIDE_SCENERY] (5) Your body in another scene (or session)
 			// than the one you edit: it leaves, and joins yours as below
-			ss_ moved;
+			ss_ moved = m_hold.agent == peer && m_mcp_waits.count(peer) ?
+					m_hold.moved : "";
 			if(m_cam.play == account){
 				const json::Value b = play_body();
 				if(jstr(b, "scene") == p.scene && session_of_peer(cam) == sid)
@@ -38439,9 +38679,8 @@ struct Module: public interface::Module, public Interface
 			w.scene = p.scene;
 			scene_spawn(p.scene, w.at[0], w.at[1], w.at[2]);
 			if(!camera_place(w))
-				return (moved.empty() ? ss_() : "Your body left the scene "+
-						moved+". ")+"The server's camera is on its way to your "
-						"scene: call play_join again in a second";
+				return play_hold(peer, moved, "the server's camera is on its way to "
+						"your scene: call play_join again in a second", failed);
 			double x = w.at[0], y = w.at[1], z = w.at[2], look = 0;
 			{
 				SessionScope sc(*this, sid);
@@ -38695,7 +38934,16 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "The server's camera played: %s", cs(text.substr(0, 300)));
 		if(!w.picture || !m_cam.peer || !m_mcp_waits.count(w.agent))
 			return mcp_answer(w.agent, text, false);
-		// Its own view at the end
+		// Its own view at the end. simplified: [KIT_AGENT_PLAY_TEXTS] the world
+		// alone, no UI (the answer's texts and buttons say what is up): the
+		// camera's UI is laid out for its 320x240 window (a 1440x1080 root at
+		// scale 0.22: texts at their 8-pixel floor, twice a screen's size),
+		// so a renderui pass into the picture (at the window's size, or
+		// scaled) would show another layout than a player's.
+		// The upgrade: the UI root laid out at the picture's size for its
+		// frame (UI::SetCustomSize, which the sandbox does not offer, as it
+		// keeps UI.scale read-only for the trust overlay: a trusted hook in
+		// the client's C++ for the camera), then renderui in its path
 		std::random_device rd;
 		char id[24];
 		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
