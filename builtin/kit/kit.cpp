@@ -114,8 +114,10 @@ static const size_t MAX_LOCAL_TYPES = 64, MAX_LOCAL_SOURCE = 64 << 10,
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
 // [KIT_PLANE] stage 3: kit/polygon's points at most (its edit, 18 bytes a point
-// written to the 1/16, within the 4096-byte edit packet)
-static const size_t MAX_POLYGON_POINTS = 128;
+// written to the 1/16, a set's packet: MAX_SET_PACKET). [KIT_POLYGON_POINTS] 512:
+// a skyline in one piece (its crossing check about 1 ms; a step's queries look at
+// runs of its edges, move.lua's CHUNK)
+static const size_t MAX_POLYGON_POINTS = 512;
 // [KIT_SIDE_SCENERY] its points' reach from its place each way (512 wide: a
 // skyline or a ridge in one piece); the other looks keep MAX_EXTENT
 static const int MAX_POLYGON_EXTENT = 256;
@@ -4956,7 +4958,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_PLANE] stage 3: kit/polygon's outline ("points": [[x, y]...] in its own x
 	// and y): "" when it is a simple polygon of 3...MAX_POLYGON_POINTS points within
 	// MAX_POLYGON_EXTENT of its place ([KIT_SIDE_SCENERY]), else what it should
-	// be. Every pair of edges is checked (128 points: 8128 pairs).
+	// be. Every pair of edges is checked (512 points: 130816 pairs, about 1 ms).
 	// [KIT_GENERATORS] (4z37f) a parameter's `values` = {{name, min, max,
 	// default}...}: a point's further numbers after its x and y, in that
 	// order (a track's corner's radius), each within its min and max
@@ -26565,6 +26567,20 @@ struct Module: public interface::Module, public Interface
 				const double lr = look_reach(look);
 				if(near[0] > lr || near[1] > lr || near[2] > lr)
 					continue;
+				// [KIT_POLYGON_POINTS] a polygon no step meets (move.lua's
+				// look_poly) left out, its points (up to 512) no text for the box
+				// each step: neither solid nor a floor, or its depth along z and
+				// that out of reach (a backdrop behind the side view's plane)
+				if(jstr(look, "shape") == "polygon" && look.get("when").is_undefined() &&
+						!links.size()){
+					if(!look.get("solid").is_true() && !look.get("floor").is_true())
+						break;
+					double ax[3] = {0, 0, 1};
+					wq.apply(ax);
+					if(std::fabs(ax[2]) >= 1 - 1e-9 &&
+							near[2] > num(look, "depth", 1, 0.02, 64) / 2)
+						break;
+				}
 				const ss_ key = jstr(look, "state");
 				const bool on = !key.empty() && in.state.get(key).is_true();
 				o += "{";
@@ -44158,12 +44174,14 @@ struct Module: public interface::Module, public Interface
 	void on_edit_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
-		// ([KIT_AGENT_VISUALS] comments' are longer, [JAM_EDITOR] a set's too)
+		// ([KIT_AGENT_VISUALS] comments' are longer, [JAM_EDITOR] a set's too,
+		// [KIT_POLYGON_POINTS] and a place's: a polygon drawn of 512 points)
 		json::Value j = packet.data.size() <= MAX_SET_PACKET ?
 				json::load_string(packet.data.c_str()) : json::null();
 		if(packet.data.size() > MAX_EDIT_PACKET && !(j.is_object() &&
 				((jstr(j, "op") == "comments" && packet.data.size() <=
-				MAX_COMMENTS_PACKET) || jstr(j, "op") == "set")))
+				MAX_COMMENTS_PACKET) || jstr(j, "op") == "set" ||
+				jstr(j, "op") == "place")))
 			j = json::null();
 		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
 		m_edit_op = op;

@@ -29,7 +29,7 @@
 #      (kit/controls' side_clip 3 shows the tree): D walks up the slope
 #      through the tree and the hill (not met) and stops under the overhang
 #      (x 22.05, y 4.5, z 1), few corrections; the side view's screenshot.
-#      Crossing edges and 129 points refused.
+#      Crossing edges and 513 points refused.
 #   7. The Front view on a 1/4 grid: a concave polygon of 5 points drawn by
 #      clicks and closed on its first; the server's points are the clicked
 #      ones less its place (z 1); its second point dragged: a set of the
@@ -68,9 +68,12 @@
 #      collision row marked none; what is under a layer drawn where
 #      authored in edit mode. (MCP and get_view:
 #      util/kit_get_view_check.sh.)
+#  13. A fifth session: [KIT_POLYGON_POINTS] a skyline of 512 points wearing
+#      kit/grass placed (a packet past 4096 bytes), drawn with its bands; the
+#      body walks into a tower's wall, few corrections, no step too slow.
 # The screenshots (side, front, side_ortho, side_polygons, front_polygon,
 # side_wide, front_wide, front_far_end, grass_one, grass_two,
-# grass_materials, touch_front, side_sky, par_front, par_side)
+# grass_materials, touch_front, side_sky, par_front, par_side, sky_side)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
@@ -223,13 +226,13 @@ EOF
 	poly 21.5 5.25 5 '[[-11.5, -4.75], [-5.5, 1.75], [-0.5, -0.25], [5.5, 4.75], [11.5, -4.75]]' '"color": "#56648a", "depth": 2'
 	set_p 3 ortho false
 	set_p 3 side_clip 3
-	# Shapes refused: edges crossing, 129 points
-	many=$(for i in $(seq 0 128); do printf '[%d, %d],' $((i % 30)) $((i / 30)); done)
+	# Shapes refused: edges crossing, 513 points
+	many=$(for i in $(seq 0 512); do printf '[%d, %d],' $((i % 30)) $((i / 30)); done)
 	cat <<EOF
 event kit_edit {"op": "place", "type": "kit/polygon", "pos": [0, 4, 1], "params": {"points": [[0, 0], [3, 2], [3, 0], [0, 1]]}}
 wait_log 10000 a polygon whose edges do not cross (edges 1 and 3 meet)
 event kit_edit {"op": "set", "id": 6, "comp": 0, "param": "points", "value": [${many%,}]}
-wait_log 10000 a polygon: 3 to 128 points
+wait_log 10000 a polygon: 3 to 512 points
 keypress F6
 wait_log 10000 kit editor: edit mode off
 wait_log_any 10000 a polygon of 9 points
@@ -633,6 +636,39 @@ EOF
 run_client 60 "$t/par.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
 	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/par.cmds" ||
 	fail "the parallax client failed ($t/par.log, $t/srv.log)"
+# 13. [KIT_POLYGON_POINTS] A skyline of 512 points (util/kit_plane_check.lua's,
+# placed at 0, 40: towers 2 wide, 2 apart, on a base), wearing kit/grass: its
+# place's packet past the 4096 bytes of other edits; the body put in the gap at x
+# 10...12 walks D into the tower's wall (x 12)
+sky=$(awk 'BEGIN { printf "[[-255, -4], [-85, -4.5], [85, -4.5], [255, -4]"
+	for (k = 0; k < 127; k++) { x = 254 - 4 * k; h = 2 + (k * 37 % 23) / 2
+		printf ", [%d, 0.5], [%d, %g], [%d, %g], [%d, 0.5]", x, x, h, x - 2, h, x - 2 }
+	print "]" }')
+cat > "$t/sky.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+event kit_edit {"op": "place", "type": "kit/polygon", "pos": [0, 40, 1], "params": {"points": $sky, "voxel": "kit/grass"}}
+wait_log_any 10000 a polygon of 512 points
+event kit_edit {"op": "walk_here", "pos": [10.6, 40.6, 1]}
+wait_log 10000 the server put the player at (10.6
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+event kit_body
+keydown D
+delay 900
+keyup D
+frames 30
+event kit_body
+screenshot $t/sky_side.png
+quit
+EOF
+run_client 60 "$t/sky.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/sky.cmds" ||
+	fail "the skyline client failed ($t/sky.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log s=$t/srv.log
@@ -707,7 +743,7 @@ paste <(echo "$got") <(echo "$moved") | awk 'NR != 3 && NR != 4 && $1 != $2 { ba
 	(NR == 3 || NR == 4) && $1 != $2 { m = 1 } END { exit bad || !m }' ||
 	fail "not point 2 alone moved: $(echo $got) -> $(echo $moved)"
 echo "ok: a polygon drawn in the Front view, its points [$(echo $got)] at $at in the server's state; point 2 dragged: [$(echo $moved)]"
-echo "ok: a polygon's crossing edges and 129 points refused"
+echo "ok: a polygon's crossing edges and 513 points refused"
 # [KIT_POLYGON_ROW] The inspector's points row: from 3D to the Front view
 # round the drawn polygon (its points' box, about where it was placed)
 shown=$(grep -aoP 'kit editor: polygon 10 in the Front view at \K\S+' "$c")
@@ -848,5 +884,18 @@ near "$(awk -v d="$d" -v a="$a" -v c="$c" 'BEGIN { print (d - a) - 0.5 * (c + 20
 	fail "perspective: $C5 not half the camera's way from the layer (x -20): $(par $C5 4)"
 cops "$(par $CR 3)" || fail "perspective, repeat 8: no copy one period over: $(par $CR 3)"
 echo "ok: perspective: follow 0.5 at $d (authored $a, the camera $c), repeat 8: $(par $CR 3)"
+# 13. The skyline of 512 points: drawn textured with its top bands, the body
+# stopped at the tower's wall (x 12 less its 0.45) on the gap's floor (40.5),
+# few corrections, no step too slow
+k=$t/sky.log
+drawn=$(grep -aoP 'kit: entity [0-9]+ drawn .*a polygon of 512 points, \K[0-9]+ triangles, textured, [0-9]+ triangles in its top band' "$k")
+[ -n "$drawn" ] || fail "the skyline of 512 points not drawn textured with its bands ($k)"
+read -r sx1 sy1 sz1 sa1 sc1 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$k" | sed -n 1p)")"
+read -r sx2 sy2 sz2 sa2 sc2 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$k" | sed -n 2p)")"
+awk -v x="$sx2" -v y="$sy2" 'BEGIN { exit !(x > 11.5 && x < 11.6 && y > 40.48 && y < 40.52) }' &&
+	[ "$sz2" = 1.00 ] && [ $((sc2 - sc1)) -le 2 ] ||
+	fail "not stopped at the skyline's tower (11.55, 40.5): $sx1,$sy1 -> $sx2,$sy2,$sz2, $((sc2 - sc1)) corrections ($k)"
+! grep -aq "too slow" "$s" || fail "a step too slow: $(grep -a "too slow" "$s" | head -1)"
+echo "ok: a skyline of 512 points placed (a packet past 4096 bytes), drawn ($drawn), the body walked $sx1 -> $sx2 into its tower's wall ($((sc2 - sc1)) corrections), no step too slow"
 echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua); the ortho side view's sky, clipped scenery told, a creature held to the plane; kit/parallax's follow, repeat and never met, the editor's where authored"
 # vim: set noet ts=4 sw=4:

@@ -730,7 +730,7 @@ namespace interface
 //   (jam1; get_guide topic music), "" none, a parse error refused with its
 //   line; the inspector's own section (the text, Play/Stop, the moods).
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
-//   128 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
+//   512 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
 //   nor touching, its area not 0; any winding), edited in a side game's 2D
 //   view, not the inspector (kit/polygon's).
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
