@@ -110,7 +110,7 @@ echo "$sug" | grep -Eq '^https://ntfy.sh/buildat-[0-9a-f]{32}$' ||
 	fail "the moderator's suggestion: '$sug' ($t/mod1.log)"
 hearth mod modpass1234 "$t/mod2.log" 'wait_log_any 30000 note=Sent\nquit\n' \
 	BUILDAT_HEARTH_NTFY="$(printf 'set http://127.0.0.1:1/mod\nset %s/mod\ntest' "$N")"
-grep -aq "note=An https:// address" "$t/mod2.log" || fail "http:// not refused ($t/mod2.log)"
+grep -aqE "note=(An|Enter an) https:// address" "$t/mod2.log" || fail "http:// not refused ($t/mod2.log)"
 grep -aq "note=Saved" "$t/mod2.log" || fail "not saved ($t/mod2.log)"
 grep -aq "note=Sent" "$t/mod2.log" || fail "the test not sent ($t/mod2.log)"
 echo "ok: the moderator asked with a fresh topic; http:// refused, https saved, Test sent"
