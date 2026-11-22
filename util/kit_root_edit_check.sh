@@ -246,7 +246,7 @@ if phase == "build":
     # scene's own; on "root" the app root's
     r = call("place", {"type": "kit/environment", "pos": [0, 0, 0]})
     EV = placed(r)
-    assert "on the scene moon (this scene's own environment;" in r, r
+    assert "on the scene moon (this scene's own environment:" in r, r
     assert EV in {e["id"] for e in state(scene="moon")["entities"]}, EV
     r = call("place", {"type": "kit/environment", "pos": [0, 0, 0], "on": "root"})
     ER = placed(r)
