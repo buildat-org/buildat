@@ -90,23 +90,13 @@ local function clamp(x, lo, hi)
 	return x < lo and lo or x > hi and hi or x
 end
 
--- x^0.3 and x^0.4 for x >= 1 (the box has no pow; sqrt is exact on every
--- side). simplified: x^0.3125 and x^0.375, the nearest sums of halvings
-local function pow03(x)
-	local q = math.sqrt(math.sqrt(x))
-	return q * math.sqrt(math.sqrt(q))
-end
-local function pow04(x)
-	local q = math.sqrt(math.sqrt(x))
-	return q * math.sqrt(q)
-end
-
--- EDGM's outer wheel: past 0.17 pi turned less
+-- EDGM's outer wheel: past 0.17 pi turned less (math.pow: the same bits on
+-- every side, as a movement's math is)
 local OUTER = 0.17 * PI
 local function outer(a)
 	local m = a < 0 and -a or a
 	if m > OUTER then
-		m = pow04(m / OUTER) * OUTER
+		m = math.pow(m / OUTER, 0.4) * OUTER
 	end
 	return a < 0 and -m or m
 end
@@ -335,7 +325,7 @@ return {
 		local good = smax
 		local fs = vf < 0 and -vf or vf
 		if fs > 1.5 then
-			good = good / pow03(fs / 1.5)
+			good = good / math.pow(fs / 1.5, 0.3)
 		end
 		local want = 0
 		if vf > 0 then

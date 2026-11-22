@@ -64,23 +64,21 @@ local function spring(s, wh, lx, AY, ca, sa, dt, K, D)
 	s.av = s.av - (ox * fy - oy * fx) / IC * dt
 end
 
--- A wheel against the world: out of what it is in, its speed into it gone,
--- its tyre gripping (the friction a share of the push); true and whether a
+-- A wheel against the world: out of what it is in, its speed into it gone
+-- (w:resolve_circle, a tenth bounced), its tyre gripping each surface it
+-- was pushed out of (the friction a share of the push); true and whether a
 -- finish line is among what it met
 local function ground(wh, w, R)
-	local touched, finish = false, false
-	for k, h in ipairs(w:circle(wh[1], wh[2], R)) do
-		if k > 3 then
-			break
-		end
-		local nx, ny = h.nx, h.ny
-		wh[1], wh[2] = wh[1] + nx * h.depth, wh[2] + ny * h.depth
-		local vn = wh[3] * nx + wh[4] * ny
-		if vn < 0 then
-			wh[3], wh[4] = wh[3] - nx * vn * 1.1, wh[4] - ny * vn * 1.1
+	local hits
+	wh[1], wh[2], wh[3], wh[4], hits = w:resolve_circle(wh[1], wh[2], R, wh[3],
+		wh[4], 0.1, 0)
+	local finish = false
+	for _, h in ipairs(hits) do
+		local vn = h.vn
+		if vn and vn < 0 then
 			-- Along the surface (t, the way a forward turn rolls it): the
 			-- tyre's speed and the wheel's met halfway, within the grip
-			local tx, ty = ny, -nx
+			local tx, ty = h.ny, -h.nx
 			local slip = wh[3] * tx + wh[4] * ty - wh[5]
 			local j = slip / 2
 			local lim = (h.info and h.info.friction or 1) * -vn * 1.5
@@ -88,10 +86,9 @@ local function ground(wh, w, R)
 			wh[3], wh[4] = wh[3] - tx * j, wh[4] - ty * j
 			wh[5] = wh[5] + j
 		end
-		touched = true
 		finish = finish or (h.info and h.info.surface == "finish")
 	end
-	return touched, finish
+	return #hits > 0, finish
 end
 
 return {

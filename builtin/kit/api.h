@@ -417,10 +417,22 @@ namespace interface
 //                               "pressed", "released" or "held" (every
 //                               0.1 s of game time between, value the
 //                               seconds held). 16 actions in a world at
-//                               most (the first found)
+//                               most (the first found).
+//                               [KIT_SMALL_PIECES] mouse = "left",
+//                               "right" or "middle": that button does it
+//                               too, as the left click does Kit's use
+//                               (the keys page shows it beside the key;
+//                               not rebound): a race's fire
+//   client_params = {"name", ...}
+//                            -- ([KIT_SMALL_PIECES]) its parameters whose
+//                               values its client part reads (e.params,
+//                               in the entity's show: sent as an edit
+//                               changes them, play's c:set_param not;
+//                               32 at most). Opt-in: the others never
+//                               leave the server (a puzzle's answer)
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
 //   on_timer(c, name, player), on_enter(c, by), on_leave(c, by),
-//   on_join(c, by),
+//   on_join(c, by), on_away(c, by) ([KIT_SMALL_PIECES]; below),
 //   [KIT_API_1] (finding 16) on_give(c, by) (kit/starting_kit's: a starting
 //   kit for the player by, at a round's start, and where its `when`
 //   parameter is "spawn" at each respawn too; each instance in the
@@ -726,7 +738,9 @@ namespace interface
 //   [KIT_CLIENT_REACT] (3) **What a client part reaches**: its handlers'
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
-//   client's log only); `local kit = require("buildat/module/kit")`,
+//   client's log only; [KIT_SMALL_PIECES] e.params: the values of the
+//   parameters its type names in `client_params`, below, {} with none);
+//   `local kit = require("buildat/module/kit")`,
 //   [KIT_API_1] these 16 names of the client's Kit and no others (another
 //   is nil; module.lua's, controls.lua's and input.lua's heads say more):
 //   kit.pointed(origin, dir, reach) and kit.use(id), kit.body_state() this
@@ -841,7 +855,12 @@ namespace interface
 //   left out, {id, name, types = {type...}, pos = {x, y, z} (the world's;
 //   none without a place), yaw}: to avoid or decorate hand-placed ones;
 //   c.move_lib: move.lua's library (the clients' kit.move_lib; not
-//   c:move), to check what it builds. An error() refuses
+//   c:move), to check what it builds. [KIT_SMALL_PIECES] c:random(seed)
+//   (any handler's; not experimental): a seeded generator, g:next() 0...1
+//   (never 1) and g:int(a, b) a whole number a...b (a, b whole, a <= b),
+//   the same numbers from the same seed on every server and build (Lehmer's
+//   16807 on the seed's whole part; math.random is seeded by the clock): a
+//   layout from the generator's seed parameter (brim_yard's junk). An error() refuses
 //   the run (the edit with it), its text the reason. Run again on demand:
 //   the edit op {"op": "build", "id", "comp", "params"} (the editor's Run,
 //   MCP run_generator): params set first, then built whether they changed
@@ -1182,7 +1201,21 @@ namespace interface
 //   their client's prediction ("kit:controls"' parameters) alike. Until
 //   another call, Stop, or their body's going (they leave, another
 //   session). 64 a run. A movement's step gets the factor as i.speed
-//   ([KIT_MOVE_DRAW]).
+//   ([KIT_MOVE_DRAW]). [KIT_SMALL_PIECES] The two apart: Kit scales the
+//   body's own movement's `speed` parameter by the factor before the step
+//   sees p (a walker's pace: its step needs nothing more), and passes the
+//   factor itself as i.speed, which is the step's to use for the rest (a
+//   bike's motor and brakes, a car's engine; 0 a freeze: brim_car holds
+//   itself still at i.speed 0, as the race's grid does). A seat's movement
+//   is the vehicle's own: its p unscaled (a steered vehicle's i.speed 1, a
+//   seated player's step theirs); a driving bot's i.speed its own factor.
+//   [KIT_SMALL_PIECES] A hazard that must react at once (spikes, a pit's
+//   edge, ice) is the movement's step's to meet: a surface it reads (w:circle's
+//   and w:under's info.surface, a kit/polygon's `surface` parameter), the
+//   same on the server and in the client's prediction. A zone's on_enter
+//   (a kit/trigger_zone) is the server's alone: the client learns of it a
+//   round trip late and rewinds. crag_bike's head and finish line are so;
+//   its spikes would be.
 //   [KIT_BODY_VARS] c:body_var(player, key, value[, opts]): a player it reaches
 //   (an id or a by, as c:speed's), on an app with Kit's controls: their
 //   body's state has s.vars[key] = value from then on (nil clears), which
@@ -1241,7 +1274,15 @@ namespace interface
 // round's start and each time the app places them in its scene anew
 // (set_peer: the first time, or as another name; [KIT_SCENE_PACKAGES] one
 // with no position on the root: in any scene, each scene they come into
-// too); on_enter/on_leave as a
+// too); [KIT_SMALL_PIECES] on_away(c, by), a `reads_players` type's only,
+// on_join's counterpart: once as a placed player leaves the scene it is in
+// (gone from the game, to another scene or session, logged in as another
+// name), the player's c.players entry then as it is after (here false when
+// gone, else the scene they went to); one with no position on the root has
+// it for each scene they leave, as on_join for each they come into, so a
+// scene change there is on_away then on_join (p.here tells a leave of the
+// game). A round that polled c.players for p.away or not p.here in a tick
+// reacts here instead. on_enter/on_leave as a
 // player's position (the cell it rounds to) comes into or leaves its zone
 // ([KIT_ZONE_SHAPES] or its body's spheres or box: as zone's, above).
 //

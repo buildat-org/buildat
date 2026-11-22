@@ -382,7 +382,8 @@ assert a < 1.5 and abs((b - a) - (tb - ta)) < 0.3, (ta, a, tb, b)
 print("ok: the music: none before GO; the race's song from GO at %.2f s on kitboss's, %.2f s on kitbob's %.2f s later" % (a, b, tb - ta))
 PY
 mgo=$(mark "$CL")
-# The fire key's mouse button (the race's client part): a press of the action
+# The fire key's mouse button (the action's mouse = "left", [KIT_SMALL_PIECES]:
+# Kit's input.lua, no client part of the race's): a press of the action
 m=$(mark "$SL")
 step 5 "kit: action fire pressed" "mouse_down left" "frames 3" "mouse_up left"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss presses fire"

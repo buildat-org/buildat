@@ -23,7 +23,10 @@ local function env()
 		table = table, string = string, error = error}
 end
 local MV = load_env("builtin/kit/client_lua/move.lua", env())
-local car = load_env("apps/workbench/templates/brimstone_speedway/types/brim_car.lua", env())
+-- (with move.lua's math, as both sides run a movement: its math.pow)
+local car_env = env()
+car_env.math = MV.math
+local car = load_env("apps/workbench/templates/brimstone_speedway/types/brim_car.lua", car_env)
 
 -- The track's ground: a kit/polygon floor lying flat (pitch 90), surface dirt
 local FLOOR = MV.look_poly({shape = "polygon", depth = 0.05, solid = false,
@@ -190,6 +193,13 @@ end
 function gc:child(t) kids[#kids + 1] = t return #kids end
 function gc:link() end
 function gc:log() end
+-- (box.c's c:random, [KIT_SMALL_PIECES])
+function gc:random(seed)
+	local s = math.floor(tonumber(seed) or 0) % 2147483646 + 1
+	local function nxt() s = s * 16807 % 2147483647 return (s - 1) / 2147483646 end
+	return {next = function() return nxt() end,
+		int = function(_, a, b) return a + math.floor(nxt() * (b - a + 1)) end}
+end
 yard.on_build(gc)
 local polys, path = {}, nil
 for _, k in ipairs(kids) do

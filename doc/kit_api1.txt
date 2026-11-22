@@ -75,12 +75,14 @@ move math.atan
 move math.atan2
 move math.ceil
 move math.cos
+move math.exp
 move math.floor
 move math.fmod
 move math.huge
 move math.max
 move math.min
 move math.pi
+move math.pow
 move math.sin
 move math.sqrt
 reserved ext.kit_*
@@ -155,6 +157,7 @@ server c:name | (by)
 server c:nearest | (ty)
 server c:params_of | (t)
 server c:propose_move | (g)
+server c:random | (seed)
 server c:region_at | (pos)
 server c:remove | (id)
 server c:respawn_waiting | (player)
@@ -234,6 +237,7 @@ server handler inventory_take
 server handler migrate
 server handler modify_hit
 server handler on_action
+server handler on_away
 server handler on_blast
 server handler on_build | [experimental]
 server handler on_daytime
@@ -290,6 +294,7 @@ server type_field between_plays
 server type_field bot
 server type_field builds
 server type_field children
+server type_field client_params
 server type_field component
 server type_field container
 server type_field controls
@@ -350,6 +355,7 @@ client e.id
 client e.look
 client e.mine
 client e.node
+client e.params
 client e.state
 client e.swing
 client e.you
@@ -450,6 +456,7 @@ move w:pose_at | (t) [internal]
 move w:pushed | (pos, b) [internal]
 move w:ray | (ox, oy, oz, dx, dy, dz, len, no_ground)
 move w:ray_objects | (ox, oy, oz, dx, dy, dz, len, skip) [internal]
+move w:resolve_circle | (x, y, r, vx, vy, e, mu, z)
 move w:segment | (x0, y0, x1, y1, z)
 move w:shed | (x, y, z, r, h, moved) [internal]
 move w:slide | (b, dx, dz) [internal]
