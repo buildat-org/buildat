@@ -503,10 +503,13 @@ namespace interface
 // [KIT_TEMPLATE_CLEANUP] c:teleport(nil, {entity = id}) onto a spawner of
 // players with no yaw given: facing its way, as a join there),
 // c:set_param(id, type,
-// param, value) ([KIT_VEHICLE_MOVEMENTS] a parameter of a component on an
+// param, value, opts) ([KIT_VEHICLE_MOVEMENTS] a parameter of a component on an
 // entity it reaches, until Stop, checked as an edit's, the row keeping its
 // own; a movement's take it at its next step: an engine upgrade, wind, fuel;
-// 64 a run), c:log(...) (the
+// 64 a run; [KIT_PLAYER_PARAMS] value nil: play's value gone, the row's
+// again; read by the movements, the players' kit/controls and bodies'
+// movement and a UI type's `ui` "param:" fields, below; opts {player =
+// by}: that player's own, below), c:log(...) (the
 // server's log and the entity's own, which the inspector shows),
 // c:app(what, value) ([KIT] stage 6a; the app's own types only: the event
 // kit:app, AppCall, its native code's to do; 8 a run). A
@@ -2028,6 +2031,32 @@ namespace interface
 // them: the run's outputs start and stop the stopwatch, its elapsed (or
 // lap) goes to the records' time and back to the run, the records' best
 // back to the run for its result card.
+// [KIT_PLAYER_PARAMS] c:set_param(id, type, param, value, {player = by}) (by
+// "player:<id>" or a player's entity id; a player it reaches; not a bot):
+// that player's own value of the parameter (nil: theirs gone), over the
+// row's and play's for everyone, for them alone, wherever Kit reads the
+// parameter for a player: their kit/controls (the nearest copy's: camera,
+// camera_frame, distance, offset_*, fov..., their camera alone, sent to
+// their client alone in "kit:controls"; not `plane`, one a scene: refused),
+// their body's movement (its nearest copy's p, kit/walker's gravity: the
+// server's steps and their client's prediction alike, their body put
+// afresh where it is as the value changes, so prediction does not correct),
+// a seat's movement while they hold it, and a UI type's `ui` fields that
+// are "param:<name>" (kit/ui_bar's width and height from their stats:
+// their client gets "kit:pparams" {"ui": {"<id>": {field: value}}} and
+// draws the element made anew with them). Elsewhere (a handler's c.params,
+// a look, `ui`'s `when`, client_params) the row's or play's. Until Stop,
+// as c:set_param's; the inspector shows the row's. A change (not the same
+// value again, not a nil with none) counts toward 20 a player and second,
+// past that refused (logged once a second); 256 values a player.
+// kit/param_set (its file says how) does it with no code: "set" sets
+// `param` of the `target` entity's `target_type` component to `value`
+// (true, false, a number, "x, y, z" or a text) or (source "signal") to the
+// signal's number times `scale` plus `offset` within `min` and `max`;
+// "reset" puts the target's own back; `to` "player": for the player the
+// signal carries (a signal by no player does nothing), "everyone": play's
+// for all. A trigger zone's entered and left to set and reset a gravity, a
+// lever's on and off a camera.
 // [KIT_RACE_PIECES] kit/checkpoint (its file says how): an unseen gate of a
 // course, `order` its place (1, 2...), its zone `size` cells from its own
 // along its own axes turned by its yaw (x across, z the way through: a

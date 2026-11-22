@@ -638,6 +638,9 @@ struct Peer
 	// ("<entity>:<key>": JSON), and the UI buttons they hold
 	std::map<ss_, ss_> mine_sent;
 	std::set<uint64_t> ui_held;
+	// [KIT_PLAYER_PARAMS] "kit:pparams" as last sent ("": none; "-" nothing
+	// sent yet: a joining client is told, what it had from elsewhere dropped)
+	ss_ pparams_sent = "-";
 	// [KIT_EDIT_MODE_FPS] kit:edit_state's keys as last sent (JSON): one the
 	// same again goes by name in "same", not again (about 100 KB a state
 	// in edit mode, the types' declarations most of it)
@@ -2914,6 +2917,41 @@ struct Module: public interface::Module, public Interface
 	std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> m_track_sent;
 	// [KIT_VEHICLE_MOVEMENTS] c:set_param's: entity, type, parameter, value; play's
 	std::map<uint64_t, std::map<ss_, json::Value>> m_play_params;
+	// [KIT_PLAYER_PARAMS] c:set_param's {player = by}: each player's own (by
+	// their entity), over play's for them alone: entity, "type|param", value;
+	// their changes this second (PLAYER_PARAM_RATE), a refusal logged once a
+	// second. Gone at Stop, as play's
+	struct PlayerParams
+	{
+		std::map<uint64_t, std::map<ss_, json::Value>> vals;
+		size_t count = 0;
+		int64_t sec = 0, refused_sec = 0;
+		int n = 0;
+	};
+	std::map<uint64_t, PlayerParams> m_player_params;
+	static const int PLAYER_PARAM_RATE = 20; // changes a player and second
+	static const size_t PLAYER_PARAM_MAX = 256; // values a player
+
+	// [KIT_PLAYER_PARAMS] Play's values of entity id's component of a type over
+	// p: c:set_param's for everyone, then the player's own (0: none)
+	void play_over(json::Value &p, uint64_t id, const ss_ &type, uint64_t player)
+	{
+		auto over = [&](const std::map<ss_, json::Value> &m){
+			for(auto &kv : m)
+				if(kv.first.size() > type.size() && kv.first[type.size()] == '|' &&
+						kv.first.compare(0, type.size(), type) == 0)
+					p.set(kv.first.substr(type.size() + 1), kv.second);
+		};
+		auto pp = m_play_params.find(id);
+		if(pp != m_play_params.end())
+			over(pp->second);
+		auto pl = player ? m_player_params.find(player) : m_player_params.end();
+		if(pl == m_player_params.end())
+			return;
+		auto vi = pl->second.vals.find(id);
+		if(vi != pl->second.vals.end())
+			over(vi->second);
+	}
 
 	// A track's pose at t (s); false: no key yet
 	static bool track_at(const std::deque<std::array<double, 7>> &k, double t, double v[6])
@@ -3100,18 +3138,12 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// A movement's parameters, play's (c:set_param) over the row's, the scene's
-	// gravity and sea level in
+	// gravity and sea level in ([KIT_PLAYER_PARAMS] a rider's own over play's)
 	json::Value move_params(const Entity &e, const Instance &in, const ss_ &scene,
-			bool env = true)
+			bool env = true, uint64_t player = 0)
 	{
 		json::Value p = params_of(in.type, &in);
-		auto pp = m_play_params.find(e.id);
-		if(pp != m_play_params.end())
-			for(auto &kv : pp->second){
-				const size_t at = kv.first.find('|');
-				if(kv.first.substr(0, at) == in.type)
-					p.set(kv.first.substr(at + 1), kv.second);
-			}
+		play_over(p, e.id, in.type, player);
 		// (a body's gravity is body_movement()'s)
 		const json::Value &g = p.get("gravity");
 		const double f = env ? env_gravity(scene) : 1;
@@ -22932,8 +22964,11 @@ struct Module: public interface::Module, public Interface
 	// entity's component it reaches, from now until Stop (play's; the row keeps its
 	// own). Checked as an edit's. A movement's go into its next step: a steered one's
 	// next batch, a body's next input (its client told, kit:controls)
-	// simplified: movements read them (move_params()); the other types' c.params
-	// stay their rows'
+	// ([KIT_PLAYER_PARAMS] the players' bodies' movement and kit/controls too,
+	// and a UI type's `ui` fields; {player = by}: player_param())
+	// simplified: movements, kit/controls and `ui` read them (play_over()); the
+	// other types' c.params stay their rows' (a handler's c.params would take
+	// play_over() for the run's by)
 	void set_param_fx(const Entity &e, size_t comp, const ss_ &by, const json::Value &s)
 	{
 		const uint64_t id = s.at(0u).is_number() ? (uint64_t)s.at(0u).as_number() : 0;
@@ -22954,19 +22989,111 @@ struct Module: public interface::Module, public Interface
 			why = "it has no "+type.substr(0, 64);
 		else if(why.empty() && !decl.is_object())
 			why = type+" has no parameter "+param.substr(0, 64);
-		if(why.empty()){
-			const ss_ bad = check_set_param(decl, s.at(3u));
+		// [KIT_PLAYER_PARAMS] value null (nil): play's gone, the row's again
+		const json::Value &v = s.at(3u);
+		const bool gone = v.is_null() || v.is_undefined();
+		if(why.empty() && !gone){
+			const ss_ bad = check_set_param(decl, v);
 			if(!bad.empty())
 				why = param+" is "+bad;
+		}
+		// [KIT_PLAYER_PARAMS] {player = by}: a player it reaches, their own
+		const json::Value &who = s.at(4u);
+		uint64_t pid = 0;
+		if(why.empty() && !who.is_null() && !who.is_undefined()){
+			pid = who.is_string() ? actor_id(who.as_string()) :
+					who.is_number() && who.as_number() > 0 ?
+					(uint64_t)who.as_number() : 0;
+			auto pi = m_entities.find(pid);
+			if(pi == m_entities.end() || pi->second.kind != "player")
+				why = "a player's own is a player's (\"player:<id>\" or an id)";
+			else if(!reach(e, comp, by).count(pid))
+				why = "not a player it reaches";
+			// simplified: one plane a scene (plane_of()); a player's own would
+			// need their body held at a depth of their own
+			else if(type == "kit/controls" && param == "plane")
+				why = "kit/controls' plane is the scene's, not a player's own";
+		}
+		if(why.empty() && pid){
+			player_param(e, id, type, param, v, pid);
+			return;
 		}
 		if(!why.empty()){
 			add_log(e.id, "set_param refused: "+why);
 			log_i(MODULE, "Entity %s: set_param refused: %s", cs(itos(e.id)), cs(why));
 			return;
 		}
-		m_play_params[id][type+"|"+param] = s.at(3u);
+		if(gone){
+			auto pp = m_play_params.find(id);
+			if(pp != m_play_params.end() && pp->second.erase(type+"|"+param))
+				log_i(MODULE, "Entity %s's %s %s back to its own in play", cs(itos(id)),
+						cs(type), cs(param));
+			if(pp != m_play_params.end() && pp->second.empty())
+				m_play_params.erase(pp);
+			return;
+		}
+		m_play_params[id][type+"|"+param] = v;
 		log_i(MODULE, "Entity %s's %s %s set to %s in play", cs(itos(id)), cs(type),
-				cs(param), cs(s.at(3u).stringify()));
+				cs(param), cs(v.stringify()));
+	}
+
+	// [KIT_PLAYER_PARAMS] c:set_param(id, type, param, value, {player = by}):
+	// that player's own value (null: gone), checked as set_param_fx() does. Read
+	// for them alone wherever the parameter is read for a player: their
+	// kit/controls (controls_for()), their body's movement (body_movement(): the
+	// server's steps and their prediction), a UI type's `ui` (their client's,
+	// send_player_params()). A change counts toward PLAYER_PARAM_RATE a second
+	// (the same value again is free), PLAYER_PARAM_MAX values a player
+	void player_param(const Entity &e, uint64_t id, const ss_ &type,
+			const ss_ &param, const json::Value &v, uint64_t pid)
+	{
+		const bool gone = v.is_null() || v.is_undefined();
+		PlayerParams &pp = m_player_params[pid];
+		auto &vals = pp.vals[id];
+		const ss_ key = type+"|"+param;
+		auto it = vals.find(key);
+		if(gone ? it == vals.end() : it != vals.end() &&
+				it->second.stringify() == v.stringify()){
+			if(vals.empty())
+				pp.vals.erase(id);
+			return;
+		}
+		const ss_ who = m_entities[pid].name;
+		const int64_t sec = interface::os::time_us() / 1000000;
+		if(pp.sec != sec)
+			pp.sec = sec, pp.n = 0;
+		ss_ why;
+		if(pp.n >= PLAYER_PARAM_RATE)
+			why = "past "+itos(PLAYER_PARAM_RATE)+" changes a second for "+who;
+		else if(!gone && it == vals.end() && pp.count >= PLAYER_PARAM_MAX)
+			why = "past "+itos((int64_t)PLAYER_PARAM_MAX)+" values for "+who;
+		if(!why.empty()){
+			// (logged once a second: a flood logs no flood)
+			if(pp.refused_sec != sec){
+				pp.refused_sec = sec;
+				add_log(e.id, "set_param refused: "+why);
+				log_i(MODULE, "Entity %s: set_param refused: %s", cs(itos(e.id)),
+						cs(why));
+			}
+			if(vals.empty())
+				pp.vals.erase(id);
+			return;
+		}
+		pp.n++;
+		if(gone){
+			vals.erase(it);
+			pp.count--;
+			if(vals.empty())
+				pp.vals.erase(id);
+			log_i(MODULE, "Entity %s's %s %s back for %s in play", cs(itos(id)),
+					cs(type), cs(param), cs(who));
+			return;
+		}
+		if(it == vals.end())
+			pp.count++;
+		vals[key] = v;
+		log_i(MODULE, "Entity %s's %s %s set to %s for %s in play", cs(itos(id)),
+				cs(type), cs(param), cs(v.stringify()), cs(who));
 	}
 
 	// [KIT_CARRY_ATTACH] c:attach(player, {bone, offset}): its own entity
@@ -25093,6 +25220,7 @@ struct Module: public interface::Module, public Interface
 		if(m_session.running)
 			radars_tick();
 		send_controls();
+		send_player_params();
 		music_tick();
 		env_tick();
 		lobby_out_tick();
@@ -25506,12 +25634,18 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_SCENE_TREE] scene's: its nearest kit/controls ("": the root's)
-	json::Value controls_params(const ss_ &scene = "")
+	// ([KIT_PLAYER_PARAMS] c:set_param's over its row's, everyone's and the
+	// player's own)
+	json::Value controls_params(const ss_ &scene = "", uint64_t player = 0)
 	{
 		ss_ why;
 		if(!load_type("kit/controls", why))
 			return json::object();
-		return params_of("kit/controls", scene_instance("kit/controls", scene));
+		uint64_t holder = 0;
+		json::Value p = params_of("kit/controls", scene_instance("kit/controls",
+				scene, &holder));
+		play_over(p, holder, "kit/controls", player);
+		return p;
 	}
 
 	// [KIT_PLANE] The plane's depth in a scene: the cell's middle (a whole z) of
@@ -25560,10 +25694,11 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// The movement a body has: its seat's, else the controls' choice
+	// ([KIT_PLAYER_PARAMS] player: their entity, their own parameters over)
 	void body_movement(Body &b, ss_ &type, json::Value &params,
-			const ss_ &scene)
+			const ss_ &scene, uint64_t player)
 	{
-		body_movement_of(b, type, params, scene);
+		body_movement_of(b, type, params, scene, player);
 		// [KIT_ENVIRONMENT] the scene's gravity, times the movement's own
 		const json::Value &g = params.get("gravity");
 		const double f = env_gravity(scene);
@@ -25599,7 +25734,7 @@ struct Module: public interface::Module, public Interface
 	}
 
 	void body_movement_of(Body &b, ss_ &type, json::Value &params,
-			const ss_ &scene)
+			const ss_ &scene, uint64_t player)
 	{
 		// [KIT_VEHICLE_MOVEMENTS] the vehicle's, a seat's or what it is on; play's
 		// parameters over its own
@@ -25609,7 +25744,7 @@ struct Module: public interface::Module, public Interface
 				type = in->type;
 				ss_ sc;
 				scene_of(*v, &sc);
-				params = move_params(*v, *in, sc, false);
+				params = move_params(*v, *in, sc, false, player);
 				b.ride = m_drives.count(v->id) ? v->id : 0;
 				return;
 			}
@@ -25617,19 +25752,23 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SCENE_TREE] the nearest kit/controls' movement, its parameters
 		// the nearest copy's of it
 		type = scene_holds(scene) ? ss_() :
-				jstr(controls_params(scene), "movement", "kit/walker");
+				jstr(controls_params(scene, player), "movement", "kit/walker");
 		if(!is_movement(type)){
 			type = "";
 			params = json::object();
 			return;
 		}
-		params = params_of(type, scene_instance(type, scene));
+		uint64_t holder = 0;
+		params = params_of(type, scene_instance(type, scene, &holder));
+		// [KIT_PLAYER_PARAMS] c:set_param's on the nearest copy: everyone's,
+		// the player's own (kit/walker's gravity); the client predicts with
+		// these ("kit:controls"' move.params), so both sides step alike
+		play_over(params, holder, type, player);
 		// [KIT_CTF] c:speed's factor (a seat's movement is the vehicle's own)
 		const json::Value &sp = params.get("speed");
-		if(b.speed != 1 && sp.is_number()){
+		if(b.speed != 1 && sp.is_number())
 			params.set("speed", sp.as_number() * b.speed);
-			params = json::load_string(params.stringify().c_str());
-		}
+		params = json::load_string(params.stringify().c_str());
 	}
 
 	static double num(const json::Value &v, const char *k, double def,
@@ -25675,7 +25814,8 @@ struct Module: public interface::Module, public Interface
 		json::Value c = json::object();
 		const Peer &pe = m_peers[peer];
 		// [KIT_SCENE_TREE] their scene's nearest kit/controls
-		const json::Value p = controls_params(pe.scene);
+		// ([KIT_PLAYER_PARAMS] their own parameters over: their camera alone)
+		const json::Value p = controls_params(pe.scene, pe.player);
 		c.set("params", p);
 		// The signals' state, those for everyone and this player's
 		const Instance *ci = scene_instance("kit/controls", pe.scene);
@@ -25821,6 +25961,62 @@ struct Module: public interface::Module, public Interface
 							name+" "+b.stringify());
 				}
 				inetwork->send(p.first, "kit:controls", s);
+			});
+		}
+	}
+
+	// [KIT_PLAYER_PARAMS] Each player's client told the UI fields that play's
+	// parameters change for them (c:set_param's, everyone's and their own):
+	// "kit:pparams" {"ui": {"<entity>": {field: value}}}, a UI type's `ui`
+	// fields that are "param:<name>" (its first UI component's, as show_of()
+	// has it), sent as it changes; ui.lua draws them over the show's.
+	// simplified: the top level of `ui` alone ("param:" in its `when` stays the
+	// row's); a client part's e.params (client_params) stay the rows'
+	void send_player_params()
+	{
+		for(auto &p : m_peers){
+			Peer &pe = p.second;
+			if(!pe.player || (m_play_params.empty() && m_player_params.empty() &&
+					pe.pparams_sent.empty()))
+				continue;
+			std::set<uint64_t> ids;
+			for(auto &pp : m_play_params)
+				ids.insert(pp.first);
+			auto mi = m_player_params.find(pe.player);
+			if(mi != m_player_params.end())
+				for(auto &v : mi->second.vals)
+					ids.insert(v.first);
+			json::Value ui = json::object();
+			for(uint64_t id : ids){
+				auto ei = m_entities.find(id);
+				if(ei == m_entities.end())
+					continue;
+				for(const Instance &in : ei->second.comps){
+					const json::Value &d = m_types[in.type].decl.get("ui");
+					if(!d.is_object())
+						continue;
+					json::Value over = json::object(), out = json::object();
+					play_over(over, id, in.type, pe.player);
+					for(json::Iterator it(d); it; ++it)
+						if((*it).is_string() &&
+								(*it).as_string().compare(0, 6, "param:") == 0 &&
+								!over.get((*it).as_string().substr(6)).is_undefined())
+							out.set(it.key(), over.get((*it).as_string().substr(6)));
+					if(out.size())
+						ui.set(itos(id), out);
+					break;
+				}
+			}
+			const ss_ s = ui.size() ? ui.stringify() : ss_();
+			if(s == pe.pparams_sent)
+				continue;
+			pe.pparams_sent = s;
+			log_i(MODULE, "%s's own UI parameters: %s", cs(pe.name),
+					s.empty() ? "none" : cs(s));
+			json::Value m = json::object();
+			m.set("ui", ui);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(p.first, "kit:pparams", m.stringify());
 			});
 		}
 	}
@@ -26086,7 +26282,8 @@ struct Module: public interface::Module, public Interface
 			double yaw = 0, const json::Value *state = nullptr,
 			double look = NAN)
 	{
-		body_movement(b, b.type, b.params, m_peers[peer].scene);
+		body_movement(b, b.type, b.params, m_peers[peer].scene,
+				m_peers[peer].player);
 		if(state){
 			b.state = state->deepcopy();
 		} else {
@@ -29328,7 +29525,7 @@ struct Module: public interface::Module, public Interface
 			ss_ type;
 			json::Value params;
 			const uint64_t ride = b.ride;
-			body_movement(b, type, params, pi->second.scene);
+			body_movement(b, type, params, pi->second.scene, pi->second.player);
 			const bool changed = params.stringify() != b.params.stringify();
 			// [KIT_PLANE] The plane turned on or off, or its spawn moved: put again
 			// onto it (a rider holds nothing: its vehicle steps here)
@@ -29723,6 +29920,7 @@ struct Module: public interface::Module, public Interface
 		}
 		m_seat_home.clear();
 		m_play_params.clear();
+		m_player_params.clear(); // [KIT_PLAYER_PARAMS]
 		// [KIT_CARRY_ATTACH] nothing on a player past Stop
 		sv_<uint64_t> on;
 		for(auto &a : m_attached)
@@ -34593,6 +34791,7 @@ struct Module: public interface::Module, public Interface
 		if(join){
 			joined(peer);
 			send_all_mine(peer);
+			p.pparams_sent = "-"; // [KIT_PLAYER_PARAMS]
 		}
 		if(m_open_tools && can_edit_u(peer)){
 			m_open_tools = false;
@@ -40499,6 +40698,7 @@ struct Module: public interface::Module, public Interface
 		m_discarded.clear();
 		m_drives.clear();
 		m_play_params.clear();
+		m_player_params.clear(); // [KIT_PLAYER_PARAMS]
 		m_bot_seats.clear();
 		for(auto &pe : m_entities)
 			for(size_t i = 0; i < pe.second.comps.size(); i++){
@@ -43459,6 +43659,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_VEHICLE_MOVEMENTS] steered from their rows again, play's parameters gone
 		m_drives.clear();
 		m_play_params.clear();
+		m_player_params.clear(); // [KIT_PLAYER_PARAMS]
 		m_bot_seats.clear(); // [KIT_GUIDE_STATIONS]
 		m_bot_foes.clear(); // [KIT_AIRSHIPS_BOTS_LEFTOVERS]
 		m_session.by = by;
@@ -46622,6 +46823,7 @@ struct Module: public interface::Module, public Interface
 		std::map<uint64_t, json::Value> motions;
 		std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> track_sent;
 		std::map<uint64_t, std::map<ss_, json::Value>> play_params;
+		std::map<uint64_t, PlayerParams> player_params; // [KIT_PLAYER_PARAMS]
 		std::map<uint64_t, Attach> attached;
 		std::set<ss_> action_names;
 		ss_ actions_sent;
@@ -46690,6 +46892,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_motions, c.motions);
 		swap(m_track_sent, c.track_sent);
 		swap(m_play_params, c.play_params);
+		swap(m_player_params, c.player_params);
 		swap(m_attached, c.attached);
 		swap(m_action_names, c.action_names);
 		swap(m_actions_sent, c.actions_sent);
