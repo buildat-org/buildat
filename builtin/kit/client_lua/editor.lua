@@ -3624,7 +3624,19 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 		ui_utils.settings_form(w, fields, values, function(k, v)
 			E.pending[key] = E.pending[key] or {}
-			E.pending[key][k] = v
+			-- (typed back to the stored value: no edit left for Apply or
+			-- for leaving the inspector to ask of. A scene's inherited one
+			-- stays: Apply makes it its own)
+			local was = (c.params or {})[k]
+			if was == nil then
+				was = decl[k].default
+			end
+			if not from[k] and type(v) ~= "table" and type(was) ~= "table" and
+					tostring(v) == tostring(was) then
+				E.pending[key][k] = nil
+			else
+				E.pending[key][k] = v
+			end
 			log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
 			mark()
 		end, tipped)
@@ -6278,6 +6290,10 @@ local function dialog(title, width)
 	w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	-- (shown in the HUD view too, which window() hides: the unapplied
+	-- edits' ask of a click on the frame was there unseen, a click's next
+	-- press its Cancel)
+	w.visible = true
 	ui_utils.dim_behind(w, "kit dialog " .. tostring(title))
 	if width then
 		w:SetFixedWidth(math.min(width, magic.ui.root.width / S.font - 16))

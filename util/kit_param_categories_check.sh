@@ -23,7 +23,8 @@
 #   7. the Signals view's column has the chips;
 #   8. a 1800x1000 window; a touch client at 600x400 (-u 1: the desktop's
 #      tool panel): a tap lets the element go and takes it again, its
-#      title's tap is its own, typing in a field, the views dropdown leaves;
+#      title's tap is its own, typing in a field (not applied: the tap out
+#      asks of it, 4z37h, and Save), the views dropdown leaves;
 #   9. a chip holding an edit not applied marked; the last chip back in a new
 #      session; a warning's height given back; narrowing on the kill feed and
 #      the hint; a drag started on the panel moves nothing; the
@@ -409,6 +410,11 @@ tap Text "◆ $BAR *"
 frames 5
 event kit_tabs title
 tap 60 200
+wait_log 10000 kit editor: unapplied edits of $BAR: 1 asked
+frames 3
+screenshot @T@/touch_asked.png
+tap Button "unapplied save"
+wait_log 10000 kit editor: unapplied edits of $BAR saved
 frames 5
 screenshot @T@/touch_closed.png
 tap 150 93
