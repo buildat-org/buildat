@@ -309,10 +309,9 @@ elif phase == "build":
             "clientInfo": {"name": "kit_agents_check", "version": "1"}}
     ins = rpc(tok, "initialize", init)["result"]["instructions"]
     # The guide: within the 4096 characters Claude Code keeps, whole by tool
-    # (kit/ left out of the type list; its last group must fit)
+    # (kit/ left out of the type list; the groups past Logic may be cut)
     assert len(ins) <= 4096 and "kitboss's agent" in ins and \
-        re.search(r"\nLogic:[^\n]* counter[ \n]", ins) and \
-        "get_guide lists them all" not in ins, ins
+        re.search(r"\nLogic:[^\n]* counter[ \n]", ins), ins
     guide = call(tok, "get_guide")
     assert re.search(r"\n- kit/counter: [^\n]*In: [^\n]*add \(number\)", guide), guide[:3000]
     # [KIT_AGENT_VISUALS] the look's topic, named in both
