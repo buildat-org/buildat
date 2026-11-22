@@ -28,10 +28,12 @@
 #      it: the zone's "entered" among the events, the body moved, a picture
 #      at the end; [KIT_PLAY_PICTURE_UI] a kit/ui_bar and a kit/ui_text in
 #      it (the bar's colour at its place, the text's glyphs as tall as a
-#      screen of that size draws them), in two picture_at pictures at
-#      800x600 and in get_view's with no pose (the body's screen), not in
-#      a pose's; picture_at's pixel cap and range, as a JSON string or one
-#      number ([KIT_REPORT_1122B]); play_leave;
+#      screen of that size draws them), in two picture steps at 800x600
+#      and in get_view's with no pose (the body's screen), not in a pose's;
+#      [KIT_REPORT_1123] steps as a JSON string: a try_input as the body
+#      shows it a text fading in, a picture mid-fade and one after; a bad
+#      step refused by its index, steps with flat parameters, the pixel
+#      and time caps, picture_at gone; play_leave;
 #   6. the server stopped: its camera gone with it;
 #   7. (CAMERA_X11=1) a server given no display, offscreen failing:
 #      get_view says what its host needs;
@@ -410,28 +412,71 @@ elif phase == "play":
     got = json.loads(re.search(r"Played 2 s: (\{.*\})\n", text).group(1))
     assert got["moved"] > 1, got
     assert any(e["id"] == zone and e["output"] == "entered" for e in got["events"]), got
-    # Two at set times after the input, at a size asked; the pixel cap
-    text, imgs = call("play_input", {"seconds": 0.1, "width": 800, "height": 600,
-        "picture_at": [0, 0.6]})
-    assert len(imgs) == 2 and "0.6 s after the input" in text, text
+    # [KIT_REPORT_1123] steps: two pictures at a size asked, a wait between
+    def played(text):
+        return json.loads(re.search(r"Played [^:]*: (\{.*\})", text).group(1))
+    text, imgs = call("play_input", {"steps": [{"seconds": 0.1},
+        {"picture": True, "width": 800, "height": 600}, {"wait": 0.6},
+        {"picture": True, "width": 800, "height": 600}]})
+    pics = played(text)["pictures"]
+    assert len(imgs) == 2 and [p["step"] for p in pics] == [1, 3], text
+    assert pics[1]["t"] - pics[0]["t"] >= 0.6, pics
     for k, png in enumerate(imgs):
-        with open("%s/play_at_%d.png" % (out, k), "wb") as f:
+        with open("%s/play_steps_%d.png" % (out, k), "wb") as f:
             f.write(png)
         assert decode(png)[:2] == (800, 600)
-        ui_in(decode(png), "play_at_%d" % k)
-    assert "1572864 pixels at most" in refused("play_input", {"width": 1024,
-        "height": 768, "picture_at": [0, 0.5, 1]})
-    assert "picture_at: 1 to 3 times" in refused("play_input", {"picture_at": [3]})
-    # [KIT_REPORT_1122B] as text (an older schema's client): the list as a
-    # JSON string, or one number; a string not a list refused
-    for at, pics, last in (("[0.05, 0.25]", 2, "0.25"), (0.1, 1, "0.1")):
-        text, imgs = call("play_input", {"seconds": 0.1, "width": 320,
-            "height": 240, "picture_at": at})
-        assert len(imgs) == pics and last + " s after the input" in text, text
-        assert all(decode(png)[:2] == (320, 240) for png in imgs)
-    assert "picture_at: a list of 1 to 3 times" in refused("play_input",
-        {"picture_at": "soon"})
-    assert "picture_at: 1 to 3 times" in refused("play_input", {"picture_at": "[3]"})
+        ui_in(decode(png), "play_steps_%d" % k)
+    # A try_input as the body whose output shows a text to it alone, fading
+    # in: a picture at once (mid-fade) and one after; the steps as a JSON
+    # string (an older schema's client sends them so)
+    text = call("place", {"type": "kit/logic", "pos": [0, 0, 0], "params":
+        {"mode": "or"}})[0]
+    gate = int(re.search(r"placed kit/logic (\d+)", text).group(1))
+    text = call("place", {"type": "kit/ui_text", "pos": [0, 0, 0], "params": {"text": "FADEIN",
+        "anchor": "top_right", "x": 4, "y": 20, "size": 10, "color": "#00ff00", "style": "plain",
+        "to": "player", "shown": False, "appear": "fade"}})[0]
+    fade = int(re.search(r"placed kit/ui_text (\d+)", text).group(1))
+    call("link", {"id": gate, "output": "on", "to": fade, "input": "show"})
+    def lit(img):
+        """The text's pixels at its full colour, and those of it at all"""
+        w, h, px = img
+        v, full, part = min(w, h) / 100.0, 0, 0
+        for y in range(int(18 * v), min(h, int(34 * v))):
+            for x in range(max(0, w - int(50 * v)), w - int(2 * v)):
+                r, g, b = px(x, y)
+                full += g > 230 and r < 60 and b < 60
+                part += g > 110 and g > 1.6 * max(r, b)
+        return full, part
+    # (its show reaches the camera a tick or two later)
+    steps = [{"try_input": {"id": gate, "input": "a"}}, {"wait": 0.05},
+        {"picture": True, "width": 320, "height": 240}, {"wait": 0.6},
+        {"picture": True, "width": 320, "height": 240}]
+    text, imgs = call("play_input", {"steps": json.dumps(steps)})
+    got = played(text)
+    assert len(imgs) == 2 and [p["step"] for p in got["pictures"]] == [2, 4], text
+    assert any(e["id"] == gate and e["output"] == "on" and e.get("by") == "you"
+        for e in got["events"]), got
+    assert any(x.get("text") == "FADEIN" for x in got.get("texts", [])), got
+    (f0, p0), (f1, p1) = [lit(decode(png)) for png in imgs]
+    for k, png in enumerate(imgs):
+        with open("%s/play_fade_%d.png" % (out, k), "wb") as f:
+            f.write(png)
+    print("   the fade: %d of %d pixels at full at t %.2f, %d of %d at t %.2f" % (f0, p0,
+        got["pictures"][0]["t"], f1, p1, got["pictures"][1]["t"]))
+    # (the 0.3 s fade: some of it drawn, little at full; then all of it)
+    assert p0 > 40 and f1 > 40 and f0 < f1 / 2, ("not mid-fade, then shown", f0, p0, f1)
+    # Refused before anything runs: a bad step by its index, steps with the
+    # flat parameters, the caps over the whole run
+    t = refused("play_input", {"steps": [{"wait": 0.1}, {"keys": ["W"], "wait": 1}]})
+    assert t.startswith("steps[1]: one of keys"), t
+    assert refused("play_input", {"steps": [{"wait": 0.1}, {"try_input": {"id": gate,
+        "input": "nope"}}]}).startswith("steps[1]: try_input: input: entity")
+    assert refused("play_input", {"steps": "[{\"wait\": 9}]"}).startswith("steps[0]: wait")
+    assert "not both" in refused("play_input", {"keys": ["W"], "steps": [{"wait": 0.1}]})
+    assert "1572864 pixels at most" in refused("play_input", {"steps": [{"picture": True,
+        "width": 1024, "height": 768}] * 3})
+    assert "6 at most" in refused("play_input", {"steps": [{"seconds": 4}, {"wait": 2.5}]})
+    assert "no parameter \"picture_at\"" in refused("play_input", {"picture_at": [0.1]})
     # get_view with no pose: the body's screen; a pose's: the world alone
     text, imgs = view({"width": 320, "height": 240}, "play_own")
     assert "its own view" in text, text

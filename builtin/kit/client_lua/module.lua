@@ -3134,8 +3134,8 @@ end)
 -- The server's camera's view has its chunks: none came lately and none
 -- is waiting for its mesh (the first view waits 0.4 s for them to start
 -- coming); out of budget it is drawn as it is. ([KIT_PLAY_PICTURE_UI]) A
--- view `at` ms after the request (play_input's picture_at: its body's
--- surroundings are loaded) is drawn then
+-- view `at` ms after the request (play_input's picture steps, at 0: its
+-- body's surroundings are loaded) is drawn then
 function VIEW.settled(j)
 	local now = buildat.get_time_us()
 	if j.at then
