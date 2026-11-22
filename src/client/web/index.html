@@ -730,11 +730,20 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			b.style.pointerEvents = 'auto';
 			b.onclick = function(){ location.reload(); };
 			status.appendChild(b);
+			// [KIT_WORKBENCH_WEB_LOCAL] Restarting, the page's own server
+			// (a Workbench switch): it goes on in the worker, which this
+			// client cannot rejoin; stopped, its storage saved, and the
+			// page loaded again, which starts it again
+			if(restarting && Module.buildatPipe && Module.buildatPipe.restart){
+				status.firstChild.textContent = reason + '.\n\nRestarting...\n\n';
+				b.style.display = 'none';
+				Module.buildatPipe.restart();
+			}
 			// Restarting: the page is reloaded once its server answers
 			// /health with anything but the stand-in's 503 (a 403 to a
 			// stranger is the server up), asked every 3 s for 5 minutes;
 			// the button is Cancel meanwhile
-			if(restarting){
+			else if(restarting){
 				var t0 = Date.now(), timer = null;
 				status.firstChild.textContent = reason + '.\n\n';
 				var wait = document.createTextNode('Reconnecting...\n\n');
@@ -821,6 +830,14 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			if(w)
 				w.postMessage({op: 2});
 		};
+		// The server stopped (its storage saved first: pre.js's onExit),
+		// then the page loaded again; at most 15 s
+		p.restart = function(){
+			p.on_exit = function(){ location.reload(); };
+			if(w)
+				w.postMessage({op: 'stop'});
+			setTimeout(p.on_exit, 15000);
+		};
 		if(!window.crossOriginIsolated){
 			p.gone = p.closed = 'this page is not cross-origin isolated, ' +
 					'which the local server needs';
@@ -868,6 +885,8 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			} else if(m.exit !== undefined){
 				end_threads();
 				p.gone = p.closed = 'the local server stopped (' + m.exit + ')';
+				if(p.on_exit)
+					p.on_exit();
 			}
 		};
 		w.onerror = function(e){

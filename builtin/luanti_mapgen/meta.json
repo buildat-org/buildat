@@ -1,6 +1,7 @@
 {
 	"comment": "Luanti's mapgen is C++17; the rest of buildat's modules are C++11, and the flag here only changes this one",
 	"cxxflags": "-std=c++17",
+	"web": true,
 	"dependencies": [
 		{"module": "voxelworld"},
 		{"module": "worldgen"}

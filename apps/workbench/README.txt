@@ -45,6 +45,16 @@ them):
 
         unzip -o X.template.zip -x meta.json LICENSE -d templates/<name>/
 
+Workbench runs in the browser with its server in the page
+[KIT_WORKBENCH_WEB_LOCAL]: /?local=workbench on a server with the web
+client (util/package.sh builds web/local/workbench). It is a single
+player's: the templates, the editor, Play with bots, export and import.
+Its games are kept in the browser's IndexedDB, and a reload opens the one
+that ran last; a switch from Games... reloads the page. Publishing says
+why it cannot (a page reaches no Aitta: export the game and import it on
+a server), and there are no agents (MCP needs the server's HTTP).
+util/workbench_web_local_check.sh drives it.
+
 The server can publish as itself [KIT_SERVER_PUBLISH]. The Server
 window's Admin / Publishing makes the server's key (one, kept in its
 data), lists the Aittas it publishes to and installs from, gives
