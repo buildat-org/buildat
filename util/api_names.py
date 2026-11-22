@@ -520,8 +520,15 @@ def kit_surface():
     for lhs in re.findall(r"^\t((?:e\.\w+, )*e\.\w+) = ", ml[a:ml.index("\nend\n", a)], re.M):
         for f in re.findall(r"e\.(\w+)", lhs):
             cl["client e." + f] = ""
+    # [KIT_UI_CLIENT_PART] e.ui: ui.lua's M.ui_api, set's fields its SETS
+    ul = kit_read(KIT + "/client_lua/ui.lua")
+    a = ul.index("function M.ui_api(")
+    for mm in re.finditer(r"^\tfunction ui\.(\w+)\(([^)]*)\)", ul[a:ul.index("\nend\n", a)], re.M):
+        cl["client e.ui." + mm.group(1)] = "(%s)" % mm.group(2)
+    a = ul.index("local SETS = {")
+    cl["client e.ui.set"] += " " + " ".join(sorted(block_members(ul, a + 13)[0]))
     a = ml.index("local API = {")
-    lua_src = "\n".join(kit_read(KIT + "/client_lua/" + f) for f in
+    lua_src ="\n".join(kit_read(KIT + "/client_lua/" + f) for f in
             sorted(os.listdir(os.path.join(root, KIT, "client_lua"))) if f.endswith(".lua"))
     for k in block_members(ml, a + 12)[0] | set(re.findall(r'"(\w+)"', ml[a:ml.index("do\n", a)])):
         mm = re.search(r"^function M\.%s\(([^)]*)\)" % k, lua_src, re.M)

@@ -182,7 +182,9 @@ end
 --   [KIT_BOT_DIFFICULTY]), e:shown(key) (the state as drawn),
 --   e:near(d) (this player's entity within d of it),
 --   e:predict(key, value, seconds) (drawn so at once, until the server's
---   value changes or the seconds, 1, pass), e:log(text) (this client's log);
+--   value changes or the seconds, 1, pass), e:log(text) (this client's log),
+--   [KIT_UI_CLIENT_PART] e.ui (its element's rect, the screen, set{...}:
+--   ui.lua's M.ui_api);
 --   [KIT_CLIENT_REACT] require("buildat/module/kit") is [KIT_API_1] the
 --   table at this file's end: kit.shared, kit.pointed, kit.use,
 --   kit.body_state(), kit.body_pos(), kit.seated(), [RACER_FEEL] (2), (3)
@@ -1294,7 +1296,9 @@ end
 
 -- The entity as its client parts have it
 local function entity_view(id, n)
-	local e = {id = id, node = n.node, state = {}, params = {}}
+	-- ([KIT_UI_CLIENT_PART] e.ui: ui.lua's M.ui_api)
+	local e = {id = id, node = n.node, state = {}, params = {},
+		ui = M.ui_api and M.ui_api(id, n)}
 	function e:shown(key)
 		return value(n, key)
 	end
@@ -1887,6 +1891,8 @@ local function swap_part(t, old, new)
 		if n.added and has then
 			if old then
 				call(n, old, "on_remove")
+				-- ([KIT_UI_CLIENT_PART] what it set on its element goes with it)
+				n.ui_set, n.ui_v = nil, (n.ui_v or 0) + 1
 			end
 			if new then
 				call(n, new, "on_add")

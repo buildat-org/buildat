@@ -71,6 +71,8 @@
 --   mode, written to kit/game_rules (placed on the root if there is none).
 -- The text a builder wrote is drawn as plain text (a Text element: no
 -- markup), its {value} the signal's value cut at 200 characters.
+-- [KIT_UI_CLIENT_PART] **A client part's changes** (e.ui, M.ui_api below):
+-- its offset, opacity and fields over each layout, in play.
 --   kit.ui_at(x, y) -> whether the pointer (pixels) is on a UI component
 --     that takes clicks (a button or a panel with a background in play;
 --     any in edit mode), which the controls and the editor leave alone
@@ -198,6 +200,84 @@ end)
 -- none sent)
 function M.mine_state(id, key)
 	return mine[id] and mine[id][key]
+end
+
+-- [KIT_UI_CLIENT_PART] e.ui, a client part's hold on its own entity's
+-- element (module.lua's entity_view; api.h's client parts paragraph). Its
+-- entity's id is all it has: no element, no other entity's, none of Kit's
+-- own. What set() sets stays till set again (false: the element's own
+-- again), on the entity (n.ui_set) so an element made anew keeps it; drawn
+-- from the next layout (a part's on_update runs before it in the frame),
+-- in play and unframed edit mode; framed edit mode draws it as authored.
+-- width, height, size, color and text go in as its ui's fields (over a
+-- player's own, 4z37zt's), dx, dy (UI units) after its place, kept in its
+-- box, opacity times its own. Units: percent of the box's shorter side.
+local SETS = {dx = {-400, 400}, dy = {-400, 400}, width = {0, 400},
+	height = {0, 400}, size = {0.5, 30}, opacity = {0, 1}, color = "color",
+	text = "text"}
+-- The last layout's box: x, y, w, h (UI pixels) and V
+local BOX = {0, 0, 1, 1, 0.01}
+function M.ui_api(id, n)
+	local ui = {}
+	-- x, y (from the box's top left), w, h, shown: as last drawn; nil: none
+	function ui.rect()
+		local r = U[id]
+		if not (r and r.el and r.ax) then
+			return nil
+		end
+		local V = BOX[5]
+		return (r.ax - BOX[1]) / V, (r.ay - BOX[2]) / V, r.w / V, r.h / V,
+				r.vis
+	end
+	-- The box's (the screen's) w, h
+	function ui.screen()
+		return BOX[3] / BOX[5], BOX[4] / BOX[5]
+	end
+	-- The text as last drawn ({value} filled), a bar's fill 0...1
+	function ui.text()
+		local r = U[id]
+		if r and r.text then
+			return r.text, r.frac
+		end
+		return nil
+	end
+	function ui.set(t)
+		if type(t) ~= "table" then
+			error("e.ui.set takes a table", 2)
+		end
+		local s = n.ui_set or {}
+		for k, v in pairs(t) do
+			local lim = SETS[k]
+			if not lim then
+				error("e.ui.set: no field " .. tostring(k), 2)
+			end
+			if v == false then
+				v = nil
+			elseif lim == "color" then
+				v = tostring(v)
+				if not v:match("^#%x%x%x%x%x%x$") and not v:match("^#%x%x%x%x%x%x%x%x$") then
+					error("e.ui.set: color " .. v .. " is not #rrggbb or #rrggbbaa", 2)
+				end
+			elseif lim == "text" then
+				v = tostring(v):sub(1, 200)
+			else
+				v = tonumber(v)
+				if not v or v ~= v then
+					error("e.ui.set: " .. k .. " is not a number", 2)
+				end
+				v = math.max(lim[1], math.min(lim[2], v))
+			end
+			if s[k] ~= v then
+				s[k] = v
+				-- (the layout's fields: its ui made again, below)
+				if k ~= "dx" and k ~= "dy" and k ~= "opacity" then
+					n.ui_v = (n.ui_v or 0) + 1
+				end
+			end
+		end
+		n.ui_set = next(s) and s or nil
+	end
+	return ui
 end
 
 -- light: added to each channel and the alpha (a pointer over a button)
@@ -350,6 +430,23 @@ local function atlas_part(r, z, col, i)
 	return b
 end
 
+local function fill_color(u)
+	return color(u.color, u.source == "health" and
+			magic.Color(0.85, 0.15, 0.15) or magic.Color(0.13, 0.78, 0.88))
+end
+
+-- [KIT_UI_CLIENT_PART] Its colour as make() gives it, again (a part's
+-- color set or gone)
+local function recolor(r, u)
+	if u.kind == "bar" then
+		if r.parts.fill then
+			r.parts.fill.color = fill_color(u)
+		end
+	elseif u.kind ~= "own" then
+		r.t:SetColor(color(u.color, magic.Color(1, 1, 1)))
+	end
+end
+
 local function make(r, id, parent, in_panel)
 	local u, el = r.ui, nil
 	r.host = parent
@@ -386,8 +483,8 @@ local function make(r, id, parent, in_panel)
 	r.el = el
 	r.parts = {}
 	local p = r.parts
-	local fill_col = color(u.color, u.source == "health" and
-			magic.Color(0.85, 0.15, 0.15) or magic.Color(0.13, 0.78, 0.88))
+	local fill_col = fill_color(u)
+	r.col_at = u.color
 	r.pie = shapes and u.kind == "bar" and u.form == "pie"
 	if r.pie then
 		local bg, line = color(u.background, nil), color(u.border, nil)
@@ -470,7 +567,7 @@ local function make(r, id, parent, in_panel)
 			log:info("kit: ui input " .. id .. " entered (" .. #s .. " bytes)")
 		end)
 	end
-	r.t = el:CreateChild("Text")
+	r.t, r.t_op = el:CreateChild("Text"), nil
 	r.t.priority = 5
 	r.t:SetTextEffect(magic.TE_SHADOW)
 	local a = tostring(u.anchor or "")
@@ -1376,6 +1473,7 @@ local function update()
 	local V = vmin()
 	local pad = pad_of(V)
 	local bx, by, bw, bh = hud_box()
+	BOX[1], BOX[2], BOX[3], BOX[4], BOX[5] = bx, by, bw, bh, V
 	-- The ones there now; a panel before what is in it
 	local list = {}
 	for id, n in pairs(P.nodes) do
@@ -1402,11 +1500,27 @@ local function update()
 				if r then
 					drop(r)
 				end
-				r = {id = id, raw = raw, ui = u, kind = tostring(u.kind),
+				r = {id = id, raw = raw, ui = u, base = u, kind = tostring(u.kind),
 					node = n.node, comp = tonumber(u.comp) or 0}
 				U[id] = r
 			end
 			r.n, r.seen = n, true
+			-- ([KIT_UI_CLIENT_PART] its client part's fields over them, M.ui_api)
+			if r.cp_v ~= n.ui_v then
+				r.cp_v, r.pui = n.ui_v, nil
+				if n.ui_set then
+					r.pui = {}
+					for k, v in pairs(r.base) do
+						r.pui[k] = v
+					end
+					for k, v in pairs(n.ui_set) do
+						if k ~= "dx" and k ~= "dy" and k ~= "opacity" then
+							r.pui[k] = v
+						end
+					end
+				end
+			end
+			r.ui = not frame and r.pui or r.base
 			list[#list + 1] = id
 		end
 	end
@@ -1832,6 +1946,13 @@ local function update()
 				end
 				y = y + (r.dy or 0)
 			end
+			-- [KIT_UI_CLIENT_PART] its client part's offset, kept in its box
+			local cp = not frame and r.n and r.n.ui_set
+			if cp and (cp.dx or cp.dy) then
+				local x0, y0 = pr and pad or bx, pr and pad + r.top or by
+				x = math.max(x0, math.min(x0 + r.pw - w, x + (cp.dx or 0) * V))
+				y = math.max(y0, math.min(y0 + r.ph - h, y + (cp.dy or 0) * V))
+			end
 			-- ([KIT_LOBBY] the HUD view's frame a box too: its bx, by undone)
 			r.to_params = function(px, py, nw, nh)
 				if pr then
@@ -1918,6 +2039,10 @@ local function update()
 				r.frac = f
 			end
 			dress(r, math.floor(w), math.floor(h), V, r.frac or 0)
+			if u.color ~= r.col_at then
+				r.col_at = u.color
+				recolor(r, u)
+			end
 			-- Play: as its state says; edit mode: all, a hidden one dimmed,
 			-- framed (framed())
 			-- ([KIT_LOBBY] edit mode one layer, the HUD view's pick's or the
@@ -1928,9 +2053,10 @@ local function update()
 			else
 				layer_on = up == nil or r.layer == up
 			end
-			r.el.visible = not edit_off() and layer_on and not r.skip and
+			r.vis = not edit_off() and layer_on and not r.skip and
 					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
-			if r.el.visible and up and r.layer == up and r.kind == "button" and
+			r.el.visible = r.vis
+			if r.vis and up and r.layer == up and r.kind == "button" and
 					u.action == "pause_menu" then
 				menu_on = true
 			end
@@ -1941,9 +2067,16 @@ local function update()
 			if frame then
 				r.el.opacity = (r.on or r.own) and 0.95 or 0.45
 			elseif r.blinking then
-				r.el.opacity = (now * 2) % 1 < 0.5 and 1 or 0.25
+				r.el.opacity = ((now * 2) % 1 < 0.5 and 1 or 0.25) *
+						(cp and cp.opacity or 1)
 			else
-				r.el.opacity = 1
+				r.el.opacity = cp and cp.opacity or 1
+			end
+			-- (a Text's opacity is its own, not its parent's times it)
+			local top = cp and cp.opacity or 1
+			if r.t and top ~= (r.t_op or 1) then
+				r.t_op = top
+				r.t.opacity = top
 			end
 			if r.kind == "button" and r.parts.bg then
 				-- simplified: a pointer over it brightens it, no fade
@@ -2013,8 +2146,9 @@ local function update()
 			-- Said as it changes: where it is and what it shows
 			local sw, sh = bw, bh
 			local sp = r.el.screenPosition
+			r.ax, r.ay = sp.x, sp.y
 			local line = string.format("kit: ui %s %s at %d,%d %dx%d in %dx%d" ..
-					" font %d %s order %g %s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
+					" font %d %s order %g %s%s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
 					sp.x, sp.y, w, h, sw, sh, r.px or 0, tostring(u.style or "shapes"),
 					num(u.order, 0, -40, 40), r.el.visible and "shown" or "hidden",
 					E.editing and (r.on and ", edit mode" or
@@ -2027,6 +2161,8 @@ local function update()
 							(r.layer ~= "hud" and ", layer " .. tostring(r.layer) or "") ..
 							(r.v3d and (r.following and ", follows " ..
 							tostring(r.value) or ", nobody") or ""),
+					cp and string.format(", part %.1f,%.1f opacity %.2f", cp.dx or 0,
+							cp.dy or 0, cp.opacity or 1) or "",
 					((r.text .. (r.last_line and " | " .. r.last_line or "")):gsub(
 							"\n", " | ")))
 			-- ([KIT_RECORDS] a running kit/stopwatch time said once a
@@ -2034,8 +2170,10 @@ local function update()
 			-- the comparison)
 			local key = r.counting and line:gsub(" at %-?%d+,%-?%d+ %d+x%d+", "")
 					:gsub("(%d)%.%d", "%1") or line
-			if key ~= r.log then
-				r.log = key
+			-- ([KIT_UI_CLIENT_PART] one its client part moves: twice a second
+			-- at most)
+			if key ~= r.log and not (cp and now - (r.log_at or 0) < 0.5) then
+				r.log, r.log_at = key, now
 				local off = sp.x < bx or sp.y < by or sp.x + w > bx + sw or
 						sp.y + h > by + sh
 				log:info(line .. ((off and r.el.visible) and " OFF SCREEN" or ""))
