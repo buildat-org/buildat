@@ -6306,6 +6306,18 @@ struct Module: public interface::Module, public Interface
 				}
 				m_runtime_dirty = true;
 			}
+		// [KIT_REPORT_1123] per_player entries of bodies not here (a guest's
+		// dropped, a bot gone, before they went with them): their ids are
+		// handed out again. Other keys stay
+		const size_t stale = drop_per_player([&](const ss_ &k){
+			const size_t at = k.compare(0, 7, "player:") == 0 ? 7 :
+					k.compare(0, 4, "bot:") == 0 ? 4 : 0;
+			return at && k.size() > at && k.find_first_not_of("0123456789", at) ==
+					ss_::npos && !actor_id(k);
+		});
+		if(stale)
+			log_i(MODULE, "per_player state: %zu entries of bodies not here "
+					"dropped", stale);
 
 		// The nodes that carry the positional entities' shared state, and
 		// the voxels they own
@@ -17575,6 +17587,41 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_REPORT_1123] The per_player entries whose key `gone` says goes
+	// out of every component's (a body or bot gone: its "player:<id>" or
+	// "bot:<id>"), sent as a change is; the count
+	size_t drop_per_player(const std::function<bool(const ss_&)> &gone)
+	{
+		size_t n = 0;
+		for(auto &p : m_entities)
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				Instance &in = p.second.comps[i];
+				for(const ss_ &k : m_types[in.type].per_player){
+					const json::Value &all = in.state.get(k);
+					if(!all.is_object())
+						continue;
+					sv_<ss_> drop;
+					for(json::Iterator it(all); it; ++it)
+						if(gone(it.key()))
+							drop.push_back(it.key());
+					if(drop.empty())
+						continue;
+					json::Value v = all.deepcopy();
+					for(const ss_ &b : drop)
+						v.del_key(b);
+					in.state.set(k, std::move(v));
+					n += drop.size();
+					m_runtime_dirty = true;
+					replicate_state(p.second, i, k);
+				}
+			}
+		return n;
+	}
+	void drop_body_state(const ss_ &by)
+	{
+		drop_per_player([&](const ss_ &k){ return k == by; });
+	}
+
 	// [KIT_UI_COMPONENTS] Whether a UI entity (a type with `ui`) is up for
 	// a player (their entity): its state `shown`, everyone's, under their
 	// own ("own": {"player:<id>": {shown}}), and its panel's (its parent,
@@ -19299,10 +19346,13 @@ struct Module: public interface::Module, public Interface
 		}
 		size_t n = 0;
 		bool authored_gone = false;
+		sv_<uint64_t> bots;
 		for(auto x = g.rbegin(); x != g.rend(); ++x){
 			auto it = m_entities.find(*x);
 			if(it == m_entities.end())
 				continue;
+			if(is_bot(it->second))
+				bots.push_back(*x);
 			remove_node(it->second);
 			it->second.node = 0;
 			it->second.nodes.clear();
@@ -19322,6 +19372,8 @@ struct Module: public interface::Module, public Interface
 			m_entities.erase(it);
 			n++;
 		}
+		for(uint64_t b : bots)
+			drop_body_state("bot:"+itos(b));
 		if(authored_gone)
 			m_store->set("authored", authored_json().stringify());
 		m_runtime_dirty = true;
@@ -34907,6 +34959,7 @@ struct Module: public interface::Module, public Interface
 		m_players.erase(it);
 		m_aside.del_key(name);
 		m_gone_guests["player:"+itos(id)] = name;
+		drop_body_state("player:"+itos(id));
 		// Written now: a shutdown can come before the next tick's save
 		m_runtime_dirty = true;
 		save_runtime();
@@ -42780,7 +42833,8 @@ struct Module: public interface::Module, public Interface
 				"component's own scene: a scene's run or HUD keeps to those not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
 				"for by, v in pairs(c.state.<key>) lists it, c.state.<key>[by] = "
-				"nil clears one.\n"
+				"nil clears one; a body's entry is dropped when the body goes "
+				"(play_leave, a guest leaving, a bot removed).\n"
 				// [KIT_CLIENT_REACT] (2), (3), (4)
 				"- A type's client part (put_type's client) runs on each client, "
 				"in its sandbox. Its handlers get e: e.id, e.node (its "
@@ -47016,8 +47070,11 @@ struct Module: public interface::Module, public Interface
 		auto it = m_entities.find(id);
 		if(after.is_null()){
 			if(it != m_entities.end()){
+				const bool bot = is_bot(it->second);
 				remove_node(it->second);
 				m_entities.erase(it);
+				if(bot)
+					drop_body_state("bot:"+itos(id));
 			}
 			return;
 		}
@@ -48618,6 +48675,7 @@ struct Module: public interface::Module, public Interface
 		for(auto it = m_attached.begin(); it != m_attached.end();)
 			it = it->second.player == bid ? m_attached.erase(it) : ++it;
 		m_drives.erase(bid);
+		drop_body_state("bot:"+itos(bid));
 	}
 
 	// Publish: the entities the draft's edits changed, as the draft has
