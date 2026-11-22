@@ -246,7 +246,8 @@ PART = {"type": "kit/part", "pos": M, "params": {"size": [4, 4, 4],
     "color": "#ff00ff", "material": "glow", "collision": False}}
 if phase == "draft":
     # The guide's sandbox line, the types still in Claude Code's 4096
-    assert len(ins) <= 4096 and "draft" in ins and "kit/counter" in ins, ins
+    assert len(ins) <= 4096 and "draft" in ins and \
+        re.search(r"\nLogic:[^\n]* counter[ \n]", ins), ins
     print("  instructions:", len(ins), "characters")
     text("stop") # (Workbench's world Running from its start)
     st = js("get_state")

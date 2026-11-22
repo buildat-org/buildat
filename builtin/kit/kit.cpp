@@ -41901,8 +41901,9 @@ struct Module: public interface::Module, public Interface
 			const ss_ g = jstr(m_types[t].decl.get("about"), "group");
 			groups[g.empty() ? "Other" : g].push_back(t);
 		}
-		s += full ? "\nThe types by group:\n" : "\nThe types by group "
-				"(get_guide: each one's inputs, outputs and params):\n";
+		s += full ? "\nThe types by group:\n" : "\nThe types by group, "
+				"kit/ left out (get_guide: each one's inputs, outputs and "
+				"params):\n";
 		auto ports = [](const sm_<ss_, ss_> &typed){
 			ss_ r;
 			for(auto &x : typed)
@@ -41914,7 +41915,7 @@ struct Module: public interface::Module, public Interface
 			if(!full){
 				ss_ line = g.first+":";
 				for(const ss_ &t : g.second)
-					line += " "+t;
+					line += " "+(t.rfind("kit/", 0) == 0 ? t.substr(4) : t);
 				line += "\n";
 				if(s.size() + line.size() > MAX_INSTRUCTIONS - 40)
 					return s+"... (get_guide lists them all)\n";
