@@ -1135,6 +1135,17 @@ buildat.sub_packet("kit:controls", function(data)
 			tostring(m and m.type or "none") .. (M.seated() and ", seat " ..
 			M.seated() or "") .. (c.plane and ", plane " .. (c.horizontal and "y " or "z ") ..
 			tostring(c.plane) or ""))
+	-- [KIT_PLAYER_PARAMS] the view's and the movement's numbers as they change
+	-- (a player's own parameters among them)
+	local p, mp = params(), m and type(m.params) == "table" and m.params or {}
+	local view = string.format("distance %s, fov %s, offset %s,%s,%s, frame %s, " ..
+			"gravity %s", tostring(p.distance), tostring(p.fov), tostring(p.offset_x),
+			tostring(p.offset_y), tostring(p.offset_z), tostring(p.camera_frame),
+			tostring(mp.gravity))
+	if view ~= C.view_logged then
+		C.view_logged = view
+		log:info("kit: controls: view " .. view)
+	end
 end)
 
 -- ---- Effects: Kit's render path (kit_effects.xml), on a viewport of

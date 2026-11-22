@@ -165,7 +165,7 @@ server c:send | (id, input, value, by)
 server c:session_end | (id, result)
 server c:session_move | (player, id)
 server c:session_start | (players, map, others)
-server c:set_param | (id, ty, param, value)
+server c:set_param | (id, ty, param, value, opts)
 server c:set_voxel | (name)
 server c:set_voxels | (cells)
 server c:sound | (name, opts)
@@ -1252,6 +1252,20 @@ type kit/parallax handlers | [experimental]
 type kit/parallax param follow | {"default": 0.5, "kind": "number", "max": 1, "min": 0} [experimental]
 type kit/parallax param follow_y | {"default": 1, "kind": "number", "max": 1, "min": 0} [experimental]
 type kit/parallax param repeat | {"default": 0, "kind": "number", "max": 4096, "min": 0} [experimental]
+type kit/param_set | version 1
+type kit/param_set handlers | on_input
+type kit/param_set param max | {"default": 1000000, "kind": "number", "max": 1000000, "min": -1000000}
+type kit/param_set param min | {"default": -1000000, "kind": "number", "max": 1000000, "min": -1000000}
+type kit/param_set param offset | {"default": 0, "kind": "number", "max": 1000000, "min": -1000000}
+type kit/param_set param param | {"default": "camera", "kind": "string"}
+type kit/param_set param scale | {"default": 1, "kind": "number", "max": 1000000, "min": -1000000}
+type kit/param_set param source | {"choices": ["value", "signal"], "default": "value", "kind": "string"}
+type kit/param_set param target | {"default": 0, "kind": "entity"}
+type kit/param_set param target_type | {"default": "kit/controls", "kind": "string"}
+type kit/param_set param to | {"choices": ["player", "everyone"], "default": "player", "kind": "string"}
+type kit/param_set param value | {"default": "chase", "kind": "string"}
+type kit/param_set input reset | none
+type kit/param_set input set | any
 type kit/part | version 1
 type kit/part handlers
 type kit/part param collision | {"default": true, "kind": "bool"}

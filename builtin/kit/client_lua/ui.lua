@@ -183,6 +183,17 @@ buildat.sub_packet("kit:mine", function(data)
 	end
 end)
 
+-- [KIT_PLAYER_PARAMS] The UI fields play's parameters change for this player
+-- (c:set_param's, everyone's and their own: {["<id>"] = {field = value}}),
+-- drawn over the show's; an element whose own change is made again, as an
+-- edit's change makes it
+local own_params = {}
+buildat.sub_packet("kit:pparams", function(data)
+	local m = network.parse_json(data)
+	own_params = type(m) == "table" and type(m.ui) == "table" and m.ui or {}
+	log:info("kit: ui own parameters: " .. data)
+end)
+
 -- [KIT_LOBBY] This player's own of entity id's per_player state key (nil:
 -- none sent)
 function M.mine_state(id, key)
@@ -1374,12 +1385,25 @@ local function update()
 			menu_item(id, n, show.ui)
 		elseif show and type(show.ui) == "table" then
 			local r = U[id]
+			-- ([KIT_PLAYER_PARAMS] this player's own fields over the show's)
+			local own = own_params[tostring(id)]
+			local u = show.ui
+			if type(own) == "table" then
+				raw = tostring(raw) .. network.write_json(own)
+				u = {}
+				for k, v in pairs(show.ui) do
+					u[k] = v
+				end
+				for k, v in pairs(own) do
+					u[k] = v
+				end
+			end
 			if not r or r.raw ~= raw or r.node ~= n.node then
 				if r then
 					drop(r)
 				end
-				r = {id = id, raw = raw, ui = show.ui, kind = tostring(show.ui.kind),
-					node = n.node, comp = tonumber(show.ui.comp) or 0}
+				r = {id = id, raw = raw, ui = u, kind = tostring(u.kind),
+					node = n.node, comp = tonumber(u.comp) or 0}
 				U[id] = r
 			end
 			r.n, r.seen = n, true
