@@ -646,10 +646,10 @@ local function voxel_mesh(node, def, size, shape)
 end
 
 -- [KIT_PLANE] stage 3: a polygon look's mesh in its own frame: its points (x, y)
--- extruded its depth along z round 0, its two faces (move.lua's triangles) and a
--- side an edge; n.poly its points and half depth (entity_t's). Returns the
--- CustomGeometry, its faces' triangles, whether it wears textures and its top
--- band's triangles.
+-- extruded its depth along z round 0, its two faces (move.lua's triangles; with
+-- bands slabs') and a side an edge; n.poly its points and half depth
+-- (entity_t's). Returns the CustomGeometry, its faces' triangles, whether it
+-- wears textures and its top band's triangles.
 -- [KIT_SIDE_SCENERY] Wearing a voxel material (def, voxel_tiles'), textured
 -- world-aligned where its node is (at, q), a repeat a cell, so pieces side by side
 -- tile: on its faces u and v are the world's x and -y (lying flat, its faces
@@ -691,6 +691,56 @@ do
 			s = s + p[2 * i - 1] * p[2 * j] - p[2 * j - 1] * p[2 * i]
 		end
 		return k >= 3 and math.abs(s) > 1e-9
+	end
+	-- [KIT_POLYGON_POINTS] A simple polygon {x1, y1...} as convex pieces in slabs
+	-- along (mx, my) (u = mx * x + my * y), a slab between each two of its points'
+	-- u: in each, the edges through it bottom to top along (ux, uy), each two
+	-- bounding a piece. A band's sides are two of those u, so it cuts only the
+	-- pieces under it: ear clipping's long slivers under a skyline were cut by
+	-- every band they passed (512 points: some 64000 triangles a face, a second's
+	-- build)
+	local function slabs(pts, mx, my, ux, uy)
+		local k, us, u, seen = #pts / 2, {}, {}, {}
+		for i = 1, k do
+			u[i] = mx * pts[2 * i - 1] + my * pts[2 * i]
+			if not seen[u[i]] then
+				seen[u[i]] = true
+				us[#us + 1] = u[i]
+			end
+		end
+		table.sort(us)
+		local out = {}
+		for s = 1, #us - 1 do
+			local u0, u1 = us[s], us[s + 1]
+			local um = (u0 + u1) / 2
+			local cr = {}
+			for i = 1, k do
+				local j = i % k + 1
+				if (u[i] < um) ~= (u[j] < um) then
+					local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * j - 1], pts[2 * j]
+					local t0, t1 = (u0 - u[i]) / (u[j] - u[i]), (u1 - u[i]) / (u[j] - u[i])
+					local tm = (t0 + t1) / 2
+					cr[#cr + 1] = {ax + (bx - ax) * t0, ay + (by - ay) * t0,
+						ax + (bx - ax) * t1, ay + (by - ay) * t1,
+						h = ux * (ax + (bx - ax) * tm) + uy * (ay + (by - ay) * tm)}
+				end
+			end
+			table.sort(cr, function(a, b) return a.h < b.h end)
+			for c = 1, #cr - 1, 2 do
+				local a, b = cr[c], cr[c + 1]
+				local p = {a[1], a[2], a[3], a[4], b[3], b[4], b[1], b[2]}
+				-- (two edges meeting at a point: a triangle)
+				if p[5] == p[3] and p[6] == p[4] then
+					table.remove(p, 5)
+					table.remove(p, 5)
+				end
+				if p[#p - 1] == p[1] and p[#p] == p[2] then
+					p[#p], p[#p - 1] = nil, nil
+				end
+				out[#out + 1] = p
+			end
+		end
+		return out
 	end
 	local function face_uv(x, y)
 		return x, -y
@@ -808,22 +858,29 @@ do
 			end
 		end
 		-- The faces: the triangles less the bands, the bands' parts in them
-		local tris = MV.triangulate(pts)
+		-- ([KIT_POLYGON_POINTS] with bands: in slabs along down's normal)
 		local pieces, band = {}, {}
-		for t = 1, #tris - 2, 3 do
-			local a, b, c = tris[t], tris[t + 1], tris[t + 2]
-			pieces[#pieces + 1] = {pts[2 * a - 1], pts[2 * a], pts[2 * b - 1],
-				pts[2 * b], pts[2 * c - 1], pts[2 * c]}
+		if bands[1] then
+			pieces = slabs(pts, -down[2], down[1], -down[1], -down[2])
+		else
+			local tris = MV.triangulate(pts)
+			for t = 1, #tris - 2, 3 do
+				local a, b, c = tris[t], tris[t + 1], tris[t + 2]
+				pieces[#pieces + 1] = {pts[2 * a - 1], pts[2 * a], pts[2 * b - 1],
+					pts[2 * b], pts[2 * c - 1], pts[2 * c]}
+			end
 		end
 		for _, h in ipairs(bands) do
 			local rest = {}
 			for _, p in ipairs(pieces) do
-				local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
-				for v = 1, #p, 2 do
-					x0, x1 = math.min(x0, p[v]), math.max(x1, p[v])
-					y0, y1 = math.min(y0, p[v + 1]), math.max(y1, p[v + 1])
+				if not p.x0 then
+					p.x0, p.y0, p.x1, p.y1 = math.huge, math.huge, -math.huge, -math.huge
+					for v = 1, #p, 2 do
+						p.x0, p.x1 = math.min(p.x0, p[v]), math.max(p.x1, p[v])
+						p.y0, p.y1 = math.min(p.y0, p[v + 1]), math.max(p.y1, p[v + 1])
+					end
 				end
-				if x1 <= h.x0 or x0 >= h.x1 or y1 <= h.y0 or y0 >= h.y1 then
+				if p.x1 <= h.x0 or p.x0 >= h.x1 or p.y1 <= h.y0 or p.y0 >= h.y1 then
 					rest[#rest + 1] = p
 				else
 					local inside = p
@@ -841,7 +898,7 @@ do
 			end
 			pieces = rest
 		end
-		local band_tris = 0
+		local band_tris, face_tris = 0, 0
 		for g, list in ipairs({pieces, band}) do
 			for _, p in ipairs(list) do
 				for v = 3, #p / 2 do
@@ -851,6 +908,7 @@ do
 								faces_uv)
 					end
 					band_tris = band_tris + (g == 2 and 1 or 0)
+					face_tris = face_tris + 1
 				end
 			end
 		end
@@ -892,7 +950,7 @@ do
 				cg:SetMaterial(i - 1, m)
 			end
 		end
-		return cg, #tris / 3, tiles ~= nil, band_tris
+		return cg, face_tris, tiles ~= nil, band_tris
 	end
 end
 

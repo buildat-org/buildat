@@ -676,8 +676,13 @@ end
 
 -- ---- [KIT_PLANE] stage 3: a polygon look as a prism (the top of this file says
 -- what): {pts = {x1, y1, x2, y2...} in the world, the solid on the right going
--- round, n, z0, z1, x0, y0, x1, y1 its box, info, inf (its edges' infos)}; nil when
--- it is not met
+-- round, n, z0, z1, x0, y0, x1, y1 its box, info, inf (its edges' infos), ck (its
+-- edges in runs of CHUNK: {i0, i1, x0, y0, x1, y1...}, edge i from point i to the
+-- next)}; nil when it is not met
+-- [KIT_POLYGON_POINTS] a query looks at a run's edges only where its box is met:
+-- a long skyline of 512 points spans the body, and every edge each time was a
+-- walker's step past box.c's cap
+local CHUNK = 16
 M.POLYGON = {solid = true, friction = 1, surface = "polygon"}
 -- [KIT_CLIENT_REACT] (5) a look's own surface and friction (none: M.POLYGON)
 local function poly_info(look)
@@ -756,13 +761,28 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 	end
 	local p = {pts = pts, n = n, info = poly_info(look), inf = {}, da = da,
 		floor = fl or nil, x0 = math.huge, y0 = math.huge, x1 = -math.huge,
-		y1 = -math.huge}
+		y1 = -math.huge, ck = {}}
 	for i = 1, n do
 		local x, y = pts[2 * i - 1], pts[2 * i]
 		if x < p.x0 then p.x0 = x end
 		if x > p.x1 then p.x1 = x end
 		if y < p.y0 then p.y0 = y end
 		if y > p.y1 then p.y1 = y end
+	end
+	local ck = p.ck
+	for i0 = 1, n, CHUNK do
+		local i1 = i0 + CHUNK - 1 < n and i0 + CHUNK - 1 or n
+		local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+		for i = i0, i1 + 1 do
+			local k = i <= n and i or 1
+			local x, y = pts[2 * k - 1], pts[2 * k]
+			if x < x0 then x0 = x end
+			if x > x1 then x1 = x end
+			if y < y0 then y0 = y end
+			if y > y1 then y1 = y end
+		end
+		ck[#ck + 1], ck[#ck + 2], ck[#ck + 3] = i0, i1, x0
+		ck[#ck + 1], ck[#ck + 2], ck[#ck + 3] = y0, x1, y1
 	end
 	local d = tonumber(look.depth) or 1
 	d = (d < 0.02 and 0.02 or d > 64 and 64 or d) * abs(sc[3])
@@ -790,13 +810,18 @@ end
 
 -- Whether x, y is inside it (even-odd)
 local function poly_inside(p, x, y)
-	local q, n, inside = p.pts, p.n, false
-	for i = 1, n do
-		local j = i % n + 1
-		local ay, by = q[2 * i], q[2 * j]
-		if (ay > y) ~= (by > y) and x < q[2 * i - 1] + (y - ay) *
-				(q[2 * j - 1] - q[2 * i - 1]) / (by - ay) then
-			inside = not inside
+	local q, n, ck, inside = p.pts, p.n, p.ck, false
+	for c = 1, #ck, 6 do
+		-- (a run wholly over, under or left of it crosses nothing to its right)
+		if ck[c + 3] <= y and ck[c + 5] > y and ck[c + 4] >= x then
+			for i = ck[c], ck[c + 1] do
+				local j = i % n + 1
+				local ay, by = q[2 * i], q[2 * j]
+				if (ay > y) ~= (by > y) and x < q[2 * i - 1] + (y - ay) *
+						(q[2 * j - 1] - q[2 * i - 1]) / (by - ay) then
+					inside = not inside
+				end
+			end
 		end
 	end
 	return inside
@@ -809,32 +834,37 @@ local function poly_over(p, x0, y0, x1, y1)
 	if p.x1 <= x0 or p.x0 >= x1 or p.y1 <= y0 or p.y0 >= y1 then
 		return false
 	end
-	local q, n = p.pts, p.n
-	for i = 1, n do
-		local j = i % n + 1
-		local ax, ay = q[2 * i - 1], q[2 * i]
-		local dx, dy = q[2 * j - 1] - ax, q[2 * j] - ay
-		-- (Liang and Barsky)
-		local t0, t1 = 0, 1
-		for k = 1, 4 do
-			local pp = k == 1 and -dx or k == 2 and dx or k == 3 and -dy or dy
-			local qq = k == 1 and ax - x0 or k == 2 and x1 - ax or k == 3 and ay - y0 or
-					y1 - ay
-			if pp == 0 then
-				if qq < 0 then
-					t0 = 2
+	local q, n, ck = p.pts, p.n, p.ck
+	for c = 1, #ck, 6 do
+		if ck[c + 2] <= x1 and ck[c + 4] >= x0 and ck[c + 3] <= y1 and
+				ck[c + 5] >= y0 then
+			for i = ck[c], ck[c + 1] do
+				local j = i % n + 1
+				local ax, ay = q[2 * i - 1], q[2 * i]
+				local dx, dy = q[2 * j - 1] - ax, q[2 * j] - ay
+				-- (Liang and Barsky)
+				local t0, t1 = 0, 1
+				for k = 1, 4 do
+					local pp = k == 1 and -dx or k == 2 and dx or k == 3 and -dy or dy
+					local qq = k == 1 and ax - x0 or k == 2 and x1 - ax or
+							k == 3 and ay - y0 or y1 - ay
+					if pp == 0 then
+						if qq < 0 then
+							t0 = 2
+						end
+					else
+						local r = qq / pp
+						if pp < 0 then
+							if r > t0 then t0 = r end
+						elseif r < t1 then
+							t1 = r
+						end
+					end
 				end
-			else
-				local r = qq / pp
-				if pp < 0 then
-					if r > t0 then t0 = r end
-				elseif r < t1 then
-					t1 = r
+				if t0 <= t1 then
+					return true
 				end
 			end
-		end
-		if t0 <= t1 then
-			return true
 		end
 	end
 	return poly_inside(p, (x0 + x1) / 2, (y0 + y1) / 2)
@@ -1387,31 +1417,40 @@ function W:sweep_polys(b0, a0, d)
 			if spans(self, p, b0) and plo <= v1 and phi >= v0 and
 					(s > 0 and hi >= lead - EPS and lo <= lead + d or
 					s < 0 and lo <= lead + EPS and hi >= lead + d) then
-				local q, n = p.pts, p.n
-				for i = 1, n do
-					local j = i % n + 1
-					local pu, pv = q[2 * i - 2 + a], q[2 * i - 2 + v]
-					local qu, qv = q[2 * j - 2 + a], q[2 * j - 2 + v]
-					local eu, ev = qu - pu, qv - pv
-					-- Its normal out ((-ey, ex)) against the move: coming at it
-					if s * (a == 1 and -ev or ev) < 0 then
-						local was = d
-						-- The body's leading corners along the move onto it
-						if (v0 - pv) * (v0 - qv) <= 0 then
-							d = nearer((pu + (v0 - pv) * eu / ev - lead) * s, d, s)
-						end
-						if (v1 - pv) * (v1 - qv) <= 0 then
-							d = nearer((pu + (v1 - pv) * eu / ev - lead) * s, d, s)
-						end
-						-- Its ends onto the body's leading face
-						if pv > v0 and pv < v1 then
-							d = nearer((pu - lead) * s, d, s)
-						end
-						if qv > v0 and qv < v1 then
-							d = nearer((qu - lead) * s, d, s)
-						end
-						if d ~= was then
-							hit = edge_info(p, i)
+				local q, n, ck = p.pts, p.n, p.ck
+				-- (a run's box as the polygon's above: u along the move, v across)
+				local cu, cv = a == 1 and 2 or 3, v == 1 and 2 or 3
+				for c = 1, #ck, 6 do
+					lo, hi = ck[c + cu], ck[c + cu + 2]
+					if ck[c + cv] <= v1 and ck[c + cv + 2] >= v0 and
+							(s > 0 and hi >= lead - EPS and lo <= lead + d or
+							s < 0 and lo <= lead + EPS and hi >= lead + d) then
+						for i = ck[c], ck[c + 1] do
+							local j = i % n + 1
+							local pu, pv = q[2 * i - 2 + a], q[2 * i - 2 + v]
+							local qu, qv = q[2 * j - 2 + a], q[2 * j - 2 + v]
+							local eu, ev = qu - pu, qv - pv
+							-- Its normal out ((-ey, ex)) against the move: coming at it
+							if s * (a == 1 and -ev or ev) < 0 then
+								local was = d
+								-- The body's leading corners along the move onto it
+								if (v0 - pv) * (v0 - qv) <= 0 then
+									d = nearer((pu + (v0 - pv) * eu / ev - lead) * s, d, s)
+								end
+								if (v1 - pv) * (v1 - qv) <= 0 then
+									d = nearer((pu + (v1 - pv) * eu / ev - lead) * s, d, s)
+								end
+								-- Its ends onto the body's leading face
+								if pv > v0 and pv < v1 then
+									d = nearer((pu - lead) * s, d, s)
+								end
+								if qv > v0 and qv < v1 then
+									d = nearer((qu - lead) * s, d, s)
+								end
+								if d ~= was then
+									hit = edge_info(p, i)
+								end
+							end
 						end
 					end
 				end
@@ -2054,14 +2093,20 @@ function W:down(x, y, z, len)
 			end
 		elseif p.da ~= 2 and p.z0 < z and p.z1 > z and p.x0 <= x and p.x1 >= x and
 				p.y0 <= y + EPS then
-			local q = p.pts
-			for i = 1, p.n do
-				local j = i % p.n + 1
-				local ax, bx = q[2 * i - 1], q[2 * j - 1]
-				if ax < bx and ax <= x and bx >= x then
-					local d = y - (q[2 * i] + (x - ax) * (q[2 * j] - q[2 * i]) / (bx - ax))
-					if d > -EPS and d <= len and (not best or d < best) then
-						best, info = d < 0 and 0 or d, edge_info(p, i)
+			local q, ck = p.pts, p.ck
+			for c = 1, #ck, 6 do
+				if ck[c + 2] <= x and ck[c + 4] >= x and ck[c + 3] <= y + EPS and
+						ck[c + 5] >= y - len then
+					for i = ck[c], ck[c + 1] do
+						local j = i % p.n + 1
+						local ax, bx = q[2 * i - 1], q[2 * j - 1]
+						if ax < bx and ax <= x and bx >= x then
+							local d = y - (q[2 * i] + (x - ax) * (q[2 * j] - q[2 * i]) /
+									(bx - ax))
+							if d > -EPS and d <= len and (not best or d < best) then
+								best, info = d < 0 and 0 or d, edge_info(p, i)
+							end
+						end
 					end
 				end
 			end
@@ -2156,13 +2201,18 @@ function W:plane_edges(z, x0, y0, x1, y1)
 	for _, p in ipairs(self.polys) do
 		if (p.da or 3) == da and p.z0 < z and p.z1 > z and p.x0 <= x1 and p.x1 >= x0 and
 				p.y0 <= y1 and p.y1 >= y0 then
-			local q = p.pts
-			for i = 1, p.n do
-				local j = i % p.n + 1
-				local ax, ay, bx, by = q[2 * i - 1], q[2 * i], q[2 * j - 1], q[2 * j]
-				if (ax < bx and ax or bx) <= x1 and (ax > bx and ax or bx) >= x0 and
-						(ay < by and ay or by) <= y1 and (ay > by and ay or by) >= y0 then
-					out[#out + 1] = {ax, ay, bx, by, edge_info(p, i), poly = true}
+			local q, ck = p.pts, p.ck
+			for c = 1, #ck, 6 do
+				if ck[c + 2] <= x1 and ck[c + 4] >= x0 and ck[c + 3] <= y1 and
+						ck[c + 5] >= y0 then
+					for i = ck[c], ck[c + 1] do
+						local j = i % p.n + 1
+						local ax, ay, bx, by = q[2 * i - 1], q[2 * i], q[2 * j - 1], q[2 * j]
+						if (ax < bx and ax or bx) <= x1 and (ax > bx and ax or bx) >= x0 and
+								(ay < by and ay or by) <= y1 and (ay > by and ay or by) >= y0 then
+							out[#out + 1] = {ax, ay, bx, by, edge_info(p, i), poly = true}
+						end
+					end
 				end
 			end
 		end

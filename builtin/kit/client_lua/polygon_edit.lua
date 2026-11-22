@@ -35,7 +35,7 @@ local G = {}
 NT.pg = G
 local TYPE = "kit/polygon"
 -- (kit.cpp's MAX_POLYGON_POINTS)
-local MAX_POINTS = 128
+local MAX_POINTS = 512
 
 local function snap(v)
 	local g = GRID_STEPS[S.grid] or 1

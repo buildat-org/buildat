@@ -10,6 +10,8 @@
 -- the same bits twice; the plane off: climbing, passing beside it, stopped by its
 -- face along z; w:circle and w:segment against an edge, a polygon at another
 -- depth not met, w:down on its top, M.triangulate of a concave shape.
+-- [KIT_POLYGON_POINTS] Three skylines of 512 points: a tower's wall met, a step's
+-- Lua instructions well within box.c's cap.
 -- Run: lua util/kit_plane_check.lua (Lua 5.1 or LuaJIT), from the source tree's root.
 local function load_env(path, env)
 	local f = assert(loadfile(path))
@@ -236,6 +238,51 @@ for q = 1, #tri, 3 do
 end
 assert(#tri == 12 and near(area, 6), "triangles: " .. #tri .. ", " .. area)
 print("ok: w:circle, w:segment and w:down against polygon edges, one at another depth not met; a concave one's triangles")
+
+-- [KIT_POLYGON_POINTS] Three skylines of 512 points (127 towers 2 wide, 2 apart, on
+-- a base; kit_plane_check.sh's): the walker in the gap at x 10...12 stops at the
+-- tower's wall (x 12); its dearest step (that, dropped onto the towers jumping,
+-- put inside one) well within box.c's STEP_CAP (200000 instructions, counted by a
+-- hook; with every edge looked at each query 150000, some steps 415000)
+local SKY = {{-255, -4}, {-85, -4.5}, {85, -4.5}, {255, -4}}
+for k = 0, 126 do
+	local x, h = 254 - 4 * k, 2 + (k * 37 % 23) / 2
+	for _, p in ipairs({{x, 0.5}, {x, h}, {x - 2, h}, {x - 2, 0.5}}) do
+		SKY[#SKY + 1] = p
+	end
+end
+assert(#SKY == 512)
+local skw = MV.world{cell = function() return nil end, plane = 0, polys = {
+	poly(SKY, {0, 10, 0}), poly(SKY, {0, 10, 0}), poly(SKY, {0, 10, 0})}}
+if jit then
+	jit.off()
+end
+local count, worst = 0, 0
+local function counted(s, n, i)
+	for _ = 1, n do
+		count = 0
+		debug.sethook(function() count = count + 100 end, "", 100)
+		MV.steps(walker, s, {i}, 1 / 60, 1, skw, wp)
+		debug.sethook()
+		worst = math.max(worst, count)
+	end
+end
+s = {pos = {10.6, 10.55, 0}}
+counted(s, 120, RIGHT)
+assert(near(s.pos[1], 11.55, 1e-3) and near(s.pos[2], 10.5) and s.ground,
+		"the skyline's wall: " .. s.pos[1] .. "," .. s.pos[2])
+-- (then dropped onto the towers, jumping along them)
+s = {pos = {0, 41, 0}}
+counted(s, 240, {f = 0, r = 1, yaw = 0, jump = 1})
+-- (and put inside a tower: pushed out)
+s = {pos = {13, 12, 0}}
+counted(s, 30, RIGHT)
+if jit then
+	jit.on()
+end
+assert(worst < 100000, "a step over three skylines: " .. worst .. " instructions")
+print("ok: three skylines of 512 points: the walker stopped at a tower's wall, its dearest step ~" ..
+		worst .. " instructions")
 
 -- [KIT_CLIENT_REACT] (5) a polygon's own surface and friction in what a step meets:
 -- w:circle's, w:segment's and the walker's ground (s.surface); none: "polygon", 1
