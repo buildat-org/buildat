@@ -27,6 +27,11 @@
 #      meadow_2 the red team (its spawn) moved, a kit/part put by it, a cell
 #      put: meadow's team, entities and cells as they were. Running:
 #      next_map twice, the lobby's status "Next map: meadow_2".
+#      [KIT_ENV_INHERIT] Stopped, by MCP: a kit/environment on the root
+#      (ambient, time) and one on meadow with its sky alone: get_state's
+#      overrides ["sky"], inherited the root's ambient and time; its
+#      ambient set (its own), then inherit: true (the root's again; twice
+#      refused, and on the root's).
 # Screenshot, kept with KEEP_TMP=1: $t/scenes.png (the Scenes window, its
 # Duplicate world)
 #   util/kit_scene_dup_check.sh
@@ -335,6 +340,31 @@ elif phase == "arena":
     s = until(lambda: "Next map: meadow_2" in status_of() and status_of(), "meadow_2 next")
     print("  the arena's status:", s)
     call("stop")
+    # [KIT_ENV_INHERIT] A scene's kit/environment with its sky alone: the
+    # rest the root's, by get_state's overrides and inherited; set_param
+    # makes one its own, inherit: true the root's again
+    renv = placed(call("place", {"type": "kit/environment", "pos": [0, 0, 0],
+        "on": "root", "params": {"ambient": "#8c8c96", "time": 9}}))
+    call("switch_scene", {"name": "meadow"})
+    env = placed(call("place", {"type": "kit/environment", "pos": [0, 0, 0],
+        "on": "scene", "params": {"sky": "#405a78"}}))
+    def ec():
+        return comp(state(ids=[env])["entities"][0], "kit/environment")
+    c = ec()
+    assert c["overrides"] == ["sky"] and "sky" not in c["inherited"], c
+    assert c["inherited"]["ambient"] == "#8c8c96" and c["inherited"]["time"] == 9, c
+    call("set_param", {"id": env, "param": "ambient", "value": "#202020"})
+    c = ec()
+    assert c["overrides"] == ["ambient", "sky"] and "ambient" not in c["inherited"], c
+    call("set_param", {"id": env, "param": "ambient", "inherit": True})
+    c = ec()
+    assert c["overrides"] == ["sky"] and c["inherited"]["ambient"] == "#8c8c96", c
+    assert "not its own" in call("set_param", {"id": env, "param": "ambient",
+        "inherit": True}, True)
+    assert "only a scene's" in call("set_param", {"id": renv, "param": "ambient",
+        "inherit": True}, True)
+    assert "inherited" not in comp(state(ids=[renv])["entities"][0], "kit/environment")
+    print("  a scene's environment by MCP: its sky its own, the rest the root's")
 print("ok:", phase)
 PY
 mcp() # <phase>

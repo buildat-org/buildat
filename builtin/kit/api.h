@@ -32,6 +32,9 @@ namespace interface
 // kit/game_rules, kit/environment, a builder's own) are looked up from a
 // player's scene up, the nearest copy winning (one on an entity right under
 // a scene with no position, "on": "scene"), the root's last.
+// [KIT_ENV_INHERIT] kit/environment by each parameter: a scene's has those
+// set on it (its component's "overrides", saved and exported with it), the
+// rest the nearest's above that sets them, the root's setting all.
 // [KIT_SINGLE] A type with `single = true` has at most one instance a
 // holder: the app root, a scene (the nearest scene above the entity, else
 // the root); one on the root and one in a scene is the scene's override.

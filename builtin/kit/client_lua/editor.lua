@@ -3448,7 +3448,9 @@ end
 -- [KIT_LIGHTING_SCENE] What an environment's lighting inherit is on the
 -- entity e: the environment's above it that says other (kit.cpp's
 -- env_lighting), inherit on the root's fast_physical, none there cartoon
-local function inherited_lighting(e)
+-- [KIT_ENV_INHERIT] The environments above the entity e's scene: each
+-- scene's over it, the root's last, {c (nil: none there), name, root}
+local function env_chain(e)
 	local by, env = {}, {}
 	for _, x in ipairs(all_entities()) do
 		by[x.id] = x
@@ -3459,19 +3461,51 @@ local function inherited_lighting(e)
 			end
 		end
 	end
-	-- (from the scene e is on up: each scene over it, the root last)
-	local h = e.parent or 1
+	local out, h = {}, e.parent or 1
 	for _ = 1, 64 do
 		if h == 1 then
 			break
 		end
 		h = by[h] and by[h].parent or 1
-		local c = env[h]
-		local l = c and (c.params or {}).lighting or "inherit"
-		if h == 1 then
+		if h == 1 or by[h] and by[h].kind == "scene" then
+			out[#out + 1] = {c = env[h], root = h == 1,
+				name = h ~= 1 and by[h].name or "root"}
+		end
+	end
+	return out
+end
+-- Whether an environment's parameter k is its own: the root's all, a
+-- scene's those set on it (kit.cpp's env_own)
+local function env_own(c, k, root)
+	if root then
+		return true
+	end
+	for _, o in ipairs(c.overrides or {}) do
+		if o == k then
+			return true
+		end
+	end
+	return false
+end
+-- A scene's environment's parameter k from above: its value and whose it
+-- is (nil, nil: no environment above sets it, the default)
+local function env_above(e, k)
+	for _, a in ipairs(env_chain(e)) do
+		if a.c and env_own(a.c, k, a.root) then
+			return (a.c.params or {})[k], a.name
+		end
+	end
+end
+
+local function inherited_lighting(e)
+	for _, a in ipairs(env_chain(e)) do
+		local c = a.c
+		local l = c and env_own(c, "lighting", a.root) and
+				(c.params or {}).lighting or "inherit"
+		if a.root then
 			return not c and "cartoon" or l == "inherit" and
 					"fast_physical" or l
-		elseif by[h] and by[h].kind == "scene" and l ~= "inherit" then
+		elseif l ~= "inherit" then
 			return l
 		end
 	end
@@ -3494,6 +3528,20 @@ function NT.params_form(w, e, ci, c, t, keep)
 	for k, v in pairs(c.params or {}) do
 		values[k] = v
 	end
+	-- [KIT_ENV_INHERIT] a scene's environment: a parameter not set on it
+	-- shown with the value it has from above, "(root's)"; edited, its own
+	local env_scene = c.type == "kit/environment" and e.pos == nil and
+			e.kind == nil and (e.parent or 1) ~= 1
+	local from = {}
+	for k in pairs(env_scene and decl or {}) do
+		if not env_own(c, k) then
+			local v, whose = env_above(e, k)
+			if v == nil then
+				v = decl[k].default
+			end
+			values[k], from[k] = v, whose or "default"
+		end
+	end
 	-- What is picked and not applied yet stays picked: the inspector is
 	-- drawn again on the state's packets (user, 2026-10-31: the camera
 	-- dropdown went back to first_person at once)
@@ -3515,6 +3563,10 @@ function NT.params_form(w, e, ci, c, t, keep)
 			points[#points + 1] = k
 		else
 			local f = field(k, decl[k], values)
+			if from[k] then
+				f.label = k .. " (" .. (from[k] == "default" and "default" or
+						from[k] .. "'s") .. ")"
+			end
 			if k == "lighting" and c.type == "kit/environment" then
 				local l = inherited_lighting(e)
 				for _, ch in ipairs(f.choices or {}) do
@@ -3629,6 +3681,19 @@ function NT.params_form(w, e, ci, c, t, keep)
 		apply_b:SetName("kit apply")
 		mark()
 		NT.pf.overrides(w, e, ci)
+		-- [KIT_ENV_INHERIT] each one set on it, and back to the one above's
+		for _, k in ipairs(env_scene and c.overrides or {}) do
+			local r = row(w)
+			label(r, k .. ": this scene's")
+			button(r, "Inherit " .. k, function()
+				if E.pending[key] then
+					E.pending[key][k] = nil
+				end
+				send({op = "set", id = e.id, comp = ci - 1, param = k,
+					inherit = true})
+				log:info("kit editor: " .. key .. " " .. k .. " inherited")
+			end)
+		end
 	end
 	-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
 	-- Show (written into the world, an edit undone as one) and Fill (all
