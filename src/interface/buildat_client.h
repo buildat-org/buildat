@@ -253,6 +253,8 @@ BUILDAT_CLIENT_IMPORT("Component.enabled=boolean", buildat_c_Component_set_enabl
 BUILDAT_CLIENT_IMPORT("Octree:GetDrawables(BoundingBox):table", buildat_c_Octree_GetDrawables)
 BUILDAT_CLIENT_IMPORT("Drawable.castShadows:boolean", buildat_c_Drawable_get_castShadows)
 BUILDAT_CLIENT_IMPORT("Drawable.castShadows=boolean", buildat_c_Drawable_set_castShadows)
+BUILDAT_CLIENT_IMPORT("Drawable.drawDistance:number", buildat_c_Drawable_get_drawDistance)
+BUILDAT_CLIENT_IMPORT("Drawable.drawDistance=number", buildat_c_Drawable_set_drawDistance)
 BUILDAT_CLIENT_IMPORT("Drawable.worldBoundingBox:BoundingBox", buildat_c_Drawable_get_worldBoundingBox)
 BUILDAT_CLIENT_IMPORT("Drawable.worldBoundingBox=BoundingBox", buildat_c_Drawable_set_worldBoundingBox)
 BUILDAT_CLIENT_IMPORT("CustomGeometry:BeginGeometry(number,number)", buildat_c_CustomGeometry_BeginGeometry)
@@ -382,6 +384,8 @@ BUILDAT_CLIENT_IMPORT("Material.cullMode:number", buildat_c_Material_get_cullMod
 BUILDAT_CLIENT_IMPORT("Material.cullMode=number", buildat_c_Material_set_cullMode)
 BUILDAT_CLIENT_IMPORT("Material.fillMode:number", buildat_c_Material_get_fillMode)
 BUILDAT_CLIENT_IMPORT("Material.fillMode=number", buildat_c_Material_set_fillMode)
+BUILDAT_CLIENT_IMPORT("Material.renderOrder:number", buildat_c_Material_get_renderOrder)
+BUILDAT_CLIENT_IMPORT("Material.renderOrder=number", buildat_c_Material_set_renderOrder)
 BUILDAT_CLIENT_IMPORT("Material.shadowCullMode:number", buildat_c_Material_get_shadowCullMode)
 BUILDAT_CLIENT_IMPORT("Material.shadowCullMode=number", buildat_c_Material_set_shadowCullMode)
 BUILDAT_CLIENT_IMPORT("Texture:SetNumLevels(number)", buildat_c_Texture_SetNumLevels)
@@ -2263,6 +2267,10 @@ public:
 	bool castShadows() const;
 	// Drawable.castShadows=boolean
 	void castShadows(bool a1) const;
+	// Drawable.drawDistance:number
+	double drawDistance() const;
+	// Drawable.drawDistance=number
+	void drawDistance(double a1) const;
 	// Drawable.worldBoundingBox:BoundingBox
 	::buildat::BoundingBox worldBoundingBox() const;
 	// Drawable.worldBoundingBox=BoundingBox
@@ -2591,6 +2599,10 @@ public:
 	double fillMode() const;
 	// Material.fillMode=number
 	void fillMode(double a1) const;
+	// Material.renderOrder:number
+	double renderOrder() const;
+	// Material.renderOrder=number
+	void renderOrder(double a1) const;
 	// Material.shadowCullMode:number
 	double shadowCullMode() const;
 	// Material.shadowCullMode=number
@@ -4999,6 +5011,8 @@ inline void Component::enabled(bool a1) const{ ::buildat::detail::Reply r = ::bu
 inline ::buildat::Table Octree::GetDrawables(const ::buildat::BoundingBox & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Octree_GetDrawables, *this, a1); return ::buildat::Table(r.handle()); }
 inline bool Drawable::castShadows() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_get_castShadows, *this); return r.boolean(); }
 inline void Drawable::castShadows(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_set_castShadows, *this, a1); (void)r; }
+inline double Drawable::drawDistance() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_get_drawDistance, *this); return r.number(); }
+inline void Drawable::drawDistance(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_set_drawDistance, *this, a1); (void)r; }
 inline ::buildat::BoundingBox Drawable::worldBoundingBox() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_get_worldBoundingBox, *this); return ::buildat::BoundingBox(r.handle()); }
 inline void Drawable::worldBoundingBox(const ::buildat::BoundingBox & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_set_worldBoundingBox, *this, a1); (void)r; }
 inline void CustomGeometry::BeginGeometry(double a1, double a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_CustomGeometry_BeginGeometry, *this, a1, a2); (void)r; }
@@ -5138,6 +5152,8 @@ inline double Material::cullMode() const{ ::buildat::detail::Reply r = ::buildat
 inline void Material::cullMode(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_set_cullMode, *this, a1); (void)r; }
 inline double Material::fillMode() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_get_fillMode, *this); return r.number(); }
 inline void Material::fillMode(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_set_fillMode, *this, a1); (void)r; }
+inline double Material::renderOrder() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_get_renderOrder, *this); return r.number(); }
+inline void Material::renderOrder(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_set_renderOrder, *this, a1); (void)r; }
 inline double Material::shadowCullMode() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_get_shadowCullMode, *this); return r.number(); }
 inline void Material::shadowCullMode(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Material_set_shadowCullMode, *this, a1); (void)r; }
 inline void Texture::SetNumLevels(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture_SetNumLevels, *this, a1); (void)r; }

@@ -1372,6 +1372,16 @@ impl Drawable {
 		let mut r = call(imports::buildat_c_Drawable_set_castShadows, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		drop(r)
 	}
+	/// Drawable.drawDistance:number
+	pub fn drawDistance(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Drawable_get_drawDistance, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Drawable.drawDistance=number
+	pub fn set_drawDistance(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Drawable_set_drawDistance, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
 	/// Drawable.worldBoundingBox:BoundingBox
 	pub fn worldBoundingBox(&self) -> BoundingBox {
 		let mut r = call(imports::buildat_c_Drawable_get_worldBoundingBox, &[&H(self.handle()) as &dyn Put]);
@@ -2115,6 +2125,16 @@ impl Material {
 	/// Material.fillMode=number
 	pub fn set_fillMode(&self, a1: impl Put) {
 		let mut r = call(imports::buildat_c_Material_set_fillMode, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Material.renderOrder:number
+	pub fn renderOrder(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Material_get_renderOrder, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Material.renderOrder=number
+	pub fn set_renderOrder(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Material_set_renderOrder, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		drop(r)
 	}
 	/// Material.shadowCullMode:number
@@ -7346,6 +7366,10 @@ mod imports {
 		pub fn buildat_c_Drawable_get_castShadows(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Drawable.castShadows=boolean"]
 		pub fn buildat_c_Drawable_set_castShadows(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Drawable.drawDistance:number"]
+		pub fn buildat_c_Drawable_get_drawDistance(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Drawable.drawDistance=number"]
+		pub fn buildat_c_Drawable_set_drawDistance(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Drawable.worldBoundingBox:BoundingBox"]
 		pub fn buildat_c_Drawable_get_worldBoundingBox(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Drawable.worldBoundingBox=BoundingBox"]
@@ -7604,6 +7628,10 @@ mod imports {
 		pub fn buildat_c_Material_get_fillMode(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Material.fillMode=number"]
 		pub fn buildat_c_Material_set_fillMode(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Material.renderOrder:number"]
+		pub fn buildat_c_Material_get_renderOrder(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Material.renderOrder=number"]
+		pub fn buildat_c_Material_set_renderOrder(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Material.shadowCullMode:number"]
 		pub fn buildat_c_Material_get_shadowCullMode(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Material.shadowCullMode=number"]

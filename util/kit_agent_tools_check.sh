@@ -1151,8 +1151,9 @@ elif phase == "stop_play":
     said, body = join()
     me = body["by"]
     call("try_input", {"id": s["EP"], "input": "set", "as": "me"})
-    until(lambda: entity(s["EP"])["components"][0].get("state", {}).get(
-        "got", {}).get(me) == "set " + me, "the body's entry in pp's got")
+    # (an empty Lua table comes as [] until the entry is set)
+    until(lambda: (entity(s["EP"])["components"][0].get("state", {}).get(
+        "got") or {}).get(me) == "set " + me, "the body's entry in pp's got")
     save(AB=me)
     print("   playing as %s, pp's got %s, at the stop" % (me, entity(s["EP"])))
 elif phase == "rejoin":
