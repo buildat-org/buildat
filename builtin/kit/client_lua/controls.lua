@@ -276,12 +276,27 @@ local function plane_z()
 	return C.ctl and not C.ctl.horizontal and tonumber(C.ctl.plane) or nil
 end
 
+-- [KIT_STUNTS_PERF] Whether two lists hold the same, one by one
+local function same_list(a, b)
+	if #a ~= #b then
+		return false
+	end
+	for i = 1, #a do
+		if a[i] ~= b[i] then
+			return false
+		end
+	end
+	return true
+end
+
 -- (skip: what is left out, a function of an entity's id and node; the vehicle held)
 local function world(skip)
 	local reg = voxelworld.get_voxel_registry()
 	local boxes, polys = {}, {}
+	local kept_as = skip and "skip" or "all"
 	local moving_looks = nil
 	local turned = C.turned
+	local skip_given = skip ~= nil
 	if skip and turned then
 		turned = {}
 		for _, t in ipairs(C.turned) do
@@ -350,7 +365,16 @@ local function world(skip)
 			return MV.height(sample, x, z)
 		end
 	end
-	return MV.world{cell = function(i, j, k)
+	-- [KIT_STUNTS_PERF] the lists kept while they hold the same (its own for a
+	-- skip of the caller's), so move.lua's index of them is made once, not each
+	-- world
+	C.kept = C.kept or {}
+	local kl = C.kept[kept_as]
+	if not (kl and same_list(kl.boxes, boxes) and same_list(kl.polys, polys)) then
+		kl = {boxes = boxes, polys = polys, index = {}}
+		C.kept[kept_as] = kl
+	end
+	local w = MV.world{cell = function(i, j, k)
 		local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
 		local id = reg:id_of(v)
 		if id == 0 then
@@ -358,16 +382,21 @@ local function world(skip)
 			return not (C.ctl and C.ctl.void) and MV.UNKNOWN or nil
 		end
 		return voxel_info(id, v)
-	end, boxes = boxes, turned = turned, ground = ground,
+	end, boxes = kl.boxes, turned = turned, ground = ground, index = kl.index,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
-		moving_looks = moving_looks, t = C.draw_t, polys = polys,
+		moving_looks = moving_looks, t = C.draw_t, polys = kl.polys,
 		-- [KIT_PLANE] the body's z held ([KIT_TOP_DOWN] or y: horizontal)
 		plane = C.ctl and tonumber(C.ctl.plane), horizontal = C.ctl and C.ctl.horizontal,
 		-- [KIT_TOP_DOWN] (8) the others, for a movement that meets them
 		bodies = C.ctl and C.ctl.horizontal and decl().bodies == true and
 			(tonumber(C.ctl.seat) or 0) == 0 and M.others_bodies and
 			M.others_bodies(tonumber(body_decl().r) or 0.45, tonumber(body_decl().h) or 1.7) or nil}
+	-- (the frame's, place_camera's to reuse)
+	if not skip_given then
+		C.frame_w, C.frame_w_at = w, C.frame_no
+	end
+	return w
 end
 
 -- ---- The body
@@ -2873,7 +2902,18 @@ local function place_camera(dt, at)
 		-- Not through a wall: in front of what is between ([KIT_SHIP_VIEW] the craft
 		-- ridden not counted: a ship's rail put the gunner's view in at the gun)
 		local root = craft()
-		local w = world(root and function(id, n) return under(root, id, n) end)
+		-- ([KIT_STUNTS_PERF] the steps' world of this frame where it leaves out
+		-- the same: the craft the vehicle held, no free object under it.
+		-- simplified: its moving looks where the last step had them)
+		local w = nil
+		if root == (M.seated() and M.vehicle_of(M.seated())) then
+			local free = false
+			for _, t in ipairs(root and C.turned or {}) do
+				free = free or under(root, t.id, P.nodes[t.id])
+			end
+			w = not free and (C.frame_w_at == C.frame_no and C.frame_w or world())
+		end
+		w = w or world(root and function(id, n) return under(root, id, n) end)
 		local t = w:ray(target.x, target.y, target.z, -d.x, -d.y, -d.z, dist)
 		if t then
 			dist = math.max(0.3, t - 0.2)
@@ -3102,6 +3142,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		return
 	end
 	local dt = data:GetFloat("TimeStep")
+	C.frame_no = (C.frame_no or 0) + 1
 	-- The look: the mouse in the crosshair, the right drag with a cursor
 	local mx, my = 0, 0
 	if walking() and not paused() and not TOUCH and M.view_turns() then

@@ -842,4 +842,82 @@ do
 	run(tu, s, 300, {f = 1, r = 0}, open, p)
 	assert(near(s.pitch, -60, 1e-6), "no higher than pitch_min")
 end
+
+-- [KIT_STUNTS_PERF] The world's index of its boxes and prisms by where they are
+-- (move.lua's near()): the same answers, to the bit, as a scan of every one (t.index
+-- false), over 400 boxes, a long one and some 160 prisms strewn about (standing,
+-- lying flat, floors), in a free world, a level plane's and a standing plane's
+do
+	math.randomseed(7)
+	local function rnd(a, b)
+		return a + (b - a) * math.random()
+	end
+	local boxes, polys = {}, {}
+	for i = 1, 400 do
+		local x, y, z = rnd(-120, 120), rnd(-2, 6), rnd(-120, 120)
+		boxes[i] = {x, y, z, x + rnd(0.2, 6), y + rnd(0.2, 3), z + rnd(0.2, 6),
+			info = {solid = true, friction = 1, surface = "box " .. i}}
+	end
+	boxes[#boxes + 1] = {-500, 0, -1, 500, 1, 1}
+	for i = 1, 160 do
+		local pts, n, r = {}, 3 + i % 5, rnd(0.5, 8)
+		for k = 1, n do
+			local a = 2 * math.pi * k / n
+			pts[k] = {math.cos(a) * r * rnd(0.6, 1), math.sin(a) * r * rnd(0.6, 1)}
+		end
+		local kind = i % 3
+		local p = MV.look_poly({shape = "polygon", points = pts, solid = kind ~= 2,
+			floor = kind == 2 or nil, depth = rnd(0.2, 4)}, false,
+			{rnd(-120, 120), rnd(-1, 4), rnd(-120, 120)},
+			kind == 0 and (i % 2) * 180 or rnd(0, 360), kind == 0 and 0 or 90, 0)
+		polys[#polys + 1] = p
+	end
+	local function same(a, b, at)
+		assert(type(a) == type(b), at)
+		if type(a) == "table" then
+			for k, v in pairs(a) do
+				same(v, b[k], at .. "." .. tostring(k))
+			end
+			for k in pairs(b) do
+				assert(a[k] ~= nil, at .. "." .. tostring(k))
+			end
+		else
+			assert(a == b or (a ~= a and b ~= b), at .. ": " .. tostring(a) .. " " .. tostring(b))
+		end
+	end
+	local asks = 0
+	for _, kind in ipairs({{}, {plane = 1, horizontal = true}, {plane = 0.5}}) do
+		local function made(index)
+			return MV.world{cell = function(_, j)
+				return j <= -3 and STONE or nil
+			end, boxes = boxes, polys = polys, plane = kind.plane,
+				horizontal = kind.horizontal, index = index}
+		end
+		local wi, ws = made(nil), made(false)
+		local function ask(name, ...)
+			local a, b = {wi[name](wi, ...)}, {ws[name](ws, ...)}
+			same(a, b, name)
+			asks = asks + 1
+		end
+		for _ = 1, 3000 do
+			local x, y, z = rnd(-130, 130), rnd(-2, 7), rnd(-130, 130)
+			ask("ray", x, y, z, rnd(-1, 1), rnd(-1, 1), rnd(-1, 1), rnd(0.5, 60))
+			ask("ray", x, y, z, rnd(-1, 1), 0, 0, rnd(0.5, 30))
+			ask("down", x, y, z, rnd(0.5, 10))
+			ask("under", x, y, z)
+			ask("circle", x, kind.horizontal and z or y, rnd(0.3, 3), kind.plane or z)
+			ask("segment", x, z, x + rnd(-20, 20), z + rnd(-20, 20), kind.plane or y)
+			local r, h = rnd(0.3, 2), rnd(0.5, 2)
+			local b = {x - r, y, z - r, x + r, y + h, z + r}
+			ask("sweep", b, math.random(3), rnd(-4, 4))
+			ask("blocked", b)
+			ask("move", {x = x, y = y, z = z, r = r, h = h}, rnd(-2, 2), rnd(-2, 2), rnd(-2, 2), 0.5)
+			ask("plane_edges", kind.plane or z, x - 5, z - 5, x + rnd(0, 20), z + rnd(0, 20))
+		end
+		assert(wi.index.boxes and wi.index.boxes.cells and wi.index.polys and
+				wi.index.floors and not ws.index, "the index made and asked")
+	end
+	print(string.format("ok: the world's index of %d boxes and %d prisms: %d asks the same as a scan",
+			#boxes, #polys, asks))
+end
 print("kit_move_check: ok")

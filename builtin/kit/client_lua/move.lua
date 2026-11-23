@@ -1621,6 +1621,16 @@ function M.world(t)
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
 	w.cache = {}
+	-- ([KIT_STUNTS_PERF] t.index: the caller's, kept with the same t.boxes
+	-- and t.polys; false: none, every list scanned (a check's); near() below)
+	local ix = type(t.index) == "table" and t.index or {}
+	if ix.of_boxes ~= t.boxes or ix.of_polys ~= t.polys then
+		for k in pairs(ix) do
+			ix[k] = nil
+		end
+		ix.of_boxes, ix.of_polys = t.boxes, t.polys
+	end
+	w.index = t.index ~= false and ix
 	-- [KIT_PLANE] the plane's z (nil: none); stage 3: the polygons' prisms
 	w.plane = type(t.plane) == "number" and t.plane or nil
 	-- [KIT_TOP_DOWN] (1) the plane level: w.plane a y
@@ -1673,6 +1683,115 @@ function M.world(t)
 		w:pose_at(t.t)
 	end
 	return w
+end
+
+-- [KIT_STUNTS_PERF] The static boxes, prisms and floors by where they are:
+-- each list's indices in cells of the world's x and z GRID metres wide, made
+-- at its first ask (one under INDEX_MIN long is scanned whole, as is one
+-- spanning more than SPAN_MAX cells: kept apart, in every answer). near(w,
+-- kind, x0, z0, x1, z1) -> the list's ones in the cells the rectangle
+-- (padded by PAD) meets, in the list's order, then the boxes after the
+-- static ones (a moving look's: W:pose_at). Each query below asks a
+-- rectangle that holds every one it can meet, so it meets the same ones in
+-- the same order as a scan of the whole list: the same answer on both sides.
+-- A Stunts lap scanned some 450 boxes and prisms each ask, 20 and more asks a
+-- step (2026-11-23)
+local GRID, INDEX_MIN, SPAN_MAX, ASK_MAX, PAD = 8, 32, 64, 64, 0.05
+local function box_extent(o)
+	return o[1], o[3], o[4], o[6]
+end
+-- (a prism's: its x, and its depth's z or, lying flat, its 2D y's; a tilted
+-- floor's box)
+local function poly_extent(p)
+	if p.tilt then
+		return p.b[1], p.b[3], p.b[4], p.b[6]
+	end
+	if p.da == 2 then
+		return p.x0, p.y0, p.x1, p.y1
+	end
+	return p.x0, p.z0, p.x1, p.z1
+end
+local KINDS = {boxes = box_extent, polys = poly_extent, floors = poly_extent}
+local function near(w, kind, x0, z0, x1, z1)
+	local list = w[kind]
+	local n = kind == "boxes" and w.static_boxes and #w.static_boxes or #list
+	if n < INDEX_MIN or not w.index then
+		return list
+	end
+	local ix = w.index[kind]
+	if not ix then
+		local ext = KINDS[kind]
+		ix = {cells = {}, wide = {}, mark = {}, q = 0}
+		for i = 1, n do
+			local a0, b0, a1, b1 = ext(list[i])
+			-- (not a number, or past a million metres: kept apart)
+			local ok = a1 - a0 < 1e6 and b1 - b0 < 1e6 and a0 > -1e6 and b0 > -1e6
+			local i0, k0 = ok and floor(a0 / GRID), ok and floor(b0 / GRID)
+			local i1, k1 = ok and floor(a1 / GRID), ok and floor(b1 / GRID)
+			if not ok or (i1 - i0 + 1) * (k1 - k0 + 1) > SPAN_MAX then
+				ix.wide[#ix.wide + 1] = i
+			else
+				for a = i0, i1 do
+					for b = k0, k1 do
+						local key = a * 1048576 + b
+						local c = ix.cells[key]
+						if not c then
+							c = {}
+							ix.cells[key] = c
+						end
+						c[#c + 1] = i
+					end
+				end
+			end
+		end
+		w.index[kind] = ix
+	end
+	local i0, k0 = floor((x0 - PAD) / GRID), floor((z0 - PAD) / GRID)
+	local i1, k1 = floor((x1 + PAD) / GRID), floor((z1 + PAD) / GRID)
+	if not (i1 - i0 < ASK_MAX and k1 - k0 < ASK_MAX) or
+			(i1 - i0 + 1) * (k1 - k0 + 1) > ASK_MAX then
+		return list
+	end
+	ix.q = ix.q + 1
+	local q, mark, got = ix.q, ix.mark, {}
+	for _, i in ipairs(ix.wide) do
+		mark[i] = q
+		got[#got + 1] = i
+	end
+	for a = i0, i1 do
+		for b = k0, k1 do
+			for _, i in ipairs(ix.cells[a * 1048576 + b] or {}) do
+				if mark[i] ~= q then
+					mark[i] = q
+					got[#got + 1] = i
+				end
+			end
+		end
+	end
+	-- In the list's order (an insertion sort: the box has no table.sort)
+	for j = 2, #got do
+		local v, h = got[j], j - 1
+		while h >= 1 and got[h] > v do
+			got[h + 1] = got[h]
+			h = h - 1
+		end
+		got[h + 1] = v
+	end
+	for j, i in ipairs(got) do
+		got[j] = list[i]
+	end
+	for i = n + 1, #list do
+		got[#got + 1] = list[i]
+	end
+	return got
+end
+-- (the prisms a box may meet: in a standing plane its depth is the plane's z,
+-- spans(): that z the rectangle's too)
+local function near_polys(w, x0, z0, x1, z1)
+	if w.plane and not w.horizontal then
+		z0, z1 = z0 < w.plane and z0 or w.plane, z1 > w.plane and z1 or w.plane
+	end
+	return near(w, "polys", x0, z0, x1, z1)
 end
 
 -- [KIT_MOVING_OBJECTS] The moving objects and looks of this world where they are at
@@ -1892,7 +2011,13 @@ end
 -- world's z, its faces along y)
 function W:sweep_polys(b0, a0, d)
 	local hit, s = nil, d > 0 and 1 or -1
-	for _, p in ipairs(self.polys) do
+	local x0, z0, x1, z1 = b0[1], b0[3], b0[4], b0[6]
+	if a0 == 1 then
+		x0, x1 = d < 0 and x0 + d or x0, d > 0 and x1 + d or x1
+	elseif a0 == 3 then
+		z0, z1 = d < 0 and z0 + d or z0, d > 0 and z1 + d or z1
+	end
+	for _, p in ipairs(near_polys(self, x0, z0, x1, z1)) do
 		local b = poly_box(p, b0)
 		if a0 == (p.da or 3) then
 			-- Its faces: the box over the polygon's area
@@ -2021,7 +2146,7 @@ function W:sweep(b, a, d)
 		end
 	end
 	local function box_list(n)
-		if n == 1 then return self.boxes end
+		if n == 1 then return near(self, "boxes", lo[1], lo[3], hi[1], hi[3]) end
 		return sub or {}
 	end
 	for n = 1, 2 do for _, o in ipairs(box_list(n)) do
@@ -2123,14 +2248,14 @@ function W:blocked(b, known_only)
 			end
 		end
 	end
-	for _, o in ipairs(self.boxes) do
+	for _, o in ipairs(near(self, "boxes", b[1], b[3], b[4], b[6])) do
 		if o[1] < b[4] - EPS and o[4] > b[1] + EPS and o[2] < b[5] - EPS and
 				o[5] > b[2] + EPS and o[3] < b[6] - EPS and o[6] > b[3] + EPS and
 				not on_skipped(self, o) then
 			return true
 		end
 	end
-	for _, p in ipairs(self.polys) do
+	for _, p in ipairs(near_polys(self, b[1], b[3], b[4], b[6])) do
 		local lb = poly_box(p, b)
 		if spans(self, p, b) and poly_over(p, lb[1], lb[2], lb[4], lb[5]) then
 			return true
@@ -2513,7 +2638,11 @@ function ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground, no_polys)
 		c[k] = c[k] + st[k]
 		tmax[k] = tmax[k] + td[k]
 	end
-	for _, b in ipairs(self.boxes) do
+	-- (what the segment's box meets)
+	local ex, ez = ox + dx * len, oz + dz * len
+	local rx0, rz0 = ox < ex and ox or ex, oz < ez and oz or ez
+	local rx1, rz1 = ox < ex and ex or ox, oz < ez and ez or oz
+	for _, b in ipairs(near(self, "boxes", rx0, rz0, rx1, rz1)) do
 		local t0, t1, na = 0, len, nil
 		for k = 1, 3 do
 			if abs(v[k]) < 1e-9 then
@@ -2554,7 +2683,7 @@ function ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground, no_polys)
 			best, bi, bn = t0, M.OBJECT, n
 		end
 	end
-	for _, p in ipairs(no_polys and {} or self.polys) do
+	for _, p in ipairs(no_polys and {} or near(self, "polys", rx0, rz0, rx1, rz1)) do
 		local t0, pi, pn = ray_poly(p, o, v, best or len)
 		if t0 then
 			best, bi, bn = t0, pi, pn
@@ -2641,7 +2770,7 @@ function W:down(x, y, z, len)
 		end
 		top = top - 1
 	end
-	for _, b in ipairs(self.boxes) do
+	for _, b in ipairs(near(self, "boxes", x, z, x, z)) do
 		if x >= b[1] and x <= b[4] and z >= b[3] and z <= b[6] and
 				b[2] <= y then
 			local d = y - b[5]
@@ -2666,7 +2795,7 @@ function W:down(x, y, z, len)
 	end
 	-- [KIT_PLANE] stage 3: the polygons' tops (edges going +x: solid under them)
 	-- through z, under the point
-	for _, p in ipairs(self.polys) do
+	for _, p in ipairs(near(self, "polys", x, z, x, z)) do
 		-- ([KIT_TOP_DOWN] (2) a flat one's top face over the point)
 		if p.da == 2 and p.z1 <= y + EPS and y - p.z1 <= len and p.x0 <= x and
 				p.x1 >= x and p.y0 <= z and p.y1 >= z and poly_inside(p, x, z) then
@@ -2735,7 +2864,7 @@ end
 -- of those); nil: none
 function W:floor_at(x, y, z)
 	local top, info = nil, nil
-	for _, p in ipairs(self.floors) do
+	for _, p in ipairs(near(self, "floors", x, z, x, z)) do
 		-- ([KIT_STUNTS] (G6) a tilted one: down its vertical through x, z, its pieces'
 		-- tops and bottoms there)
 		if p.tilt then
@@ -2804,7 +2933,9 @@ end
 function W:plane_edges(z, x0, y0, x1, y1)
 	local out = {}
 	local da = self.horizontal and 2 or 3
-	for _, p in ipairs(self.polys) do
+	-- (the world's z: the plane's 2D y level, else z)
+	local wz0, wz1 = self.horizontal and y0 or z, self.horizontal and y1 or z
+	for _, p in ipairs(near(self, "polys", x0, wz0, x1, wz1)) do
 		if (p.da or 3) == da and p.z0 < z and p.z1 > z and p.x0 <= x1 and p.x1 >= x0 and
 				p.y0 <= y1 and p.y1 >= y0 then
 			local q, ck = p.pts, p.ck
@@ -3035,7 +3166,8 @@ function W:circle(x, y, r, z)
 			end
 		end
 	end
-	for _, b in ipairs(self.boxes) do
+	-- (the world's z: the plane's 2D y level, else z)
+	for _, b in ipairs(near(self, "boxes", x - r, hz and y - r or z, x + r, hz and y + r or z)) do
 		if b[N] < z and b[N + 3] > z and b[1] < x + r and b[4] > x - r and b[V] < y + r and
 				b[V + 3] > y - r then
 			box(b[1], b[V], b[4], b[V + 3], ALL, b.info or M.OBJECT)
