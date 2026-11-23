@@ -1263,7 +1263,10 @@ local function follow(r, id)
 	r.cam.fov, r.cam.nearClip, r.cam.farClip = cam.fov, cam.nearClip, cam.farClip
 	r.cam.orthographic, r.cam.orthoSize = cam.orthographic, cam.orthoSize
 	-- (the play view's lighting, where Kit's is drawn)
-	local rp = K.O.viewport and K.O.viewport().renderPath
+	-- ([KIT_STUNTS_PERF] Kit's play view's where the app has no O.viewport:
+	-- the default path under the physical HDR was raw radiance, white)
+	local rp = K.O.viewport and K.O.viewport().renderPath or
+			(M.play_path and M.play_path())
 	if rp and r.rp ~= rp then
 		r.rp = rp
 		r.v3d:GetViewport().renderPath = rp
