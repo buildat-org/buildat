@@ -2499,6 +2499,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		m_types[name] = t;
+		m_types_gen++;
 		log_i(MODULE, "Component type %s version %lli: inputs %zu, outputs "
 				"%zu, %s%s%s", cs(name), (long long)t.version, t.inputs.size(),
 				t.outputs.size(), t.usable ? "usable" : "not usable",
@@ -6006,8 +6007,10 @@ struct Module: public interface::Module, public Interface
 		if(ty.player){
 			if(starting)
 				m_player_types.push_back(t);
-			if(ty.placeable)
+			if(ty.placeable){
 				m_palette.insert(t);
+				m_types_gen++;
+			}
 		} else if(ty.world && m_host.world_scene.empty()){
 			// [KIT] stage 4e: no World where the app has none
 		} else if(!m_host.controls && (ty.decl.get("controls").is_true() ||
@@ -6016,6 +6019,7 @@ struct Module: public interface::Module, public Interface
 			// the app has Kit's controls
 		} else {
 			m_palette.insert(t);
+			m_types_gen++;
 		}
 	}
 
@@ -7043,6 +7047,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(why.empty()){
 			m_types.erase(name);
+			m_types_gen++;
 			m_sources.erase(name);
 			if(row.is_object())
 				m_local_types[name] = row;
@@ -7051,6 +7056,7 @@ struct Module: public interface::Module, public Interface
 			if(row.is_object() && (!load_type(name, why, strict) ||
 					(is_movement(name) && !steps_tried(name, why)))){
 				m_types.erase(name);
+				m_types_gen++;
 				m_sources.erase(name);
 				m_local_types.erase(name);
 				if(was.is_object()){
@@ -7074,6 +7080,7 @@ struct Module: public interface::Module, public Interface
 			return why;
 		}
 		m_palette.erase(name);
+		m_types_gen++;
 		if(row.is_object()){
 			m_kit_store->set("type:"+name, row.stringify());
 			palette_add(name, false);
@@ -7997,6 +8004,7 @@ struct Module: public interface::Module, public Interface
 				m_types.erase(t);
 				m_sources.erase(t);
 			}
+			m_types_gen++;
 		};
 		reload();
 		add_package(name, row);
@@ -44558,6 +44566,83 @@ struct Module: public interface::Module, public Interface
 		m_edit_what = name+(on ? " is a builder" : " is no longer a builder");
 	}
 
+	// [KIT_EDIT_TICK] send_state()'s palette and types, the same for every
+	// editor (a Bone Yard edit's send built them again: a quarter of it),
+	// made again only when a type is loaded or dropped or the palette
+	// changes (m_types_gen), or m_types' size does (an m_types[] that
+	// added one)
+	struct TypesSent {
+		uint64_t gen = ~(uint64_t)0;
+		size_t types_n = 0, palette_n = 0;
+		ss_ palette, types;
+	} m_types_sent;
+	uint64_t m_types_gen = 0;
+	const TypesSent &types_strings()
+	{
+		TypesSent &c = m_types_sent;
+		if(c.gen == m_types_gen && c.types_n == m_types.size() &&
+				c.palette_n == m_palette.size())
+			return c;
+		json::Value pal = json::object();
+		for(const ss_ &t : m_palette){
+			const json::Value &d = m_types[t].decl;
+			json::Value o = json::object();
+			for(const char *k : {"params", "inputs", "outputs", "gizmo",
+					"usable", "zone", "volume", "grants", "region", "voxel_box",
+					"world_region", "version",
+					"inventory", "root", "no_position", "inputs_types", "outputs_types",
+					"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
+					"movement", "world", "environment", "parallax", "single"})
+				if(!d.get(k).is_undefined())
+					o.set(k, d.get(k));
+			if(addable(t))
+				o.set("addable", true);
+			// [CRAG_BEST_RESET] the inspector's Clear kept state
+			if(!m_types[t].kept.empty())
+				o.set("kept", true);
+			pal.set(t, o);
+		}
+		// The composition's types that are not in the palette, too:
+		// the inspector needs every instance's parameters and signals
+		json::Value types = std::move(pal);
+		for(auto &t : m_types)
+			if(!m_palette.count(t.first)){
+				json::Value o = json::object();
+				for(const char *k : {"params", "inputs", "outputs", "gizmo",
+						"zone", "volume", "grants", "region", "voxel_box", "world_region",
+						"version", "inventory",
+						"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
+						"outputs_labels", "player", "ui", "about", "seat", "movement",
+						"world", "environment", "parallax", "single"})
+					if(!t.second.decl.get(k).is_undefined())
+						o.set(k, t.second.decl.get(k));
+				if(addable(t.first))
+					o.set("addable", true);
+				if(!t.second.kept.empty())
+					o.set("kept", true);
+				types.set(t.first, o);
+			}
+		// [KIT] stage 4h: the controls, the movements and the seats
+		// after the objects
+		json::Value names = json::array();
+		for(int last = 0; last < 2; last++)
+			for(const ss_ &t : m_palette){
+				const json::Value &d = m_types[t].decl;
+				// [KIT_COMPONENTS] (one that only goes on an entity: its inspector's)
+				if(!d.get("component").is_true() && (d.get("controls").is_true() ||
+						d.get("movement").is_object()) == (last == 1))
+					names.append(t);
+			}
+		c.palette = names.stringify();
+		c.types = types.stringify();
+		c.gen = m_types_gen;
+		c.types_n = m_types.size();
+		c.palette_n = m_palette.size();
+		return c;
+	}
+	// (commit()'s, while it sends to its editors)
+	ss_ *m_authored_share = nullptr;
+
 	// What an editor's client shows: the palette and the authored tree, or
 	// that it is not editing
 	void send_state(size_t peer)
@@ -44568,6 +44653,8 @@ struct Module: public interface::Module, public Interface
 		WorldScope ws(m_w, world_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		json::Value j = json::object();
+		// (keys given as their strings already)
+		std::map<ss_, ss_> pre;
 		const bool editing = pi != m_peers.end() && pi->second.editing;
 		j.set("editing", editing);
 		j.set("can_edit", can_edit(peer));
@@ -44689,59 +44776,20 @@ struct Module: public interface::Module, public Interface
 			// [KIT_SCENE_PACKAGES] the game its scene packages are for
 			if(!m_host.project.empty())
 				j.set("game", game_of(author_of(pi->second)));
-			json::Value pal = json::object();
-			for(const ss_ &t : m_palette){
-				const json::Value &d = m_types[t].decl;
-				json::Value o = json::object();
-				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable", "zone", "volume", "grants", "region", "voxel_box",
-						"world_region", "version",
-						"inventory", "root", "no_position", "inputs_types", "outputs_types",
-						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement", "world", "environment", "parallax", "single"})
-					if(!d.get(k).is_undefined())
-						o.set(k, d.get(k));
-				if(addable(t))
-					o.set("addable", true);
-				// [CRAG_BEST_RESET] the inspector's Clear kept state
-				if(!m_types[t].kept.empty())
-					o.set("kept", true);
-				pal.set(t, o);
+			// [KIT_EDIT_TICK] the palette's and the types' strings, every
+			// editor's the same; the composition's once for the editors an
+			// edit's commit() sends to
+			const TypesSent &tsent = types_strings();
+			pre["palette"] = tsent.palette;
+			pre["types"] = tsent.types;
+			if(!m_authored_share || m_authored_share->empty()){
+				ss_ a = authored_json(true).stringify();
+				if(m_authored_share)
+					*m_authored_share = a;
+				pre["authored"] = std::move(a);
+			} else {
+				pre["authored"] = *m_authored_share;
 			}
-			// The composition's types that are not in the palette, too:
-			// the inspector needs every instance's parameters and signals
-			json::Value types = std::move(pal);
-			for(auto &t : m_types)
-				if(!m_palette.count(t.first)){
-					json::Value o = json::object();
-					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume", "grants", "region", "voxel_box", "world_region",
-							"version", "inventory",
-							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
-							"outputs_labels", "player", "ui", "about", "seat", "movement",
-							"world", "environment", "parallax", "single"})
-						if(!t.second.decl.get(k).is_undefined())
-							o.set(k, t.second.decl.get(k));
-					if(addable(t.first))
-						o.set("addable", true);
-					if(!t.second.kept.empty())
-						o.set("kept", true);
-					types.set(t.first, o);
-				}
-			// [KIT] stage 4h: the controls, the movements and the seats
-			// after the objects
-			json::Value names = json::array();
-			for(int last = 0; last < 2; last++)
-				for(const ss_ &t : m_palette){
-					const json::Value &d = m_types[t].decl;
-					// [KIT_COMPONENTS] (one that only goes on an entity: its inspector's)
-					if(!d.get("component").is_true() && (d.get("controls").is_true() ||
-							d.get("movement").is_object()) == (last == 1))
-						names.append(t);
-				}
-			j.set("palette", names);
-			j.set("types", types);
-			j.set("authored", authored_json(true));
 			// [KIT] stage 4d: the round's own entities (made in play) and
 			// the players here, shown and selected, not edited; the prefabs
 			json::Value made = json::array(), pfs = json::array();
@@ -44906,16 +44954,18 @@ struct Module: public interface::Module, public Interface
 			std::map<ss_, ss_> now;
 			json::Value same = json::array();
 			data = "{";
-			for(json::Iterator it(j); it; ++it){
-				const ss_ k = it.key();
-				ss_ v = it.value().stringify();
+			auto add = [&](const ss_ &k, ss_ &&v){
 				auto wi = was.find(k);
 				if(wi != was.end() && wi->second == v)
 					same.append(k);
 				else
 					data += json::Value(k).stringify()+":"+v+",";
 				now[k] = std::move(v);
-			}
+			};
+			for(json::Iterator it(j); it; ++it)
+				add(it.key(), it.value().stringify());
+			for(auto &k : pre)
+				add(k.first, std::move(k.second));
 			was = std::move(now);
 			data += "\"same\":"+same.stringify()+"}";
 		} else {
@@ -46960,11 +47010,14 @@ struct Module: public interface::Module, public Interface
 		m_authored_dirty = true; // (save_authored())
 		// [KIT_EDIT_TICK] a sliced build's landing: the editors' state the
 		// next tick (send_due_states()), not in the landing's tick too
+		ss_ authored;
+		m_authored_share = &authored;
 		for(auto &p : m_peers)
 			if(p.second.editing && m_landing)
 				m_state_due.insert(std::make_pair(m_active, p.first));
 			else if(p.second.editing)
 				send_state(p.first);
+		m_authored_share = nullptr;
 	}
 
 	// [KIT_NESTING] A change in the order it applies in: the entities that
