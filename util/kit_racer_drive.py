@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# Brimstone Speedway's driver for util/kit_racer_check.sh and
-# util/kit_racer_bots_check.sh (its comment there): a scripted client's
+# Brimstone Speedway's driver for util/kit_racer_check.sh,
+# util/kit_racer_bots_check.sh (its comment there) and (Brimstone Stunts'
+# Bone Yard) util/kit_stunts_check.sh: a scripted client's
 # keys from its log's body lines, over its command fifo
 #   python3 -I util/kit_racer_drive.py <client log> <fifo> <seconds> <stop regex>
 import json, math, os, re, sys, time

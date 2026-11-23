@@ -1,0 +1,12 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "brimstone_stunts",
+	"title": "Brimstone Stunts",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"kit_api": 1,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "Brimstone's junkyard death race, the camera chasing the car: heavy old cars round a dirt track of hairpins, chicanes, mud and oil. A time trial against the clock, or a race from a grid: crates with guns, mines and a ram boost, wrecks that burn, places in finishing order."
+}
