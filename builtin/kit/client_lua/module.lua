@@ -243,7 +243,10 @@ local function value(n, key)
 		if buildat.get_time_us() < p.till and shown(server) == p.was then
 			return p.value
 		end
+		-- ([KIT_PREDICT_UNDONE] dropped outside draw_look, by a client
+		-- part's e:shown: its look drawn again, or still() keeps it on)
 		n.predicted[key] = nil
+		n.calm = 0
 	end
 	return server
 end
