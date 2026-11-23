@@ -1,6 +1,6 @@
 -- stunt_birds' client part: the flock as nodes of its own under e.node, each
 -- bird a body and two wings (boxes of one material: Urho3D instances them).
--- Sitting, nothing is done a frame but the car's distance; within `scare`
+-- Sitting, nothing is done but the car's distance each 4th frame; within `scare`
 -- of the flock's middle each bird takes off on a loop of its own (out away
 -- from the car and round back, up and down: FLY seconds), wings flapping,
 -- and lands where it sat; a car still near scatters them again.
@@ -30,7 +30,7 @@ local function box(parent, pos, size, mat)
 	m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 	m.material = mat
 	m.castShadows = false
-	m.drawDistance = 160
+	m.drawDistance = 70 -- (a bird some pixels long past that)
 	return n
 end
 
@@ -67,9 +67,12 @@ return {
 		if not f then
 			return
 		end
-		local car = kit.body_pos()
-		local at = e.node.worldPosition
 		if not f.flying then
+			-- (sitting: looked at each 4th frame, a read through the sandbox
+			-- dear; the car comes some 4 m nearer meanwhile at most)
+			f.skip = ((f.skip or e.id) + 1) % 4
+			local car = f.skip == 0 and kit.body_pos()
+			local at = car and e.node.worldPosition
 			if car then
 				local dx, dz = car.x - at.x, car.z - at.z
 				if dx * dx + dz * dz < f.scare * f.scare then

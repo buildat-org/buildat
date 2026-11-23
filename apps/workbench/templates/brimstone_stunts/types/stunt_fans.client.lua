@@ -1,8 +1,8 @@
 -- stunt_fans' client part: the fans as nodes under e.node, turned by
 -- `facing`, along the stand's width in `rows` up its slope (a wedge's: its
 -- top from 0 at the front, -z, to the height at the back), each a shirt and
--- a head, an arm raised by some. Still while no car is near (nothing a
--- frame but the distance); within `near` they hop, each at its own pace,
+-- a head, an arm raised by some. Still while no car is near (nothing but
+-- the distance each 4th frame); within `near` they hop, each at its own pace,
 -- and settle again once it has gone.
 local magic = require("buildat/extension/urho3d")
 local kit = require("buildat/module/kit")
@@ -18,7 +18,7 @@ local function box(parent, pos, size, mat)
 	m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 	m.material = mat
 	m.castShadows = false
-	m.drawDistance = 170
+	m.drawDistance = 100 -- (a fan some pixels high past that)
 	return n
 end
 
@@ -58,6 +58,11 @@ return {
 	on_update = function(e, dt)
 		local st = stands[e.id]
 		if not st then
+			return
+		end
+		-- (still: looked at each 4th frame, a read through the sandbox dear)
+		st.skip = ((st.skip or e.id) + 1) % 4
+		if not st.cheering and st.skip ~= 0 then
 			return
 		end
 		local near = e:near(st.near)
