@@ -252,6 +252,11 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::MaxFps;
 			if(!parse_i64(rest, &c.n) || c.n < 1 || c.n > 1000)
 				return fail("max_fps <frames a second, 1 to 1000>");
+		} else if(cmd == "focus"){
+			c.type = Type::Focus;
+			if(rest != "on" && rest != "off")
+				return fail("focus on|off");
+			c.n = rest == "on";
 		} else if(cmd == "expect_error"){
 			c.type = Type::ExpectError;
 			c.s = rest;
@@ -578,6 +583,8 @@ ss_ dump_command(const Command &c)
 		return "game_rate "+c.s;
 	case Type::MaxFps:
 		return "max_fps "+itos(c.n);
+	case Type::Focus:
+		return ss_("focus ")+(c.n ? "on" : "off");
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:

@@ -1810,8 +1810,14 @@ magic.SubscribeToEvent("Update", function(_, data)
 	end
 	LK.t = t0
 	update_play(_, data)
-	LK.frames, LK.us = LK.frames + 1, LK.us + buildat.get_time_us() - t0
+	local us = buildat.get_time_us() - t0
+	LK.frames, LK.us = LK.frames + 1, LK.us + us
+	-- ([KIT_PLAYTEST_REC_2] rec.lua's perf rows: the pass's time since the start)
+	LK.all_us = (LK.all_us or 0) + us
 end)
+function M.play_us()
+	return LK.all_us or 0
+end
 -- [KIT_STILL_LOOKS] (a drive's: the looks read a frame since the last ask, of
 -- how many, and this pass's ms a frame; [KIT_3D_GAINS_1] (4z38) the frames' own
 -- ms, the mean and the worst)

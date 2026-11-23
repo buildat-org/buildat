@@ -25359,7 +25359,8 @@ struct Module: public interface::Module, public Interface
 	// bot's) recorded as one timeline a connection, typed rows {t (seconds
 	// from its start), kind, ...}:
 	//   session  start (player, scene), client (platform, screen, input:
-	//            the client's word), end
+	//            the client's word; [KIT_PLAYTEST_REC_2] its GPU, OS, browser
+	//            and the settings a frame's cost follows), end
 	//   pos      the body's position, speed and scene, 1 Hz (a body that
 	//            stays: every 10 s)
 	//   event    emit (an output emitted by them), ui and menu (a kit/ui
@@ -25367,7 +25368,9 @@ struct Module: public interface::Module, public Interface
 	//            edit (into the tools or out: no pos rows while in them)
 	//   perf     the client's every 5 s: median and 5th-percentile fps, the
 	//            worst frame (ms, where), with the server's tick gaps over the
-	//            last 5 s
+	//            last 5 s; [KIT_PLAYTEST_REC_2] draw calls, triangles, Kit's
+	//            Lua ms a frame, the 3D's size, and the seconds at the idle
+	//            rate (buildat.idle_rate()), which the figures leave out
 	//   error    client_part (theirs), type (a handler of their session's
 	//            failing), budget (one past the box's), movement (their body's)
 	//   mark     their note, where, and the picture their client drew then
@@ -25395,6 +25398,11 @@ struct Module: public interface::Module, public Interface
 		json::Value head = json::object();
 		std::set<ss_> scenes;
 		sv_<double> fps;
+		// [KIT_PLAYTEST_REC_2] the perf rows' draw calls, triangles and Kit
+		// ms (their medians the head's), the idle seconds summed
+		sv_<double> draws, tris, kit_ms;
+		double idle_s = 0;
+		bool idle_known = false; // (a client that leaves idle frames out)
 	};
 	std::map<size_t, Rec> m_recs; // by peer
 	std::map<size_t, int64_t> m_rec_later; // not recorded: looked at again then
@@ -25570,11 +25578,20 @@ struct Module: public interface::Module, public Interface
 		for(const ss_ &s : r.scenes)
 			sc.append(s);
 		h.set("scenes", sc);
-		if(!r.fps.empty()){
-			sv_<double> f = r.fps;
+		auto median = [](sv_<double> f){
 			std::sort(f.begin(), f.end());
-			h.set("fps", f[f.size() / 2]);
+			return f[f.size() / 2];
+		};
+		if(!r.fps.empty())
+			h.set("fps", median(r.fps));
+		// [KIT_PLAYTEST_REC_2]
+		if(!r.draws.empty()){
+			h.set("draws", median(r.draws));
+			h.set("tris", median(r.tris));
+			h.set("kit_ms", median(r.kit_ms));
 		}
+		if(r.idle_known)
+			h.set("idle_s", round1(r.idle_s));
 		const ss_ hk = rec_key("h", r.id), hs = h.stringify();
 		ss_ was;
 		st->get(hk, was);
@@ -25737,6 +25754,19 @@ struct Module: public interface::Module, public Interface
 				cs(r.player), cs(ftos1(rec_t(r))));
 	}
 
+	// [KIT_PLAYTEST_REC_2] A head's client: "Firefox 145, Windows NT 10.0,
+	// ANGLE (...) (GLES3)", what it has of them
+	static ss_ rec_client_text(const json::Value &h)
+	{
+		ss_ s;
+		for(const char *k : {"browser", "os", "renderer"})
+			if(!jstr(h, k).empty())
+				s += (s.empty() ? "" : ", ")+jstr(h, k);
+		if(!jstr(h, "api").empty())
+			s += (s.empty() ? "" : " ")+("("+jstr(h, "api")+")");
+		return s.empty() ? "an unnamed GPU" : s;
+	}
+
 	Rec* rec_of(size_t peer)
 	{
 		auto ri = m_recs.find(peer);
@@ -25786,12 +25816,18 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// "kit:rec" from a recorded client: {kind: "client", platform, screen,
-	// input} once, {kind: "perf", fps, fps5, worst_ms, worst_at, frames}
-	// every 5 s
+	// input, ...} once, {kind: "perf", fps, fps5, worst_ms, worst_at, frames,
+	// ...} every 5 s. [KIT_PLAYTEST_REC_2] The client's: renderer, api, os,
+	// browser (texts), msaa, vsync, max_fps, mesh_threads, memory_mb,
+	// render_scale, ui_scale; a perf row's idle_s (its frames left out of
+	// the figures), draws, tris, kit_ms (means a frame), render (w, h); a
+	// perf row of idle time alone has no fps. Each checked alone: a number
+	// clamped, a text cut and its control characters made spaces, one
+	// missing or of another type left out
 	void on_rec(const network::Packet &packet)
 	{
 		Rec *r = rec_of(packet.sender);
-		const json::Value j = packet.data.size() <= 1024 ?
+		const json::Value j = packet.data.size() <= 2048 ?
 				json::load_string(packet.data.c_str()) : json::null();
 		if(!r || !j.is_object())
 			return;
@@ -25799,6 +25835,17 @@ struct Module: public interface::Module, public Interface
 			const json::Value &v = j.get(k);
 			return v.is_number() && v.as_number() >= lo && v.as_number() <= hi ?
 					round1(v.as_number()) : NAN;
+		};
+		auto clamped = [&](const char *k, double lo, double hi){
+			const json::Value &v = j.get(k);
+			return v.is_number() && !std::isnan(v.as_number()) ?
+					std::max(lo, std::min(hi, v.as_number())) : NAN;
+		};
+		auto text = [&](const char *k, size_t n){
+			ss_ t;
+			for(char c : cut_utf8(jstr(j, k), n))
+				t += (unsigned char)c < 32 ? ' ' : c;
+			return t;
 		};
 		const ss_ kind = jstr(j, "kind");
 		const int64_t now = interface::os::time_us();
@@ -25826,23 +25873,83 @@ struct Module: public interface::Module, public Interface
 			o.set("platform", pl);
 			o.set("screen", scr);
 			o.set("input", in);
+			// [KIT_PLAYTEST_REC_2] what decides a frame's cost
+			static const std::pair<const char*, size_t> TEXTS[] = {
+				{"renderer", 160}, {"api", 16}, {"os", 80}, {"browser", 60}};
+			for(const auto &tk : TEXTS){
+				const ss_ t = text(tk.first, tk.second);
+				if(!t.empty()){
+					o.set(tk.first, t);
+					r->head.set(tk.first, t);
+				}
+			}
+			static const struct { const char *k; double lo, hi; bool whole; }
+				NUMS[] = {{"msaa", 1, 16, true}, {"max_fps", 0, 1000, true},
+					{"mesh_threads", 0, 64, true}, {"memory_mb", 0, 1 << 24, true},
+					{"render_scale", 0.05, 4, false}, {"ui_scale", 0.1, 8, false}};
+			for(const auto &nk : NUMS){
+				const double v = clamped(nk.k, nk.lo, nk.hi);
+				if(!std::isnan(v))
+					o.set(nk.k, nk.whole ? json::Value((int64_t)v) :
+							json::Value(std::round(v * 100) / 100));
+			}
+			if(j.get("vsync").is_boolean())
+				o.set("vsync", j.get("vsync").as_boolean());
 			if(!at)
 				rec_add(*r, row);
 			log_i(MODULE, "Playtest session %lld: %s's client: %s, %lldx%lld, %s",
 					(long long)r->id, cs(r->player), cs(pl),
 					(long long)scr.at(0u).as_number(), (long long)scr.at(1u).as_number(),
 					cs(in));
+			log_i(MODULE, "Playtest session %lld: %s's client runs on %s", (long long)
+					r->id, cs(r->player), cs(rec_client_text(r->head)));
 		} else if(kind == "perf" && now - r->perf_at > 2000000){
 			const double fps = num("fps", 0, 10000), fps5 = num("fps5", 0, 10000),
-					worst = num("worst_ms", 0, 600000);
-			if(std::isnan(fps) || std::isnan(fps5) || std::isnan(worst))
+					worst = num("worst_ms", 0, 600000),
+					idle = clamped("idle_s", 0, 600);
+			const bool figures = !std::isnan(fps) && !std::isnan(fps5) &&
+					!std::isnan(worst);
+			// (idle time alone: a row with no figures)
+			if(!figures && !(idle > 0))
 				return;
 			r->perf_at = now;
 			json::Value row = json::object();
 			row.set("kind", "perf");
+			// [KIT_PLAYTEST_REC_2] the frames at the idle rate left out
+			const json::Value &rs = j.get("render");
+			if(rs.is_array() && rs.size() == 2 && rs.at(0u).is_number() &&
+					rs.at(1u).is_number()){
+				json::Value wh = json::array();
+				for(unsigned k = 0; k < 2; k++)
+					wh.append((int64_t)std::max(0.0, std::min(65535.0,
+							rs.at(k).as_number())));
+				row.set("render", wh);
+				r->head.set("render", wh);
+				r->idle_known = true;
+			}
+			if(idle > 0){
+				row.set("idle_s", round1(idle));
+				r->idle_s += idle;
+			}
+			if(!figures){
+				row.set("tick_ms", round1(m_rec_gap_mean_was));
+				row.set("tick_max_ms", round1(m_rec_gap_max_was));
+				rec_add(*r, row);
+				return;
+			}
 			row.set("fps", fps);
 			row.set("fps5", fps5);
 			row.set("worst_ms", worst);
+			const double draws = clamped("draws", 0, 1e6),
+					tris = clamped("tris", 0, 1e9), kms = clamped("kit_ms", 0, 1e4);
+			if(!std::isnan(draws) && !std::isnan(tris) && !std::isnan(kms)){
+				row.set("draws", (int64_t)std::round(draws));
+				row.set("tris", (int64_t)std::round(tris));
+				row.set("kit_ms", std::round(kms * 100) / 100);
+				r->draws.push_back(std::round(draws));
+				r->tris.push_back(std::round(tris));
+				r->kit_ms.push_back(std::round(kms * 100) / 100);
+			}
 			const json::Value &wa = j.get("worst_at");
 			if(wa.is_array() && wa.size() == 3 && wa.at(0u).is_number() &&
 					wa.at(1u).is_number() && wa.at(2u).is_number()){
@@ -25988,16 +26095,32 @@ struct Module: public interface::Module, public Interface
 							sl.at(i).as_string());
 				const int64_t marks = json::jint(h, "marks"),
 						errors = json::jint(h, "errors");
+				// [KIT_PLAYTEST_REC_2] the frames' cost beside the fps, the
+				// time idle, the client's GPU and browser
+				ss_ cost;
+				if(h.get("draws").is_number()){
+					const json::Value &rs = h.get("render");
+					cost = " ("+itos(json::jint(h, "draws"))+" draws, "+
+							itos(json::jint(h, "tris"))+" triangles, Kit "+
+							ftos1(h.get("kit_ms").as_number())+" ms"+(rs.is_array() &&
+							rs.size() == 2 ? ", "+itos((int64_t)rs.at(0u).as_number())+
+							"x"+itos((int64_t)rs.at(1u).as_number()) : ss_())+")";
+				}
+				const json::Value &idle = h.get("idle_s");
 				json::Value o = json::object();
 				o.set("session", it->first);
 				o.set("summary", jstr(h, "player")+", "+utc_text(json::jint(h,
 						"start"))+", "+itos(len / 60)+" min "+itos(len % 60)+" s, "+
 						(sc.empty() ? ss_("no scene") : "scenes "+sc)+", "+
 						(h.get("fps").is_number() ? "median "+ftos1(h.get("fps").
-						as_number())+" fps" : ss_("no fps"))+", "+itos(marks)+
+						as_number())+" fps"+cost : ss_("no fps"))+", "+
+						(idle.is_number() ? itos((int64_t)std::round(idle.as_number()))+
+						" s idle, " : ss_())+itos(marks)+
 						(marks == 1 ? " mark, " : " marks, ")+itos(errors)+
 						(errors == 1 ? " error" : " errors")+(rec_live(it->first) ?
-						" (live)" : ""));
+						" (live)" : "")+(h.get("os").is_string() ||
+						h.get("renderer").is_string() ? "; "+jstr(h, "platform")+", "+
+						rec_client_text(h) : ss_()));
 				for(const char *k : {"platform", "input"})
 					if(!jstr(h, k).empty())
 						o.set(k, jstr(h, k));
@@ -36202,14 +36325,22 @@ struct Module: public interface::Module, public Interface
 				"played (every player with edit rights is recorded, one session "
 				"a connection; 1 MB a game, the oldest dropped, 7 days at most). "
 				"None: the recent sessions, the newest first, each with a "
-				"summary (player, start, length, scenes, median fps, marks, "
-				"errors); player: only theirs. session: its rows, each {t "
+				"summary (player, start, length, scenes, median fps with the "
+				"frames' draw calls, triangles, Kit ms and 3D size, time idle, "
+				"marks, errors, the client's browser, OS and GPU); player: only "
+				"theirs. session: its rows, each {t "
 				"(seconds from its start), kind, ...}: session (start, client: "
-				"platform, screen, input; end), pos (1 Hz: pos, speed, scene), "
+				"platform, screen, input, renderer, api, os, browser, msaa, "
+				"vsync, max_fps, render_scale, ui_scale, mesh_threads, "
+				"memory_mb; end), pos (1 Hz: pos, speed, scene), "
 				"event (emit: an output by them; ui, menu: a button's press; "
 				"scene: a switch), perf (every 5 s: the client's median fps, "
-				"fps5 its 5th percentile, the worst frame's ms and place; the "
-				"server's tick_ms and tick_max_ms), error (client_part, type, "
+				"fps5 its 5th percentile, the worst frame's ms and place, draws "
+				"and tris (draw calls, triangles) and kit_ms (Kit's Lua) a "
+				"frame, render (the 3D's size); idle_s: seconds at the idle "
+				"rate (the page hidden, unfocused or a minute untouched, the "
+				"window unfocused), left out of the figures, none if all idle; "
+				"the server's tick_ms and tick_max_ms), error (client_part, type, "
 				"budget, movement), mark (the builder's note at a moment, F8 "
 				"or the pause menu's \"Mark this moment\": pos, scene and the "
 				"picture their client drew then, an image after the text, 4 a "

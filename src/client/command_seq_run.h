@@ -752,6 +752,14 @@
 				m_command_index++;
 				continue;
 			}
+			// (off: Urho3D finds the window's own flag clear, as a driven
+			// window is never given the desk's focus, and loses it)
+			if(c.type == Type::Focus){
+				GetSubsystem<magic::Input>()->SetForceInputFocus(c.n != 0);
+				log_i(MODULE, "command: focus %s", c.n ? "on" : "off");
+				m_command_index++;
+				continue;
+			}
 			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny ||
 					c.type == Type::WaitLogAbsent){
 				if(m_wait_log_since < 0){

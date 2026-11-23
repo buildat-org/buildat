@@ -1943,6 +1943,9 @@ struct CApp: public App, public magic::Application
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 	// The pool's threads, for resources() ([WEB_MESH_OFF_THREAD])
 	int m_mesh_threads = 0;
+	// [KIT_PLAYTEST_REC_2] The GPU's name, for resources(): GL_RENDERER as
+	// the window came up; on the web read at the first ask
+	ss_ m_gl_renderer;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -2973,6 +2976,7 @@ struct CApp: public App, public magic::Application
 		if(GetString gs = (GetString)SDL_GL_GetProcAddress("glGetString")){
 			const unsigned char *r = gs(0x1F01); // GL_RENDERER
 			log_i(MODULE, "GL renderer: %s", r ? (const char*)r : "?");
+			m_gl_renderer = r ? (const char*)r : "";
 		}
 #endif
 
@@ -3169,6 +3173,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(last_arrival)
 		DEF_BUILDAT_FUNC(in_flight)
 		DEF_BUILDAT_FUNC(resources)
+		DEF_BUILDAT_FUNC(idle_rate)
 		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(picture_ui)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)

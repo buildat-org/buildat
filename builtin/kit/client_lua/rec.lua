@@ -7,7 +7,10 @@
 -- records this player; from then on this client sends "kit:rec"
 -- {kind = "client", platform, screen, input} once and {kind = "perf", fps
 -- (the median), fps5 (the 5th percentile), worst_ms, worst_at, frames}
--- every 5 s, its frames timed by the wall clock.
+-- every 5 s, its frames timed by the wall clock. [KIT_PLAYTEST_REC_2] The
+-- client's with its GPU, OS, browser and settings (buildat.resources()),
+-- the perf's with idle_s (the idle rate's frames, left out), draws, tris,
+-- kit_ms (means a frame) and render (the 3D's size).
 -- A mark: the key "mark" (F8) or the pause menu's "Mark this moment" draws
 -- the window's view at once into a picture 480 wide (the frame as it was
 -- seen, without the UI: Kit never reads the window, texture_png's rule),
@@ -30,50 +33,92 @@ buildat.sub_packet("kit:rec", function(data)
 		return
 	end
 	local sc = magic.ui.scale
+	-- [KIT_PLAYTEST_REC_2] with what decides a frame's cost: the GPU, the
+	-- OS, the browser, the engine's settings (an older client has none)
+	local res = buildat.resources and buildat.resources() or {}
+	local rs = buildat.get_render_scale and buildat.get_render_scale() or nil
 	buildat.send_packet("kit:rec", network.write_json({kind = "client",
 		platform = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil and "web" or "native",
 		screen = {math.floor(magic.ui.root.width * sc + 0.5),
 			math.floor(magic.ui.root.height * sc + 0.5)},
 		input = buildat.get_env("BUILDAT_TOUCH") == "1" and "touch" or
-				"keyboard/mouse"}))
+				"keyboard/mouse",
+		renderer = res.renderer, api = res.api, os = res.os, browser = res.browser,
+		msaa = res.msaa, vsync = res.vsync, max_fps = res.max_fps,
+		mesh_threads = res.mesh_threads, memory_mb = res.memory_mb,
+		render_scale = tonumber(rs), ui_scale = buildat.get_ui_scale()}))
 end)
 
 function M.rec_on()
 	return R.on
 end
 
--- The frames: each one's wall time, the worst one's place
+-- The frames: each one's wall time, the worst one's place.
+-- [KIT_PLAYTEST_REC_2] A frame at the idle rate (buildat.idle_rate(): the
+-- page left alone, the window unfocused), or the first after one, counts as
+-- idle time and not in the figures; the others' draw calls, triangles and
+-- Kit's play pass (module.lua's, M.play_us) summed for their means
+R.idle, R.draws, R.tris, R.kit = 0, 0, 0, 0
 magic.SubscribeToEvent("Update", function()
 	if not R.on then
 		return
 	end
 	local now = buildat.get_time_us()
+	local idle = buildat.idle_rate and buildat.idle_rate() or false
+	local kit_us = M.play_us and M.play_us() or 0
 	if R.last then
 		local dt = (now - R.last) / 1e6
-		R.frames[#R.frames + 1] = dt
-		if dt > R.worst then
-			R.worst = dt
-			local p = M.body_pos and M.body_pos()
-			R.at = p and {p.x, p.y, p.z} or nil
+		if idle or R.was_idle then
+			R.idle = R.idle + dt
+		else
+			R.frames[#R.frames + 1] = dt
+			if dt > R.worst then
+				R.worst = dt
+				local p = M.body_pos and M.body_pos()
+				R.at = p and {p.x, p.y, p.z} or nil
+			end
+			-- (the last frame's: the renderer's counts are its last render's)
+			local rd = magic.renderer
+			R.draws, R.tris = R.draws + rd.numBatches, R.tris + rd.numPrimitives
+			R.kit = R.kit + kit_us - (R.kit_was or kit_us)
 		end
 	end
-	R.last = now
+	R.last, R.was_idle, R.kit_was = now, idle, kit_us
 	R.t0 = R.t0 or now
 	local f = R.frames
-	if now - R.t0 < 5000000 or #f < 2 then
+	if now - R.t0 < 5000000 or (#f < 2 and R.idle <= 0) then
 		return
 	end
-	table.sort(f)
-	local med, p95 = f[math.floor(#f / 2) + 1], f[math.min(#f, math.floor(#f * 0.95) + 1)]
-	buildat.send_packet("kit:rec", network.write_json({kind = "perf",
-		fps = 1 / math.max(med, 1e-4), fps5 = 1 / math.max(p95, 1e-4),
-		worst_ms = R.worst * 1000, worst_at = R.at, frames = #f}))
+	local s = tonumber(buildat.get_render_scale and buildat.get_render_scale()) or 1
+	local row = {kind = "perf", idle_s = R.idle > 0 and R.idle or nil,
+		render = {math.floor(magic.graphics.width * s + 0.5),
+			math.floor(magic.graphics.height * s + 0.5)}}
+	local n = #f
+	if n >= 2 then
+		table.sort(f)
+		local med, p95 = f[math.floor(n / 2) + 1], f[math.min(n, math.floor(n * 0.95) + 1)]
+		row.fps, row.fps5 = 1 / math.max(med, 1e-4), 1 / math.max(p95, 1e-4)
+		row.worst_ms, row.worst_at, row.frames = R.worst * 1000, R.at, n
+		row.draws, row.tris, row.kit_ms = R.draws / n, R.tris / n, R.kit / n / 1000
+	end
+	buildat.send_packet("kit:rec", network.write_json(row))
 	if not R.reported then
 		R.reported = true
 		log:info(string.format("kit: rec: the first perf report sent, %d frames, "
-				.. "median %.1f fps", #f, 1 / math.max(med, 1e-4)))
+				.. "%s", n >= 2 and n or 0, row.fps and string.format("median %.1f fps",
+				row.fps) or "idle"))
+	end
+	-- (once each, for a check to wait for)
+	if R.idle > 0 and not R.idle_said then
+		R.idle_said = true
+		log:info(string.format("kit: rec: idle time reported, %.1f s", R.idle))
+	end
+	if n < 2 and not R.alone_said then
+		R.alone_said = true
+		log:info(string.format("kit: rec: a report of idle time alone, %.1f s", R.idle))
 	end
 	R.frames, R.t0, R.worst, R.at = {}, now, 0, nil
+	R.idle, R.draws, R.tris, R.kit = 0, 0, 0, 0
 end)
 
 -- ---- The mark: the picture (as module.lua's VIEW draws the window's view

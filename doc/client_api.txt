@@ -62,7 +62,8 @@ buildat.idle_pending() -> "" or what is still queued
 - What the idle sources (buildat.idle_source) say they have queued, as a
   drive's idle command reads it, "" when none has any; Kit's server camera
   waits for "" before it draws ([KIT_AGENT_NEXT_1]).
-buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform}
+buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform,
+  renderer, api, os, browser, msaa, vsync, max_fps}
 - What this client got to run in ([WEB_MESH_OFF_THREAD]), for an app to
   fit its view range, LOD and caches to rather than be ended by the
   browser (iOS ends a tab that takes too much). memory_mb: the most memory
@@ -77,6 +78,19 @@ buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform}
   "web_ios" or "web_android". builtin/voxelworld scales its defaults with
   it; an app's meta.json may state its least needs ("needs",
   doc/aitta.txt).
+- [KIT_PLAYTEST_REC_2] What a frame's cost follows, for a recorder (Kit's
+  playtests): renderer, the GPU's name (GL_RENDERER; on the web the
+  unmasked one where the browser gives it, "" where none); api, Urho3D's
+  ("GL3", "GLES3": WebGL 2); os, the OS and its version (natively
+  Urho3D's GetOSVersion, on the web from the user agent); browser, the
+  web's name and major version ("Firefox 145"), absent natively; msaa,
+  vsync and max_fps, the engine settings.
+buildat.idle_rate() -> boolean
+- [KIT_PLAYTEST_REC_2] Whether the frames are held at the rate for a user
+  away: on the web the page hidden, unfocused or a minute without input
+  with web_idle_fps under 60 ([WEB_IDLE_FPS]); natively the window without
+  the input focus or minimized, while Urho3D's unfocused rate (60) is under
+  max_fps. A frame-rate figure leaves such frames out.
 
 buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes
