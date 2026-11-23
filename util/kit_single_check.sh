@@ -30,7 +30,9 @@
 #      not the view's too; a plain ui_utils dialog over the editor (event
 #      message_dialog) has a click beside it and its own Escape (the pause
 #      menu opened over it). (4z37zzb) A click on a palette button under
-#      the pause menu does not open the palette's menu.
+#      the pause menu does not open the palette's menu; (4z37zzd) nor do
+#      the bar's Grid and the inspector's Comments act, which they do with
+#      the menu closed.
 #   5. (0a84) The launcher (-a app/workbench/play, a local server): a tap
 #      on the start's stripes does not cancel it, one beside the boot list
 #      does not leave the server, one beside the name screen with a name
@@ -358,6 +360,16 @@ cmd "frames 3" 'click Button "kit/environment"'
 shot eaten4
 tail -c +$((m + 1)) "$CL" | grep -aq "kit editor: the palette's menu of" &&
 	fail "a click on a palette button under the pause menu opened its menu ($CL)"
+# 4z37zzd: nor are the bar's and the inspector's buttons (Grid, Comments);
+# with the menu closed they are
+m=$(mark "$CL")
+cmd "frames 3" 'click Button "Grid*"' "frames 3" 'click Button "Comments"' "frames 3"
+shot eaten5
+a=$(tail -c +$((m + 1)) "$CL" | grep -aE "kit editor: (grid|comments) " | head -1)
+[ -z "$a" ] || fail "a bar or inspector button under the pause menu acted: $a ($CL)"
+step 10 "pause: the menu closed" "frames 3" "keypress Escape"
+step 10 "kit editor: grid " "frames 3" 'click Button "Grid*"'
+step 10 "kit editor: comments shown" "frames 3" 'click Button "Comments"'
 cmd "quit"
 exec 3>&-
 wait $CLIENT
@@ -424,4 +436,4 @@ cmd "quit"
 exec 3>&-
 wait $CLIENT
 CLIENT=
-echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it; a click off the pause menu or a dialog is eaten, the dialog's Escape its own; on the launcher a tap does not cancel the start nor leave the boot list, and the pause menu stays closed after one off it; a palette button under the pause menu and a tap beside the name screen with a name typed do nothing"
+echo "PASS: one a holder: a saved second kit/game_rules warned; by MCP a second kit/controls and kit/environment on the root and on a scene refused by place, set_parent and duplicate, naming the one there, the root's and a scene's both placed, a duplicated scene its own; the editor's Place selects the one there; the palette's menu, the pause menu, the Server window and the credits shade the rest while up, a click off each closes it; a click off the pause menu or a dialog is eaten, the dialog's Escape its own; on the launcher a tap does not cancel the start nor leave the boot list, and the pause menu stays closed after one off it; a palette button, the bar's and the inspector's under the pause menu and a tap beside the name screen with a name typed do nothing"
