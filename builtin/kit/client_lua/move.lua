@@ -36,8 +36,9 @@
 --     MAX_EVENTS a batch): the server's steps' are outputs of the movement's
 --     component on the app root (its `outputs`), as by the body's player; the
 --     client's own steps set them too, for its draw to show them at once
---   s.pose = {n...} (8 at most): what the other clients' draw gets of it;
---     [KIT_MOVE_DRAW] movement.pose = {"name"...} (8 at most, in slot order)
+--   s.pose = {n...} (16 at most, [KIT_STUNTS]; 8 before): what the other
+--     clients' draw gets of it;
+--     [KIT_MOVE_DRAW] movement.pose = {"name"...} (16 at most, in slot order)
 --     names the slots: a step may then write s.pose by name ({a = 1, dir =
 --     -1}) or by index, kept as the numbers in slot order (a slot left out 0;
 --     the next step reads it back by index), the wire's as ever; a draw reads
@@ -113,7 +114,9 @@
 --     (hit sides: -1, 0 or 1): the body b = {x, y, z, r, h} swept along
 --     y, then x and z, up a step of `step` where blocked, and onto the
 --     ground's slope up to b.slope (tan of the slope limit)
---   w:ray(ox, oy, oz, dx, dy, dz, len) -> t, info, nx, ny, nz
+--   w:ray(ox, oy, oz, dx, dy, dz, len) -> t, info, nx, ny, nz; [KIT_STUNTS] the
+--     solid polygons' prisms too (M.look_poly's, standing and lying flat: a
+--     side's info its edge's, a face's the polygon's; entered from outside)
 --   w:down(x, y, z, len) -> how far down the first solid is, its info
 --   w:under(x, y, z) -> the info of what is under the point (0.6 down)
 --   w:contacts(b) -> {{info, nx, ny, nz}...} what touches the body
@@ -180,14 +183,21 @@
 -- lying flat (stage 3's prisms with their depth up) that span it.
 -- simplified: in a horizontal plane the heightmap is no 2D edge (W:move still meets
 -- it), nor is a standing polygon (its slice there is the upgrade)
+-- [KIT_STUNTS] movement.own_height = true (its type's declaration) in a level plane:
+-- the body keeps the height and the speed up its step gives it (M.steps holds
+-- nothing; kit.cpp's put keeps a put's height), the plane's 2D queries, w.bodies and
+-- the spawn as ever: a step finds its own floor (w:down, w:under) and asks w:circle
+-- and w:segment at its own slice (their last argument: a y)
 -- [KIT_TOP_DOWN] (8) Bodies pass through each other unless a movement asks:
 -- movement.bodies = true (its type's declaration) in a level plane, its w:circle
 -- meets the other players' bodies as circles (w.bodies, t.bodies {{x, z, r, vx, vz,
--- by}...}: kit.cpp's bodies_lit() for the server's step, the others' last known
+-- by, y, h}...}: kit.cpp's bodies_lit() for the server's step, the others' last known
 -- places on a client, players.lua's others_bodies()), info.body their by, info.vel
--- {vx, vz}. Each step pushes its own body out of them (half the depth: the other's
--- step does the rest), the server deciding. simplified: a correction on contact (a
--- client's others are a round trip old); W:segment and W:move meet no bodies
+-- {vx, vz}; [KIT_STUNTS] y and h their feet's height and their body's: a body is met
+-- only where y...y + h spans the slice (none given: at any). Each step pushes its
+-- own body out of them (half the depth: the other's step does the rest), the server
+-- deciding. simplified: a correction on contact (a client's others are a round trip
+-- old); W:segment and W:move meet no bodies
 -- [KIT_PLANE] stage 3: kit/polygon's look ("polygon": its points {{x, y}...} in its
 -- own x and y, extruded `depth` along its own z round its place) lying flat to the
 -- world's x and y (its yaw 0 or 180, any roll) is a prism (M.look_poly, w.polys):
@@ -213,8 +223,8 @@
 -- higher than its top within the 0.6, a boost pad part on a road, before it), and a
 -- walker's s.surface and s.friction are its own.
 -- simplified: one turned otherwise (neither standing nor flat, a pitch off 0 and
--- +-90) or on a moving object is not met, nor by W:ray; a circle's middle deeper in
--- one than its radius meets nothing of it
+-- +-90) or on a moving object is not met; a circle's middle deeper in one than its
+-- radius meets nothing of it
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -1180,12 +1190,15 @@ function M.world(t)
 		l[#l + 1] = p
 	end
 	-- [KIT_TOP_DOWN] (8) the other bodies a movement.bodies meets, {x, z, r, vx, vz,
-	-- by} each, their info made once; in a level plane only
+	-- by, y, h} each, their info made once; in a level plane only ([KIT_STUNTS] y, h:
+	-- the heights it spans, nil: any)
 	w.bodies = {}
 	for _, b in ipairs(w.horizontal and type(t.bodies) == "table" and t.bodies or {}) do
 		local x, z, r = tonumber(b[1]), tonumber(b[2]), tonumber(b[3])
 		if x and z and r then
-			w.bodies[#w.bodies + 1] = {x, z, r, info = {solid = true, friction = 1,
+			local y, h = tonumber(b[7]), tonumber(b[8])
+			w.bodies[#w.bodies + 1] = {x, z, r, y0 = y and h and y, y1 = y and h and y + h,
+				info = {solid = true, friction = 1,
 				surface = "body", body = tostring(b[6]), vel = {tonumber(b[4]) or 0,
 				tonumber(b[5]) or 0}}}
 		end
@@ -1899,9 +1912,67 @@ function W:ray_objects(ox, oy, oz, dx, dy, dz, len, skip)
 	return best, bo, cell, n, lv
 end
 
+-- [KIT_STUNTS] (G4) Where a ray (o, its unit v) enters a polygon's prism first
+-- within len: t, its info (a side's its edge's, a face's the polygon's), its
+-- normal in the world; nil: not met (from inside it meets what it enters next)
+local function ray_poly(p, o, v, len)
+	-- (its 2D x, y the world's x and V, its depth the world's D)
+	local V, D = p.da == 2 and 3 or 2, p.da == 2 and 2 or 3
+	local ox, oy, od, vx, vy, vd = o[1], o[V], o[D], v[1], v[V], v[D]
+	-- Its box against the ray's first
+	for _, a in ipairs({{ox, vx, p.x0, p.x1}, {oy, vy, p.y0, p.y1}, {od, vd, p.z0, p.z1}}) do
+		local e = a[1] + a[2] * len
+		if (a[1] < a[3] and e < a[3]) or (a[1] > a[4] and e > a[4]) then
+			return nil
+		end
+	end
+	local best, info, n = nil, nil, nil
+	-- The face it comes at along its depth
+	if abs(vd) > 1e-9 then
+		local t = ((vd > 0 and p.z0 or p.z1) - od) / vd
+		if t >= 0 and t <= len and poly_inside(p, ox + vx * t, oy + vy * t) then
+			best, info, n = t, p.info, {0, 0, 0}
+			n[D] = vd > 0 and -1 or 1
+		end
+	end
+	-- The sides it comes at from outside (their normals out: against v)
+	local q, ck = p.pts, p.ck
+	local ex2, ey2 = ox + vx * len, oy + vy * len
+	local bx0, bx1 = ox < ex2 and ox or ex2, ox < ex2 and ex2 or ox
+	local by0, by1 = oy < ey2 and oy or ey2, oy < ey2 and ey2 or oy
+	for c = 1, #ck, 6 do
+		if ck[c + 2] <= bx1 and ck[c + 4] >= bx0 and ck[c + 3] <= by1 and ck[c + 5] >= by0 then
+			for i = ck[c], ck[c + 1] do
+				local j = i % p.n + 1
+				local ax, ay = q[2 * i - 1], q[2 * i]
+				local ex, ey = q[2 * j - 1] - ax, q[2 * j] - ay
+				local den = vx * ey - vy * ex
+				if vy * ex - vx * ey < 0 and abs(den) > 1e-12 then
+					local wx, wy = ax - ox, ay - oy
+					local t = (wx * ey - wy * ex) / den
+					local u = (wx * vy - wy * vx) / den
+					if t >= 0 and t <= len and u >= 0 and u <= 1 and (not best or t < best) then
+						local d = od + vd * t
+						if d >= p.z0 and d <= p.z1 then
+							best, info, n = t, edge_info(p, i), {0, 0, 0}
+							n[1], n[V] = info.nx, info.ny
+						end
+					end
+				end
+			end
+		end
+	end
+	return best, info, n
+end
+
 -- A ray: the first solid cell (Amanatides and Woo), object box or ground
 -- along it within len: t, info, the normal (no_ground: the heightmap left out)
+-- ([KIT_STUNTS] the polygons too: no_polys, W:segment's, leaves them out)
+local ray_cast
 function W:ray(ox, oy, oz, dx, dy, dz, len, no_ground)
+	return ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground)
+end
+function ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground, no_polys)
 	local l = sqrt(dx * dx + dy * dy + dz * dz)
 	if l < 1e-9 then
 		return nil
@@ -2014,6 +2085,12 @@ function W:ray(ox, oy, oz, dx, dy, dz, len, no_ground)
 						na == 3 and q or 0)}
 			end
 			best, bi, bn = t0, M.OBJECT, n
+		end
+	end
+	for _, p in ipairs(no_polys and {} or self.polys) do
+		local t0, pi, pn = ray_poly(p, o, v, best or len)
+		if t0 then
+			best, bi, bn = t0, pi, pn
 		end
 	end
 	if self.ground_fn and not no_ground then
@@ -2466,10 +2543,11 @@ function W:circle(x, y, r, z)
 		end
 	end
 	-- [KIT_TOP_DOWN] (8) the other bodies: circles (one on the middle: out along +x)
+	-- ([KIT_STUNTS] one with its heights where they span the slice)
 	for _, b in ipairs(self.bodies or {}) do
 		local dx, dy, rr = x - b[1], y - b[2], r + b[3]
 		local d2 = dx * dx + dy * dy
-		if d2 < rr * rr then
+		if d2 < rr * rr and not (b.y0 and (b.y0 > z or b.y1 < z)) then
 			local d = sqrt(d2)
 			if d > 1e-9 then
 				add(rr - d, dx / d, dy / d, b.info)
@@ -2562,9 +2640,9 @@ function W:segment(x0, y0, x1, y1, z)
 	local t, info, nx, ny, _
 	if self.horizontal then
 		-- ([KIT_TOP_DOWN] level: along x and z at y = z; the normal's x and z)
-		t, info, nx, _, ny = self:ray(x0, z, y0, dx, 0, dy, len, true)
+		t, info, nx, _, ny = ray_cast(self, x0, z, y0, dx, 0, dy, len, true, true)
 	else
-		t, info, nx, ny = self:ray(x0, y0, z, dx, dy, 0, len, true)
+		t, info, nx, ny = ray_cast(self, x0, y0, z, dx, dy, 0, len, true, true)
 	end
 	local best = t and t / len
 	for _, e in ipairs(self:plane_edges(z, x0 < x1 and x0 or x1, y0 < y1 and y0 or y1,
@@ -3084,15 +3162,18 @@ end
 -- after them (MAX_EVENTS at most); guard(true) and guard(false) round each
 -- def.step: the box's per-step cap
 M.MAX_EVENTS = 16
--- [KIT_MOVE_DRAW] movement.pose = {"name"...}: the slots' names (8 at most,
--- the rest and a name that is no plain string or is a slot's number left
+-- [KIT_MOVE_DRAW] movement.pose = {"name"...}: the slots' names (M.POSE_MAX at
+-- most, the rest and a name that is no plain string or is a slot's number left
 -- out); nil: none
+-- ([KIT_STUNTS] 16, room for a pitch and a roll: kit.cpp's movement_pose sends
+-- as many; 8 before)
+M.POSE_MAX = 16
 function M.pose_names(d)
 	if type(d) ~= "table" then
 		return nil
 	end
 	local names = {}
-	for k = 1, 8 do
+	for k = 1, M.POSE_MAX do
 		local n = d[k]
 		if type(n) ~= "string" or not n:match("^[%a_][%w_]*$") then
 			break
@@ -3139,6 +3220,9 @@ end
 function M.steps(def, s, inputs, dt, sub, w, p, guard)
 	sub = sub or 1
 	local names = M.pose_names(type(def.movement) == "table" and def.movement.pose)
+	-- ([KIT_STUNTS] movement.own_height in a level plane: its height its own)
+	local hold = w.plane and not (w.horizontal and type(def.movement) == "table" and
+			def.movement.own_height == true)
 	local events = nil
 	for _, i in ipairs(inputs) do
 		for n = 1, sub do
@@ -3164,7 +3248,7 @@ function M.steps(def, s, inputs, dt, sub, w, p, guard)
 					end
 				end
 			end
-			if w.plane then
+			if hold then
 				w:hold(s)
 			end
 		end

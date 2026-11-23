@@ -757,7 +757,9 @@ namespace interface
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
 //   512 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
 //   nor touching, its area not 0; any winding), edited in a side game's 2D
-//   view, not the inspector (kit/polygon's).
+//   view, not the inspector (kit/polygon's). [KIT_STUNTS] With `crossing` =
+//   true its edges may cross and its area be 0, no point twice in a row
+//   still (a loop round a figure eight: kit/path's points).
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in
 //   the world and sounds), "physics" or "advanced" (technical: poll, rate,
@@ -841,8 +843,8 @@ namespace interface
 //   size both need is a parameter, not a constant in two files); s.vars
 //   another body's public vars (c:body_var's {public = true}); s.pose by
 //   name too where the movement declares pose = {"name"...} (its slots in
-//   order, 8 at most: the step writes s.pose by name or by index, kept and
-//   sent as the numbers); node made anew when the draw function changes
+//   order, 16 at most ([KIT_STUNTS]; 8 before): the step writes s.pose by
+//   name or by index, kept and sent as the numbers); node made anew when the draw function changes
 //   (its client part put again). A put (a teleport, a respawn, a seat)
 //   starts the movement's state afresh on the server and the client: a
 //   step keeping a place of its own starts over from s.pos. A hazard that
@@ -888,7 +890,7 @@ namespace interface
 //   twice a second at most.
 //   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
 //   c:child, c:link, c:voxel_box, c.entities, c.move_lib, c:generate and the
-//   "points" keys `values` and `level` may change in any release; publishing
+//   "points" keys `values`, `level` and `crossing` may change in any release; publishing
 //   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
@@ -1153,11 +1155,21 @@ namespace interface
 //   their velocity's x and z; the step pushes its own body out, each body
 //   by its own step. The server's snapshot sends them (kit.cpp's
 //   bodies_lit()); a client predicts against the others' last known places
-//   (players.lua's others_bodies()). simplified: a correction on contact
-//   (the others' places are a round trip old on the client); no bodies in a
-//   vertical plane or without one. [KIT_3D_GAINS_1] (4z38) a steered
-//   creature's movement (kit/creature_walker's kind) declaring it meets them
-//   too: a barrel knocked about; the players' bodies meet no creature.
+//   (players.lua's others_bodies()). [KIT_STUNTS] Each with its feet's
+//   height and its body's h: met only where they span the circle's slice
+//   (a car on a bridge is no wall to one under it). simplified: a correction
+//   on contact (the others' places are a round trip old on the client); no
+//   bodies in a vertical plane or without one. [KIT_3D_GAINS_1] (4z38) a
+//   steered creature's movement (kit/creature_walker's kind) declaring it
+//   meets them too: a barrel knocked about; the players' bodies meet no
+//   creature.
+//   [KIT_STUNTS] movement.own_height = true there: the body keeps the height
+//   and the speed up its step gives it (no holding; a put keeps the put's
+//   height), the plane's 2D queries as ever, asked at the step's own slice
+//   (w:circle's and w:segment's last argument): a car's own floor by w:down
+//   and w:under, its jumps, a bridge's deck over and under (move.lua's
+//   header). w:ray meets the solid polygons' prisms (standing and lying
+//   flat) as it meets boxes: a chase camera stays out of a deck or a wall.
 //   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
 //   points the world's x and z, its depth along y; its edges are upright
 //   walls, met in a level plane where its depth spans the plane's y, in 3D its

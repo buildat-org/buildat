@@ -1,0 +1,203 @@
+-- [KIT_STUNTS] (4z37zzd (2)) Brimstone Stunts' heights, offline: the
+-- template's stunt_yard built through a stand-in for its c (its default
+-- corners: a figure eight, the bridge where it crosses itself, two tabletop
+-- jumps) as the world over the flat ground (0: the road's top 0.555 the
+-- car stands on), and kit/bot's own
+-- controller (bot.lua's follow) driving types/stunt_car.lua along the
+-- yard's racing line through move.lua's M.steps as kit.cpp steps a driving
+-- bot. At skill 100 and 50 it goes round in order, never wrecks (no
+-- "crash", no "smash"), and: on the bridge's deck its feet at the deck's
+-- top (5.055), under it at the road's (0.555), never between there; off a
+-- kicker's lip in the air for a while, at some height over its floor, and
+-- landed again on its tyres. Then a car dropped 0.4 m lands softly, one
+-- dropped 2.5 m lands hard (slowed, a bump), one dropped 12 m crashes.
+-- Run: lua util/kit_stunts_sim_check.lua (Lua 5.1 or LuaJIT), from the source tree's root.
+local function load_env(path, env)
+	local f = assert(loadfile(path))
+	setfenv(f, env)
+	return f()
+end
+local function env()
+	return {math = math, ipairs = ipairs, pairs = pairs, type = type,
+		tostring = tostring, tonumber = tonumber, setmetatable = setmetatable,
+		table = table, string = string, error = error}
+end
+local MV = load_env("builtin/kit/client_lua/move.lua", env())
+local car_env = env()
+car_env.math = MV.math
+local T = "apps/workbench/templates/brimstone_stunts/types/"
+local car = load_env(T .. "stunt_car.lua", car_env)
+local bot = load_env("builtin/kit/types/bot.lua", env())
+local function upvalue(f, name, depth)
+	for i = 1, 255 do
+		local n, v = debug.getupvalue(f, i)
+		if not n then
+			return
+		end
+		if n == name then
+			return v
+		end
+		if type(v) == "function" and depth > 0 then
+			local r = upvalue(v, name, depth - 1)
+			if r then
+				return r
+			end
+		end
+	end
+end
+bot.follow = assert(upvalue(bot.on_timer, "follow", 3), "bot.lua's follow not found")
+local yard = load_env(T .. "stunt_yard.lua", env())
+local poly_t = load_env("builtin/kit/types/polygon.lua", env())
+local kids = {}
+-- (the race's pole where the template has it)
+local gc = {params = {}, pos = {0, 0, 0}, entities = {{id = 1, pos = {-100, 0.5, -20},
+	types = {"local/stunt_race"}}}}
+for k, d in pairs(yard.params) do
+	gc.params[k] = d.default
+end
+function gc:child(t) kids[#kids + 1] = t return #kids end
+function gc:link() end
+function gc:log() end
+function gc:random(seed)
+	local s = math.floor(tonumber(seed) or 0) % 2147483646 + 1
+	local function nxt() s = s * 16807 % 2147483647 return (s - 1) / 2147483646 end
+	return {next = function() return nxt() end,
+		int = function(_, a, b) return a + math.floor(nxt() * (b - a + 1)) end}
+end
+yard.on_build(gc)
+local polys, path, cps = {}, nil, {}
+for _, k in ipairs(kids) do
+	if k.type == "kit/polygon" then
+		local look = {shape = "polygon"}
+		for n, d in pairs(poly_t.params) do
+			look[n] = d.default
+		end
+		for n, v in pairs(k.params) do
+			look[n] = v
+		end
+		look.solid = look.collision
+		polys[#polys + 1] = MV.look_poly(look, false, k.pos, k.yaw or 0, k.pitch or 0, k.roll or 0)
+	elseif k.type == "kit/path" then
+		path = {points = {}}
+		for i, q in ipairs(k.params.points) do
+			path.points[i] = {k.pos[1] + q[1], k.pos[2], k.pos[3] + q[2]}
+		end
+	elseif k.type == "kit/checkpoint" then
+		cps[#cps + 1] = k
+	end
+end
+assert(path and #path.points >= 60, "no racing line from stunt_yard")
+assert(#cps == 3 and math.floor(cps[1].pos[2]) == 5, "checkpoint 1 not on the deck (y 5): " ..
+	tostring(cps[1] and cps[1].pos[2]))
+local yw = MV.world{cell = function() return nil end, plane = 1, horizontal = true,
+	polys = polys, ground = function() return 0 end}
+local function defaults()
+	local p = {}
+	for k, d in pairs(car.params) do
+		p[k] = d.default
+	end
+	return p
+end
+-- (the bridge's deck and the tunnel under it: x -9...9 and z 2.5...17.5)
+local function at_crossing(s)
+	return math.abs(s.pos[1]) < 8 and s.pos[3] > 4 and s.pos[3] < 16
+end
+local function lap(skill)
+	local p = defaults()
+	local P = path.points
+	local a, b = P[1], P[2]
+	local s = {pos = {a[1], 0.5, a[3]}, yaw = math.deg(math.atan2(b[1] - a[1], b[3] - a[3]))}
+	local st = {at = 0, slow = 0, back = 0, t = 0}
+	local knobs = {skill = skill, grip = bot.params.grip.default, brake = bot.params.brake.default}
+	local n, per = #P, math.floor(p.rate / 10 + 0.5)
+	local inp = {f = 0, r = 0, jump = 0}
+	local done, last, steps = 0, 1, 0
+	local over, under, air, most, landed, flown, high, off, fast = 0, 0, 0, 0, 0, 0, 0, nil, 0
+	MV.steps(car, s, {inp}, 1 / p.rate, p.substeps, yw, p)
+	while done < n do
+		if steps % per == 0 then
+			local o = bot.follow(st, {pos = s.pos, vel = s.vel, yaw = s.yaw, top = p.speed},
+				path, knobs, per / p.rate)
+			inp = {f = o.f, r = o.r, jump = 0}
+			local d = (st.at - last) % n
+			if d < n / 2 then
+				done = done + d
+			end
+			last = st.at
+		end
+		MV.steps(car, s, {inp}, 1 / p.rate, p.substeps, yw, p)
+		steps = steps + 1
+		local y, t = s.pos[2], steps / p.rate
+		for _, e in ipairs(s.events or {}) do
+			local name = type(e) == "table" and e[1] or e
+			assert(name ~= "crash" and name ~= "smash", string.format("skill %d: %s (%s) at " ..
+				"%.1f,%.1f,%.1f after %.1f s", skill, name, tostring(e[2]), s.pos[1], y,
+				s.pos[3], t))
+		end
+		if at_crossing(s) then
+			assert(math.abs(y - 5.055) < 0.05 or math.abs(y - 0.555) < 0.05, string.format(
+				"skill %d: at the crossing at y %.2f, neither on the deck nor under it", skill, y))
+			if y > 3 then
+				over = over + 1
+			else
+				under = under + 1
+			end
+		end
+		-- (a flight: in the air over 0.2 s; its height over the floor as the
+		-- car finds its floor, from 0.6 over it)
+		if s.air then
+			if flown == 0 then
+				off = s.vel
+			end
+			flown = flown + 1 / p.rate
+			local d = yw:down(s.pos[1], y + 0.6, s.pos[3], 20)
+			high = math.max(high, (d or 20) - 0.6)
+		elseif flown > 0 then
+			if flown > 0.2 then
+				air, landed, most = air + flown, landed + 1, math.max(most, high)
+				fast = math.max(fast, math.sqrt(off[1] ^ 2 + off[3] ^ 2))
+			end
+			flown, high = 0, 0
+		end
+		assert(steps < 150 * p.rate, string.format("skill %d: no lap in 150 s (at point %d of %d)",
+			skill, st.at, n))
+	end
+	assert(over > 0 and under > 0, string.format("skill %d: %d steps over the crossing, %d under",
+		skill, over, under))
+	assert(air > 0.5 and most > 0.3 and landed >= 2, string.format("skill %d: %.2f s in the " ..
+		"air, %.2f m over the floor at most, %d flights", skill, air, most, landed))
+	print(string.format("ok: a bot at skill %d drove a lap of the figure eight in %.1f s, over the " ..
+		"bridge (%d steps on its deck) and under it (%d), %d flights over 0.2 s (%.2f s, %.2f m " ..
+		"over its floor at most, off its lip at %.1f m/s), never crashed", skill, steps / p.rate, over, under, landed,
+		air, most, fast))
+end
+lap(100)
+lap(50)
+
+-- Dropped from a height onto the flat at 10 m/s: the speed kept, slowed, wrecked
+local function drop(h)
+	local p = defaults()
+	local s = {pos = {0, 0.5, -40}, yaw = 0}
+	MV.steps(car, s, {{f = 0, r = 0, jump = 0}}, 1 / p.rate, p.substeps, yw, p)
+	s.c[4], s.pos[2], s.air = 10, 0.555 + h, true
+	local crash, n = false, 0
+	while s.air do
+		MV.steps(car, s, {{f = 0, r = 0, jump = 0}}, 1 / p.rate, p.substeps, yw, p)
+		for _, e in ipairs(s.events or {}) do
+			crash = crash or type(e) == "table" and e[1] == "crash"
+		end
+		n = n + 1
+		assert(n < 3 * p.rate, "dropped " .. h .. " m: not landed")
+	end
+	assert(math.abs(s.pos[2] - 0.555) < 0.01, "dropped " .. h .. " m: landed at " .. s.pos[2])
+	return s.c[4], tonumber(s.bumps) or 0, crash
+end
+local v1, b1, c1 = drop(0.4)
+local v2, b2, c2 = drop(2.5)
+local _, _, c3 = drop(12)
+assert(b1 == 0 and not c1 and v1 > 9, string.format("a 0.4 m drop: %.1f m/s, %d bumps", v1, b1))
+assert(b2 == 1 and not c2 and v2 < v1 - 1.5, string.format("a 2.5 m drop: %.1f m/s, %d bumps",
+	v2, b2))
+assert(c3, "a 12 m drop did not crash")
+print(string.format("ok: dropped 0.4 m it lands at %.1f m/s, 2.5 m slowed to %.1f with a bump, " ..
+	"12 m it crashes", v1, v2))

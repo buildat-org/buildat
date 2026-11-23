@@ -589,10 +589,12 @@ end
 
 -- [KIT_TOP_DOWN] (8) The others' bodies as a movement.bodies meets them on this
 -- client: their last known places (the last sample, not drawn DELAY back) and the
--- velocity of the last two, {x, z, r, vx, vz, by} each (move.lua's t.bodies).
--- simplified: r this player's own body's (a scene's players share kit/controls'
--- movement); a hidden one (seated, out of play) is none, as on the server
-function M.others_bodies(r)
+-- velocity of the last two, {x, z, r, vx, vz, by, y, h} each (move.lua's t.bodies;
+-- [KIT_STUNTS] y the feet's height, h the body's).
+-- simplified: r and h this player's own body's (a scene's players share
+-- kit/controls' movement); a hidden one (seated, out of play) is none, as on the
+-- server
+function M.others_bodies(r, h)
 	local out = {}
 	for id, b in pairs(bodies) do
 		local s = b.samples
@@ -605,7 +607,8 @@ function M.others_bodies(r)
 			-- ([KIT_BOT_DRIVE] a driving bot's "bot:<id>", as the server's)
 			local n = P.nodes[id]
 			local bot = n and type(n.show) == "table" and n.show.bot
-			out[#out + 1] = {a.p.x, a.p.z, r, vx, vz, (bot and "bot:" or "player:") .. tostring(id)}
+			out[#out + 1] = {a.p.x, a.p.z, r, vx, vz, (bot and "bot:" or "player:") .. tostring(id),
+				a.p.y, h}
 		end
 	end
 	return out

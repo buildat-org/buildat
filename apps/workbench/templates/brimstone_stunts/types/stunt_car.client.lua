@@ -5,7 +5,9 @@
 -- the race's paint for the player, 1...6), headlights and tail lights, four
 -- wheels where the movement's tyres are (its params track, front and rear:
 -- the draw's p), the front ones steered. Wrecked (pose flag 2) it is
--- charred black. Facing +z, turned by the pose's heading. Its effects from
+-- charred black. Facing +z, turned by the pose's heading, [KIT_STUNTS]
+-- pitched and rolled by its pitch and roll (eased toward them: they come
+-- with each step, the frames between). Its effects from
 -- the pose (stunt_car.lua's head, its slots by name): exhaust smoke
 -- (more on the throttle), road dust by the floor and the speed, sparks
 -- where it scrapes a wall, flames out of the back boosted (or on a boost pad), tyre marks
@@ -154,11 +156,12 @@ end
 
 -- [RACER_FEEL] The effects: Kit's client part effects (kit.effect,
 -- kit.mark, kit.shake), on this client alone; each kind's first logged.
--- The floor's height for them: the Bone Yard's floors' tops are 0.555 (the
--- road) to 0.5875 (mud, the line), the car's place is its plane's (y 1).
--- simplified: one height for the template's track; a track with hills
--- would take w:under's from the step into the pose
-local FLOOR_Y = 0.57
+-- [KIT_STUNTS] Their floor FLOOR_Y over the car's feet (the Bone Yard's
+-- floors' tops are 0.055 (the road) to 0.0875 (mud, the line) over the
+-- ground the feet stand on); none in the air (pose flag 256), no marks on a
+-- slope.
+-- simplified: marks lie level (on a ramp one would cut into it)
+local FLOOR_Y = 0.07
 local said_fx = {}
 local function said_once(kind, x, y, z)
 	if not said_fx[kind] then
@@ -207,12 +210,12 @@ end
 -- A tyre's mark on the floor from x0, z0 to x1, z1 (a stroke, whatever the
 -- frame rate), its colour. This player's new run (the pose's run) clears
 -- them all.
-local function mark(x0, z0, x1, z1, color)
+local function mark(x0, z0, x1, z1, color, y)
 	local dx, dz = x1 - x0, z1 - z0
 	local x, z = (x0 + x1) / 2, (z0 + z1) / 2
-	kit.mark{at = {x, FLOOR_Y, z}, yaw = math.atan2(dx, dz) * 180 / math.pi,
+	kit.mark{at = {x, y, z}, yaw = math.atan2(dx, dz) * 180 / math.pi,
 			size = {0.3, math.sqrt(dx * dx + dz * dz) + 0.1}, color = color, alpha = 0.55}
-	said_once("mark", x, FLOOR_Y, z)
+	said_once("mark", x, y, z)
 end
 -- This client's camera shaken (0...5)
 local function shake(amount)
@@ -228,6 +231,8 @@ end
 -- simplified: never dropped (the sandbox has no weak tables): a few numbers
 -- for each body this client has drawn
 local fx = {}
+-- (each drawn car's pitch and roll as drawn, by its node, and when)
+local tilt = {}
 local function effects(s, node, q, h, flags, p)
 	local now = buildat.get_time_us() / 1e6
 	local e = fx[node]
@@ -244,7 +249,8 @@ local function effects(s, node, q, h, flags, p)
 	end
 	e.run = run or e.run
 	local at = node.position
-	local x, y, z = at.x, FLOOR_Y, at.z
+	local x, y, z = at.x, at.y + FLOOR_Y, at.z
+	local air, level = bit(flags, 256), math.abs(tonumber(q.pitch) or 0) < 0.02
 	local sh, ch = math.sin(h), math.cos(h)
 	local function world(lx, lz)
 		return x + lx * ch + lz * sh, z - lx * sh + lz * ch
@@ -269,7 +275,7 @@ local function effects(s, node, q, h, flags, p)
 		puff("flame", LOOKS.flame, px, y + 0.5, pz, -sh, -ch)
 	end
 	-- Dust off the rear tyres by the speed (none off oil), more sliding
-	if DUST[surf] and speed > 3 then
+	if DUST[surf] and speed > 3 and not air then
 		e.dust = e.dust + dt * math.min(10, speed * (bit(flags, 4) and 0.8 or 0.35))
 		if e.dust >= 1 then
 			e.dust = 0
@@ -290,7 +296,7 @@ local function effects(s, node, q, h, flags, p)
 	for k, wh in ipairs(wheels(p)) do
 		local px, pz = world(wh[1], wh[2])
 		local last = e.tyres[k]
-		if not bit(slips, 2 ^ (k - 1)) then
+		if not bit(slips, 2 ^ (k - 1)) or not level then
 			e.tyres[k] = nil
 		elseif not last then
 			e.tyres[k] = {px, pz}
@@ -299,7 +305,7 @@ local function effects(s, node, q, h, flags, p)
 			if d2 > 16 then
 				e.tyres[k] = {px, pz}
 			elseif d2 >= 0.49 then
-				mark(last[1], last[2], px, pz, MARK[surf] or MARK[1])
+				mark(last[1], last[2], px, pz, MARK[surf] or MARK[1], y)
 				e.tyres[k] = {px, pz}
 			end
 		end
@@ -340,7 +346,17 @@ return {
 			log:info("stunt_car: the draw hook draws a car")
 		end
 		local body = b:GetChild("body", false)
-		body.rotation = magic.Quaternion(0, h * 180 / math.pi, 0)
+		-- ([KIT_STUNTS] eased toward the pose's: nose up and right side down
+		-- are Urho's negative x and z turns)
+		local now = buildat.get_time_us() / 1e6
+		local t = tilt[node] or {now, 0, 0}
+		local k = math.min(1, (now - t[1]) * 15)
+		t[1] = now
+		t[2] = t[2] + ((tonumber(q.pitch) or 0) - t[2]) * k
+		t[3] = t[3] + ((tonumber(q.roll) or 0) - t[3]) * k
+		tilt[node] = t
+		body.rotation = magic.Quaternion(-t[2] * 180 / math.pi, h * 180 / math.pi,
+			-t[3] * 180 / math.pi)
 		-- (placed each frame: a set_param in play shows at once)
 		for k, wh in ipairs(wheels(p)) do
 			local n = body:GetChild("wheel" .. k, false)

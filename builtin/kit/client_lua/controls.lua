@@ -368,7 +368,7 @@ local function world(skip)
 		-- [KIT_TOP_DOWN] (8) the others, for a movement that meets them
 		bodies = C.ctl and C.ctl.horizontal and decl().bodies == true and
 			(tonumber(C.ctl.seat) or 0) == 0 and M.others_bodies and
-			M.others_bodies(tonumber(body_decl().r) or 0.45) or nil}
+			M.others_bodies(tonumber(body_decl().r) or 0.45, tonumber(body_decl().h) or 1.7) or nil}
 end
 
 -- ---- The body
@@ -2674,6 +2674,9 @@ local function place_camera(dt, at)
 		return mode
 	end
 	local want_pos, rot, sight
+	-- ([KIT_STUNTS] a chase camera's world and what it looks at, for its
+	-- smoothed place too)
+	local chase_w, chase_at
 	local la, lvel = tonumber(par.look_ahead) or 0, tonumber(par.look_velocity) or 0
 	-- ([KIT_SPECTATE_CAMERA] no lead for another's body or a target)
 	local leads = (la ~= 0 or lvel ~= 0) and C.s and own
@@ -2788,6 +2791,7 @@ local function place_camera(dt, at)
 			dist = math.max(0.3, t - 0.2)
 		end
 		want_pos = target - d * dist
+		chase_w, chase_at = w, target
 		-- (where the camera looks, and level ahead: where a ship goes)
 		sight = {target, d, magic.Vector3(d.x, 0, d.z):Normalized()}
 		C.chase_dist = dist
@@ -2818,6 +2822,18 @@ local function place_camera(dt, at)
 	if mode ~= "first_person" and sm > 0 and C.cam then
 		local k = 1 - math.exp(-dt / sm)
 		want_pos = C.cam + (want_pos - C.cam) * k
+		-- [KIT_STUNTS] (G4) a chase camera catching up is not through a wall
+		-- either (a car into a tunnel under a deck: the camera above it came
+		-- down through the deck)
+		local dv = chase_w and want_pos - chase_at
+		local l = dv and dv:Length() or 0
+		if l > 0.3 then
+			local t = chase_w:ray(chase_at.x, chase_at.y, chase_at.z, dv.x / l, dv.y / l,
+					dv.z / l, l)
+			if t then
+				want_pos = chase_at + dv * (math.max(0.3, t - 0.2) / l)
+			end
+		end
 	end
 	C.cam = want_pos
 	if sh > 0 then
