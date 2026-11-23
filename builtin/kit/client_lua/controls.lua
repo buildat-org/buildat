@@ -900,6 +900,18 @@ function M.object_target(origin, dir, len)
 		centre = magic.Vector3(c[1], c[2], c[3]), rot = magic.Quaternion(w, x, y, z)}
 end
 
+-- A node's "kit_frame" and "kit_parent" (0: none), read again only once the server
+-- has changed the node (module.lua drops n.fp then: [KIT_3D_GAINS_1] (4z38) a read
+-- through the sandbox for each of a scene's nodes each frame was 10 ms of a frame)
+local function frame_parent(n)
+	if not n.fp then
+		local v = n.node:GetVar("kit_frame")
+		local w = n.node:GetVar("kit_parent")
+		n.fp = {v:IsEmpty() and 0 or v:GetInt(), w:IsEmpty() and 0 or w:GetInt()}
+	end
+	return n.fp[1], n.fp[2]
+end
+
 -- What moves an entity's node: its own object's links, those of what it is under, or
 -- a body's deck ("kit_frame", kit.cpp's place_player); nil: nothing
 function M.links_of(id, n)
@@ -909,11 +921,9 @@ function M.links_of(id, n)
 	if C.links[id] then
 		return C.links[id]
 	end
-	local v = n.node:GetVar("kit_frame")
-	local pid = v:IsEmpty() and 0 or v:GetInt()
+	local pid, parent = frame_parent(n)
 	if pid == 0 then
-		v = n.node:GetVar("kit_parent")
-		pid = v:IsEmpty() and 0 or v:GetInt()
+		pid = parent
 	end
 	for _ = 1, 16 do
 		if pid == 0 then
@@ -926,8 +936,8 @@ function M.links_of(id, n)
 		if not pn then
 			return nil
 		end
-		v = pn.node:GetVar("kit_parent")
-		pid = v:IsEmpty() and 0 or v:GetInt()
+		local _, pp = frame_parent(pn)
+		pid = pp
 	end
 	return nil
 end
@@ -942,6 +952,15 @@ local function link_now(l)
 			l.q0i = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
 		end
 		l.now_t = C.draw_t
+		-- ([KIT_3D_GAINS_1] (4z38) l.ver: a new one only as it moves; place_moving
+		-- leaves a node be while none of its links has)
+		local was = l.was or {}
+		if was[1] == xt and was[2] == yt and was[3] == zt and was[4] == wp and
+				was[5] == wy and was[6] == wr and was[7] == ky and was[8] == kp and
+				was[9] == kr then
+			return l
+		end
+		l.was, l.ver = {xt, yt, zt, wp, wy, wr, ky, kp, kr}, (l.ver or 0) + 1
 		l.xt, l.yt, l.zt = xt, yt, zt
 		if ky then
 			-- [KIT_VEHICLE_MOVEMENTS] steered: its parent's frame, its track's turn there
@@ -976,10 +995,23 @@ end
 -- can take the smoothing off a node (no binding for it yet)
 local function place_moving(rec, node, links)
 	local p, q = node.position, node.rotation
+	local same = rec.rest and rec.lk == links
 	if not rec.rest or p.x ~= rec.sx or p.y ~= rec.sy or p.z ~= rec.sz or q.w ~= rec.sw or
 			q.x ~= rec.sa or q.y ~= rec.sb or q.z ~= rec.sc then
-		rec.rest = {p.x, p.y, p.z, q.w, q.x, q.y, q.z}
+		rec.rest, same = {p.x, p.y, p.z, q.w, q.x, q.y, q.z}, false
 	end
+	-- (where it was put, while neither its rest nor a link has moved since: a
+	-- barrel at rest, a deck stopped)
+	rec.vers = same and rec.vers or {}
+	for i, l in ipairs(links) do
+		link_now(l)
+		same = same and rec.vers[i] == l.ver
+		rec.vers[i] = l.ver
+	end
+	if same then
+		return
+	end
+	rec.lk = links
 	local r = rec.rest
 	local at = moved_point(links, r[1], r[2], r[3])
 	local turn = magic.Quaternion(r[4], r[5], r[6], r[7])
@@ -1020,8 +1052,7 @@ function M.moving_tick()
 	for id, n in pairs(P.nodes) do
 		local links = M.links_of(id, n)
 		-- A body on a deck: its rest in "kit_rest" (kit.cpp's place_player)
-		local fv = links and n.node:GetVar("kit_frame")
-		if fv and not fv:IsEmpty() and fv:GetInt() ~= 0 then
+		if links and frame_parent(n) ~= 0 then
 			local rs = n.node:GetVar("kit_rest"):GetString()
 			if rs ~= n.body_rest_s then
 				local x, y, z = rs:match("^(%S+) (%S+) (%S+)$")

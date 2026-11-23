@@ -1523,11 +1523,18 @@ local function update_play(_, data)
 	par_memo = {}
 	local layers = false
 	-- [KIT_MOVING_OBJECTS] what moves at this frame's time, before anything reads it
+	-- ([KIT_3D_GAINS_1] (4z38) controls.lua's kit_frame and kit_parent kept, n.fp,
+	-- till the server changes the node; each frame without take_changed)
+	changed = replicate.take_changed and replicate.take_changed() or changed
+	for _, n in pairs(P.nodes) do
+		if n.fp and (not replicate.take_changed or changed[n.nid]) then
+			n.fp = nil
+		end
+	end
 	if M.moving_tick then
 		M.moving_tick()
 	end
 	frame_no = frame_no + 1
-	changed = replicate.take_changed and replicate.take_changed() or changed
 	local busy = {}
 	for id, n in pairs(P.nodes) do
 		n.still = still(id, n)
@@ -1541,9 +1548,14 @@ local function update_play(_, data)
 	end
 	for id, n in pairs(busy) do
 		local look_was, on_was, calm = n.look, n.on, true
-		-- What it shows: again as an edit changes it
-		local raw = n.node:GetVar("kit_show")
-		raw = raw:IsEmpty() and "" or raw:GetString()
+		-- What it shows: again as an edit changes it ([KIT_3D_GAINS_1] (4z38) read
+		-- only once the server has changed the node: a look-less node or one with
+		-- a part's on_update is here each frame)
+		local raw = n.show_raw
+		if raw == nil or changed[n.nid] or not replicate.take_changed then
+			raw = n.node:GetVar("kit_show")
+			raw = raw:IsEmpty() and "" or raw:GetString()
+		end
 		if raw ~= n.show_raw then
 			n.show_raw = raw
 			n.show = network.parse_json(raw)
