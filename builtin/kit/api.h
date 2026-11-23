@@ -1155,7 +1155,9 @@ namespace interface
 //   bodies_lit()); a client predicts against the others' last known places
 //   (players.lua's others_bodies()). simplified: a correction on contact
 //   (the others' places are a round trip old on the client); no bodies in a
-//   vertical plane or without one, none for the creatures.
+//   vertical plane or without one. [KIT_3D_GAINS_1] (4z38) a steered
+//   creature's movement (kit/creature_walker's kind) declaring it meets them
+//   too: a barrel knocked about; the players' bodies meet no creature.
 //   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
 //   points the world's x and z, its depth along y; its edges are upright
 //   walls, met in a level plane where its depth spans the plane's y, in 3D its
@@ -1171,7 +1173,17 @@ namespace interface
 //   meets the polygon (w:circle's, w:segment's, w:move's hits, a walker's
 //   s.surface), on the server's steps and the client's prediction alike
 //   (kit/polygon's params so named): a spike strip a bike's step crashes on
-//   itself, no zone and no round trip.
+//   itself, no zone and no round trip. [KIT_3D_GAINS_1] (4z38) kit/part's
+//   surface ("object" if none) and friction too, on its solid box (M.look_box's
+//   b.info): a boost pad or an oil slick a car's w:under tells under a tyre
+//   (the higher of a floor polygon and a solid box under the point).
+//   simplified: a free voxel object's hits say M.OBJECT, not their voxel's
+//   (its boxes merge every material's cells).
+//   [KIT_3D_GAINS_1] (4z38) In a level plane w:circle meets the free voxel
+//   objects too (a kit/wave's swinging prefab: the builtin kit/hammer), each
+//   of their boxes as turned now sliced at the plane's y (a convex outline).
+//   simplified: a box's slice, no speed of its own (a swing pushes a body out,
+//   it hands it no speed).
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
 //   ("param:<name>" as a look's; kit/parallax; experimental, [KIT_API_1]:
 //   the field and the type may change in any release): the looks under the entity
@@ -1181,6 +1193,18 @@ namespace interface
 //   copies every repeat along x (0: none); never met (kit.cpp's collision
 //   snapshot and the bots' grid leave them out, as controls.lua's world()
 //   does). The editor draws them where authored (module.lua's parallax pass).
+//   [KIT_3D_GAINS_1] (4z38) far = true: drawn behind the world as the sky is
+//   (KitFar*.xml: at the far plane, no depth write, after the sky, unlit, no
+//   fog, no shadow; the nearer of two looks drawn over the farther), a
+//   mountain ring round a 3D view with follow 0 and follow_y 0; placed within
+//   the camera's far clip (fog_end and a tenth), which culls past it.
+//   repeat_z: with kit/controls' plane horizontal, copies every repeat_z along
+//   z too (32 copies in all at most).
+//   [KIT_3D_GAINS_1] (4z38) The looks are drawn no farther than the far clip
+//   (kit/environment's fog_end and a tenth; past fog_end all is fog colour)
+//   from the camera, measured to each drawable's box's middle plus half its
+//   size (module.lua's cull); a far layer's looks at any distance, a get_view
+//   pose sees them all. A client part's own nodes set their drawDistance.
 //   Debugging: the builders with the tools on are sent each tick's signals
 //   along links ("kit:flow" [[from, output, to, input]...], their lines
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).

@@ -1256,9 +1256,11 @@ type kit/npc state at
 type kit/npc state line | shared
 type kit/parallax | version 1 [experimental]
 type kit/parallax handlers | [experimental]
+type kit/parallax param far | {"default": false, "kind": "bool"} [experimental]
 type kit/parallax param follow | {"default": 0.5, "kind": "number", "max": 1, "min": 0} [experimental]
 type kit/parallax param follow_y | {"default": 1, "kind": "number", "max": 1, "min": 0} [experimental]
 type kit/parallax param repeat | {"default": 0, "kind": "number", "max": 4096, "min": 0} [experimental]
+type kit/parallax param repeat_z | {"default": 0, "kind": "number", "max": 4096, "min": 0} [experimental]
 type kit/param_set | version 1
 type kit/param_set handlers | on_input
 type kit/param_set param max | {"default": 1000000, "kind": "number", "max": 1000000, "min": -1000000}
@@ -1277,11 +1279,13 @@ type kit/part | version 1
 type kit/part handlers
 type kit/part param collision | {"default": true, "kind": "bool"}
 type kit/part param color | {"default": "#b0b0b0", "kind": "string"}
+type kit/part param friction | {"default": 1, "kind": "number", "max": 10, "min": 0}
 type kit/part param material | {"choices": ["plain", "metal", "glass", "glow"], "default": "plain", "kind": "string"}
 type kit/part param own_look | {"default": true, "kind": "bool"}
 type kit/part param rotation | {"default": [0, 0, 0], "kind": "position"}
 type kit/part param shape | {"choices": ["box", "wedge", "sphere"], "default": "box", "kind": "string"}
 type kit/part param size | {"default": [1, 1, 1], "kind": "position"}
+type kit/part param surface | {"default": "object", "kind": "string"}
 type kit/part param voxel | {"default": "", "kind": "voxel"}
 type kit/path | version 1 [experimental]
 type kit/path handlers | [experimental]
@@ -1948,6 +1952,7 @@ builtin prefab kit/button_door
 builtin prefab kit/car
 builtin prefab kit/creature
 builtin prefab kit/guide
+builtin prefab kit/hammer
 builtin prefab kit/health_bar
 builtin prefab kit/hut
 builtin prefab kit/mute_button

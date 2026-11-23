@@ -1,0 +1,7 @@
+<!-- [KIT_3D_GAINS_1] (4z38) A look under a far kit/parallax layer (module.lua's
+     parallax pass): KitVoxel.glsl's KITFAR, its colour unlit and unfogged at the
+     far plane, drawn after the sky (the material's render order) and the world:
+     what of it shows is where nothing of the world is. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITFAR" psdefines="KITUNLIT KITFAR">
+    <pass name="postopaque" depthwrite="false" />
+</technique>

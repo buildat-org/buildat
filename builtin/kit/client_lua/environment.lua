@@ -593,6 +593,9 @@ local function reach()
 		return
 	end
 	REACH.want = want
+	-- [KIT_3D_GAINS_1] (4z38) the looks culled there too (module.lua's cull): past
+	-- it the fog has them all
+	M.set_look_reach(want)
 	local said = {}
 	for _, slot in ipairs({"play", "editor"}) do
 		local r = REACH[slot]
@@ -676,6 +679,7 @@ local function env_restore()
 		end
 	end
 	REACH.want = false
+	M.set_look_reach(nil)
 	if not env.zone then
 		return
 	end

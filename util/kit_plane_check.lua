@@ -302,6 +302,54 @@ assert(MV.look_poly({shape = "polygon", points = SLOPE, solid = true, surface = 
 	friction = 40}, false, {0, 0, 0}, 0).info.friction == 10, "friction past 10")
 print("ok: a polygon's surface and friction in w:circle, w:segment and the walker's ground; none: polygon, 1")
 
+-- [KIT_3D_GAINS_1] (4z38) A part's own surface and friction (kit/part's): M.look_box's
+-- info (none: nil, M.OBJECT where met); a boost pad on a floor polygon (a road) is
+-- what w:under meets over it, the road beside it; w:circle in a level plane meets a
+-- free object (a hammer's arm hanging 6.5 from its pivot) as its box sliced at y,
+-- swung by a kit/wave's roll at the step's time (M.turned's links, W:pose_at)
+local pad = MV.look_box({size = {2, 0.08, 2}, solid = true, surface = "boost",
+	friction = 1.5}, false, {0, 0.54, 0}, 0)
+assert(pad.info.surface == "boost" and pad.info.friction == 1.5, "the pad's info")
+assert(MV.look_box({size = {1, 1, 1}, solid = true, surface = "object", friction = 1},
+	false, {0, 0, 0}, 0).info == nil, "a plain part's info")
+assert(MV.look_box({size = {1, 1, 1}, solid = true, friction = 40}, false, {0, 0, 0},
+	0).info.friction == 10, "a part's friction past 10")
+local road = MV.look_poly({shape = "polygon", points = {{-10, -10}, {10, -10}, {10, 10},
+	{-10, 10}}, depth = 0.11, floor = true, surface = "asphalt"}, false, {0, 0.5, 0}, 0, 90)
+local rw = MV.world{cell = function(i, j, k)
+	return j <= 0 and STONE or nil
+end, plane = 1, horizontal = true, polys = {road}, boxes = {pad}}
+assert(rw:under(0, 0.6, 0).surface == "boost" and rw:under(5, 0.6, 5).surface == "asphalt",
+	"the pad on the road: " .. rw:under(0, 0.6, 0).surface)
+assert(rw:under(20, 0.6, 0).surface == "kit/stone" or rw:under(20, 0.6, 0) == STONE,
+	"off the road")
+local ARM = {-0.5, -6.5, -0.5, 0.5, 0.5, 0.5}
+local function hw(turned, t)
+	return MV.world{cell = function() return nil end, plane = 1, horizontal = true,
+		turned = MV.turned(turned), t = t}
+end
+-- Rolled 30 degrees: the arm's middle line through y 1 at x 10 + 4.619 / 2
+local x1 = 10 + 0.5 * 4 / math.cos(math.pi / 6)
+local tw = hw({{10, 5, 0, 0, 0, 30, ARM, 7}})
+c = tw:circle(x1, 0, 0.5)
+assert(#c == 1 and c[1].depth > 0.5, "in the rolled arm: " .. #c)
+c = tw:circle(x1 + 0.577 + 0.3, 0, 0.5)
+assert(#c == 1 and near(c[1].depth, 0.2, 2e-3) and near(c[1].nx, 1) and near(c[1].ny, 0),
+	"beside the rolled arm: " .. #c .. " " .. (c[1] and c[1].depth or 0))
+assert(#tw:circle(x1 + 2, 0, 0.5) == 0 and #tw:circle(x1, 0, 0.5, 6) == 0,
+	"past the arm, over its pivot")
+-- Swung by a wave (30 degrees each way, 4 s): at rest at 0, a quarter in at 30
+local WAVE = {wave_roll = 30, wave_roll_period = 4, pivot = {0, 0, 0}}
+local sw0 = hw({{10, 5, 0, 0, 0, 0, ARM, 7, {{10, 5, 0, 0, 0, 0, WAVE}}}}, 0)
+assert(#sw0:circle(x1, 0, 0.5) == 0 and #sw0:circle(10, 0, 0.5) == 1, "the wave at 0")
+sw0:pose_at(1)
+assert(#sw0:circle(x1, 0, 0.5) == 1 and #sw0:circle(10, 0, 0.5) == 0, "the wave at 1 s")
+-- (none in a vertical plane)
+assert(#MV.world{cell = function() return nil end, plane = 0,
+	turned = MV.turned({{10, 0, 0, 0, 0, 0, ARM, 7}})}:circle(10, -2, 0.5) == 0,
+	"a free object in a vertical plane")
+print("ok: a part's surface and friction (a boost pad over a road under w:under); a free object's box sliced in w:circle, swung by a wave")
+
 -- [KIT_CLIENT_REACT] (6) a polygon look's `when` while its state is on: scaled about
 -- its own point, moved by its offset (its depth along z too); off: as it is
 local GEM = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 2,

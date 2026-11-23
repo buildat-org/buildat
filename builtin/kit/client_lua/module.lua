@@ -279,6 +279,52 @@ local function drop_look(n)
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 	n.text_back, n.text_back_node, n.edge_mat = nil, nil, nil
+	n.worn, n.far_look = nil, nil
+end
+
+-- [KIT_3D_GAINS_1] (4z38) Culling by distance: a look's drawables drawn no farther
+-- than M.look_reach (environment.lua's: kit/environment's fog_end and a tenth, the
+-- far clip's; nil, no environment: no limit) and their own reach (Urho3D measures
+-- from a drawable's box's middle: a long road piece's near end stays); a far
+-- kit/parallax layer's never (its pass's far_look)
+local CULLED = {"StaticModel", "CustomGeometry", "Text3D"}
+local function cull(n)
+	local d = M.look_reach
+	local function walk(node)
+		for _, kind in ipairs(CULLED) do
+			local c = node:GetComponent(kind)
+			if c then
+				local r = 0
+				if d then
+					local bb = c.worldBoundingBox
+					r = (bb.max - bb.min):Length() / 2
+				end
+				c.drawDistance = d and d + r or 0
+			end
+		end
+		for i = 0, node:GetNumChildren() - 1 do
+			walk(node:GetChild(i))
+		end
+	end
+	if n.look and n.far_look ~= n.look then
+		walk(n.look)
+	end
+end
+function M.set_look_reach(d)
+	d = tonumber(d)
+	if d == M.look_reach then
+		return
+	end
+	M.look_reach = d
+	local k = 0
+	for _, n in pairs(P.nodes) do
+		if n.look then
+			cull(n)
+			k = k + 1
+		end
+	end
+	log:info("kit: looks drawn " .. (d and string.format("to %.0f m", d) or
+			"at any distance") .. " (" .. k .. " looks)")
 end
 
 -- [KIT_LIGHTING_SCENE] The lighting turned physical or back (environment.lua's
@@ -1029,6 +1075,7 @@ local function draw_look(id, n, look)
 			log:info("kit: entity " .. id .. (worn and " wears " or
 					" wears no ") .. wants)
 		end
+		n.worn = worn
 		-- Not in the registry yet: drawn again once it is
 		n.wear_wanted = wants and not def and wants or nil
 		if worn or n.poly then
@@ -1253,6 +1300,7 @@ local function draw_look(id, n, look)
 	if n.solid and n.slide_at then
 		n.solid.position = n.slide_at
 	end
+	cull(n)
 	log:info(string.format("kit: entity %d drawn %gx%gx%g at %g,%g,%g%s", id,
 			b.size[1], b.size[2], b.size[3], b.off[1], b.off[2], b.off[3],
 			b.solid and ", solid" or "") ..
@@ -1742,16 +1790,25 @@ local function update_play(_, data)
 end
 magic.SubscribeToEvent("Update", function(_, data)
 	local t0 = buildat.get_time_us()
+	-- ([KIT_3D_GAINS_1] (4z38) the frames' time, start to start: a frame-time
+	-- sample for a check)
+	if LK.t then
+		local dt = t0 - LK.t
+		LK.dt, LK.worst = (LK.dt or 0) + dt, math.max(LK.worst or 0, dt)
+	end
+	LK.t = t0
 	update_play(_, data)
 	LK.frames, LK.us = LK.frames + 1, LK.us + buildat.get_time_us() - t0
 end)
 -- [KIT_STILL_LOOKS] (a drive's: the looks read a frame since the last ask, of
--- how many, and this pass's ms a frame)
+-- how many, and this pass's ms a frame; [KIT_3D_GAINS_1] (4z38) the frames' own
+-- ms, the mean and the worst)
 magic.SubscribeToEvent("command_seq:kit_looks", function()
 	local f = math.max(1, LK.frames)
 	log:info(string.format("kit: looks: %d frames, %.1f read a frame of %.1f, " ..
-			"%.2f ms a frame", LK.frames, LK.read / f, LK.looks / f, LK.us / f / 1000))
-	LK.frames, LK.read, LK.looks, LK.us = 0, 0, 0, 0
+			"%.2f ms a frame; frames %.1f ms, the worst %.1f", LK.frames, LK.read / f,
+			LK.looks / f, LK.us / f / 1000, (LK.dt or 0) / f / 1000, (LK.worst or 0) / 1000))
+	LK.frames, LK.read, LK.looks, LK.us, LK.dt, LK.worst = 0, 0, 0, 0, 0, 0
 end)
 
 -- [KIT_CLIENT_REACT] (1) Zones on this client: its own predicted body
@@ -3019,6 +3076,11 @@ function VIEW.next()
 	local v = q.views[k]
 	if not v then
 		VIEW.q, VIEW.voxel_camera = nil, nil
+		-- ([KIT_3D_GAINS_1] (4z38) the looks culled again)
+		if VIEW.reach then
+			M.set_look_reach(VIEW.reach)
+			VIEW.reach = nil
+		end
 		return
 	end
 	local function skip(why)
@@ -3052,6 +3114,12 @@ function VIEW.next()
 				tonumber(t[3]) and magic.Vector3(t[1], t[2], t[3])
 	end
 	local pos = vec(v.pos)
+	-- [KIT_3D_GAINS_1] (4z38) a pose (a map from high up, far) sees every look, the
+	-- fog's cull lifted till the request is done
+	if pos and M.look_reach then
+		VIEW.reach = M.look_reach
+		M.set_look_reach(nil)
+	end
 	if pos then
 		-- A pose: the play camera's lens, or an orthographic one (a map)
 		cam.fov, cam.nearClip, cam.farClip = play.fov, play.nearClip, play.farClip
@@ -3410,6 +3478,48 @@ local function par_copies(n, want)
 	end
 	return cs.nodes
 end
+-- [KIT_3D_GAINS_1] (4z38) A far layer's look ({far = true}): each of its drawables'
+-- materials (its own, made for it: changed in place, its copies share them) on
+-- KitFar*.xml, behind the world as the sky is, its render order past the sky's (128),
+-- the farther from the layer first (they write no depth: the nearer ridge drawn over
+-- the farther); no draw distance, no shadow. Out from under it (or far off): the look
+-- built again
+local FAR = {}
+local function far_look(n, order)
+	FAR.plain = FAR.plain or magic.cache:GetResource("Technique", "kit/KitFar.xml")
+	FAR.tex = FAR.tex or magic.cache:GetResource("Technique", "kit/KitFarTex.xml")
+	local function walk(node)
+		local sm = node:GetComponent("StaticModel")
+		if sm then
+			local m = sm.material
+			if m then
+				m:SetTechnique(0, FAR.plain)
+				m.renderOrder = order
+			end
+			sm.castShadows, sm.drawDistance = false, 0
+		end
+		local cg = node:GetComponent("CustomGeometry")
+		if cg then
+			for i = 0, 63 do
+				local m = cg:GetMaterial(i)
+				if not m then
+					break
+				end
+				m:SetTechnique(0, n.worn and FAR.tex or FAR.plain)
+				m.renderOrder = order
+			end
+			cg.castShadows, cg.drawDistance = false, 0
+		end
+		for i = 0, node:GetNumChildren() - 1 do
+			walk(node:GetChild(i))
+		end
+	end
+	walk(n.look)
+	for _, c in ipairs(n.par_copies and n.par_copies.nodes or {}) do
+		walk(c)
+	end
+	n.far_look = n.look
+end
 local function par_tick()
 	-- (none drawn offset is the common case: no layer, no walk)
 	if not par_any and not PAR.drawn then
@@ -3436,21 +3546,44 @@ local function par_tick()
 			local lp = L.node.position
 			-- ([KIT_TOP_DOWN] (5) follow_y along z in a level plane)
 			local lv = M.level_plane()
+			local RZ = lv and math.max(0, tonumber(s.repeat_z) or 0) or 0
 			local at = n.at + magic.Vector3((1 - f) * (c.x - lp.x),
 					lv and 0 or (1 - fy) * (c.y - lp.y), lv and (1 - fy) * (c.z - lp.z) or 0)
-			local k0, k1 = 0, 0
-			if R > 0 then
+			local k0, k1, m0, m1 = 0, 0, 0, 0
+			if R > 0 or RZ > 0 then
 				-- (its look's reach from its place: the box's middle and half
 				-- its diagonal)
 				local b = n.box or {size = {1, 1, 1}, off = {0, 0, 0}}
 				local r = v3(b.off):Length() + v3(b.size):Length() / 2
 				local hw = par_half_width(cn, cam, at, aspect) + r
-				k0 = math.ceil((c.x - hw - at.x) / R)
-				k1 = math.max(k0, math.floor((c.x + hw - at.x) / R))
-				if k1 - k0 + 1 > PAR.max then
-					local mid = math.floor((c.x - at.x) / R + 0.5)
-					k0, k1 = mid - PAR.max / 2 + 1, mid + PAR.max / 2
+				-- ([KIT_3D_GAINS_1] (4z38) repeat_z: a grid, PAR.max in all; along z
+				-- as far as along x. simplified: the view's reach either way)
+				local function span(cv, av, step, most)
+					if step <= 0 then
+						return 0, 0
+					end
+					local a = math.ceil((cv - hw - av) / step)
+					local b2 = math.max(a, math.floor((cv + hw - av) / step))
+					if b2 - a + 1 > most then
+						local mid = math.floor((cv - av) / step + 0.5)
+						a, b2 = mid - math.floor(most / 2) + 1, mid + math.floor(most / 2)
+						if b2 - a + 1 > most then
+							b2 = a + most - 1
+						end
+					end
+					return a, b2
 				end
+				local mz = RZ > 0 and math.floor(math.sqrt(PAR.max)) or 1
+				k0, k1 = span(c.x, at.x, R, RZ > 0 and math.floor(PAR.max / mz) or PAR.max)
+				m0, m1 = span(c.z, at.z, RZ, mz)
+			end
+			-- [KIT_3D_GAINS_1] (4z38) far: behind the world (far_look)
+			local far = s.far == true
+			if far and n.far_look ~= n.look then
+				local dx, dz = n.at.x - lp.x, n.at.z - lp.z
+				far_look(n, 250 - math.min(100, math.floor(math.sqrt(dx * dx + dz * dz) / 10)))
+				log:info(string.format("kit: entity %d under parallax layer %d drawn far " ..
+						"(behind the world)", id, L.id))
 			end
 			-- (never met: its static bodies not moved about in the physics
 			-- world either; the look built again once it is out from under)
@@ -3458,25 +3591,32 @@ local function par_tick()
 				n.solid:Remove()
 				n.solid, n.par_solid = nil, true
 			end
-			n.look.position = at + magic.Vector3(k0 * R, 0, 0)
+			local nk = k1 - k0 + 1
+			n.look.position = at + magic.Vector3(k0 * R, 0, m0 * RZ)
 			local q = n.look.rotation
-			for j, copy in ipairs(par_copies(n, k1 - k0)) do
-				copy.position = at + magic.Vector3((k0 + j) * R, 0, 0)
+			for j, copy in ipairs(par_copies(n, nk * (m1 - m0 + 1) - 1)) do
+				copy.position = at + magic.Vector3((k0 + j % nk) * R, 0,
+						(m0 + math.floor(j / nk)) * RZ)
 				copy.rotation = q
 			end
 			n.par = true
-			local said = L.id .. " " .. f .. " " .. fy .. " " .. R
+			local said = L.id .. " " .. f .. " " .. fy .. " " .. R .. " " .. RZ
 			if PAR.said[id] ~= said then
 				PAR.said[id] = said
 				log:info(string.format("kit: entity %d under parallax layer %d " ..
-						"(follow %g, follow_y %g, repeat %g)", id, L.id, f, fy, R))
+						"(follow %g, follow_y %g, repeat %g, repeat_z %g)", id, L.id, f,
+						fy, R, RZ))
+			end
+			if not far and n.far_look then
+				drop_look(n)
+				n.par, PAR.said[id] = nil, nil
 			end
 		elseif n.par then
 			-- (the editor's, or out from under a layer: where authored)
 			n.look.position = n.at
 			par_copies(n, 0)
 			n.par = nil
-			if n.par_solid then
+			if n.par_solid or n.far_look then
 				drop_look(n)
 			end
 			if PAR.said[id] then

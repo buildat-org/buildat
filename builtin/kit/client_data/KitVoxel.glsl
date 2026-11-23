@@ -57,6 +57,10 @@
 //   KITUNLIT  ([KIT_SIDE_SCENERY]) a look in material "glow" wearing a
 //       voxel material (KitVoxelLookGlow.xml, its base pass alone): the
 //       albedo as it is, no light.
+//   KITFAR  ([KIT_3D_GAINS_1] 4z38) a look under a far kit/parallax layer
+//       (KitFar*.xml, postopaque after the sky, no depth write): at the far
+//       plane (the sky's z = w), so the depth test passes only where the
+//       world drew nothing, and no fog.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -113,6 +117,9 @@ void VS()
     gl_Position = GetClipPos(worldPos);
     vNormal = GetWorldNormal(modelMatrix);
     vWorldPos = vec4(worldPos, GetDepth(gl_Position));
+    #ifdef KITFAR
+        gl_Position.z = gl_Position.w;
+    #endif
 
     #ifdef KITSKY
         vColor = iColor;
@@ -378,6 +385,9 @@ void PS()
         float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);
     #else
         float fogFactor = GetFogFactor(vWorldPos.w);
+    #endif
+    #ifdef KITFAR
+        fogFactor = 1.0;
     #endif
 
     #if defined(PERPIXEL)
