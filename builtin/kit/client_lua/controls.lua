@@ -1105,7 +1105,30 @@ function M.moving_tick()
 	if any then
 		C.pose_world:pose_at(C.draw_t)
 	end
-	for id, n in pairs(P.nodes) do
+	-- ([KIT_STUNTS_PERF] the nodes something moves or moved, C.mt: found among
+	-- every node again once the links, the nodes or a frame or parent change,
+	-- else among those the server changed (module.lua's P.changed); a walk of
+	-- every node each frame was ~1.5 ms of a Brimstone Stunts lap)
+	local k = C.mt_key
+	if not (P.changed and k and k[1] == C.links and k[2] == P.nodes_gen and
+			k[3] == C.fp_gen) then
+		C.mt = {}
+		for id, n in pairs(P.nodes) do
+			if links_kept(id, n) or n.rest or n.body_rest_s then
+				C.mt[id] = n
+			end
+		end
+		C.mt_key = {C.links, P.nodes_gen, C.fp_gen}
+	else
+		for nid in pairs(P.changed) do
+			local id = P.by_nid[nid]
+			local n = id and P.nodes[id]
+			if n and (links_kept(id, n) or n.rest or n.body_rest_s) then
+				C.mt[id] = n
+			end
+		end
+	end
+	for id, n in pairs(C.mt) do
 		local links = links_kept(id, n)
 		-- A body on a deck: its rest in "kit_rest" (kit.cpp's place_player)
 		if links and frame_parent(n) ~= 0 then
@@ -1126,6 +1149,9 @@ function M.moving_tick()
 			elseif n.rest then
 				place_rest(n, n.node)
 			end
+		end
+		if not (links or n.rest or n.body_rest_s) then
+			C.mt[id] = nil
 		end
 	end
 	for _, o in ipairs(C.moving_nodes) do

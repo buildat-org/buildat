@@ -1540,11 +1540,22 @@ local function update_play(_, data)
 	if not replicate.take_changed then
 		par_memo = {}
 	end
-	for _, n in pairs(P.nodes) do
-		if n.fp and (not replicate.take_changed or changed[n.nid]) then
-			n.fp = nil
+	-- ([KIT_STUNTS_PERF] the changed ones alone, not a walk of every node; n.vgen
+	-- counted up: ui.lua's state() kept till then; P.changed: controls.lua's
+	-- moving_tick)
+	if replicate.take_changed then
+		for nid in pairs(changed) do
+			local n = P.nodes[P.by_nid[nid] or 0]
+			if n then
+				n.fp, n.vgen = nil, (n.vgen or 0) + 1
+			end
+		end
+	else
+		for _, n in pairs(P.nodes) do
+			n.fp, n.vgen = nil, (n.vgen or 0) + 1
 		end
 	end
+	P.changed = replicate.take_changed and changed or nil
 	-- ([KIT_STUNTS_PERF] the parallax layers remembered: again once a
 	-- remembered node's kit_parent changes)
 	for nid in pairs(changed) do
