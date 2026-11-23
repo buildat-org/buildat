@@ -116,8 +116,10 @@
 --     ground's slope up to b.slope (tan of the slope limit)
 --   w:ray(ox, oy, oz, dx, dy, dz, len) -> t, info, nx, ny, nz; [KIT_STUNTS] the
 --     solid polygons' prisms too (M.look_poly's, standing and lying flat: a
---     side's info its edge's, a face's the polygon's; entered from outside)
+--     side's info its edge's, a face's the polygon's; entered from outside;
+--     [KIT_STUNTS] (G6) tilted: a face's info with its normal, info.n)
 --   w:down(x, y, z, len) -> how far down the first solid is, its info
+--     ([KIT_STUNTS] (G6) and nx, ny, nz: the normal out of what it met)
 --   w:under(x, y, z) -> the info of what is under the point (0.6 down)
 --   w:contacts(b) -> {{info, nx, ny, nz}...} what touches the body
 --   w:unbury(pos, b) -> true when lifted: a body b = {r, h} buried by an edit
@@ -222,9 +224,16 @@
 -- its top (W:floor_at, before what is under it; [KIT_3D_GAINS_1] (4z38) a solid
 -- higher than its top within the 0.6, a boost pad part on a road, before it), and a
 -- walker's s.surface and s.friction are its own.
--- simplified: one turned otherwise (neither standing nor flat, a pitch off 0 and
--- +-90) or on a moving object is not met; a circle's middle deeper in one than its
--- radius meets nothing of it
+-- [KIT_STUNTS] (G6) one turned otherwise (neither standing nor flat, a pitch off 0
+-- and +-90) is a tilted prism (M.tilted_poly, a floor too): met by w:down,
+-- w:under and W:floor_at, W:sweep and W:blocked (separating axes), w:ray and
+-- w:segment, w:circle's slice (its pieces' outlines at the slice: a hit's info its
+-- piece's +z face's, info.n that face's normal); a concave one by its triangles; a
+-- face's info has its normal (info.n; nx, ny its horizontal length and up: w:move
+-- climbs it within the slope, else steps up it).
+-- simplified: one on a moving object is not met; a circle's middle deeper in one
+-- than its radius meets nothing of it; a box swept from inside a tilted one gets
+-- out (none met)
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -747,10 +756,17 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 	-- ([RACER_FEEL] (1) a flat one's turn as one yaw, the same on both sides)
 	pitch, yaw, roll = tonumber(pitch) or 0, tonumber(yaw) or 0, tonumber(roll) or 0
 	yaw, pitch, roll = flat_turn(yaw, pitch, roll)
-	local R = rotation(pitch, yaw, roll)
+	-- ([KIT_STUNTS] (G6) its turn on Kit's grid, a 16th of a degree: a client's
+	-- from a float quaternion the same bits as the server's; a thousandth's
+	-- midpoints are that grid's)
+	local R = rotation(round_to(pitch, 16), round_to(yaw, 16), round_to(roll, 16))
 	local da = abs(R[9]) >= 1 - 1e-9 and 3 or abs(R[6]) >= 1 - 1e-9 and 2 or nil
-	if not (solid or fl) or not da or fl and da ~= 2 then
+	if not (solid or fl) or da and fl and da ~= 2 then
 		return nil
+	end
+	if not da then
+		-- [KIT_STUNTS] (G6) turned otherwise: a tilted prism
+		return M.tilted_poly(look, w, pos, R, poly_info(look), fl or nil)
 	end
 	-- (the world's axis of its 2D y)
 	local V = da == 3 and 2 or 3
@@ -959,6 +975,432 @@ function M.triangulate(pts)
 		out[#out + 1], out[#out + 2], out[#out + 3] = idx[1], idx[2], idx[3]
 	end
 	return out
+end
+
+-- ---- [KIT_STUNTS] (G6) A polygon turned neither standing nor flat: a tilted prism
+-- (the top of this file says how it is met), in its own frame with its turn:
+-- {tilt = true, R (rows: the world's from its frame's), o (its place), info,
+-- floor, b (its box in the world), pieces}. Its pieces are convex (the polygon
+-- itself, else M.triangulate's triangles), each {k, xs, ys (its points, counter-
+-- clockwise), z0, z1 (the depth)}; a piece's world (prep: its corners, box, face
+-- planes and infos, separating axes) made the first time a query reaches it, then
+-- kept with the prism (a client's is kept with its look, the server's for a step).
+-- [KIT_POLYGON_POINTS] a query looks at a piece only where its box is met, and
+-- at TILT_CHUNK pieces' boxes at a time (a long concave outline's triangles)
+local TILT_CHUNK = 16
+function M.tilted_poly(look, w, pos, R, info, fl)
+	local sc, of = {1, 1, 1}, {0, 0, 0}
+	for k = 1, 3 do
+		sc[k] = type(w.scale) == "table" and tonumber(w.scale[k]) or 1
+		of[k] = type(w.offset) == "table" and tonumber(w.offset[k]) or 0
+	end
+	local xs, ys, n = {}, {}, 0
+	for _, q in ipairs(look.points) do
+		local x = type(q) == "table" and tonumber(q[1])
+		local y = type(q) == "table" and tonumber(q[2])
+		if not x or not y then
+			return nil
+		end
+		n = n + 1
+		xs[n], ys[n] = x * sc[1] + of[1], y * sc[2] + of[2]
+	end
+	if n < 3 then
+		return nil
+	end
+	local a = 0
+	for i = 1, n do
+		local j = i % n + 1
+		a = a + xs[i] * ys[j] - xs[j] * ys[i]
+	end
+	if a == 0 then
+		return nil
+	end
+	-- (counter-clockwise; convex where every turn goes left)
+	if a < 0 then
+		for i = 1, floor(n / 2) do
+			local j = n + 1 - i
+			xs[i], xs[j], ys[i], ys[j] = xs[j], xs[i], ys[j], ys[i]
+		end
+	end
+	local d = tonumber(look.depth) or 1
+	d = (d < 0.02 and 0.02 or d > 64 and 64 or d) * abs(sc[3])
+	local z0, z1 = of[3] - d / 2, of[3] + d / 2
+	local p = {tilt = true, R = R, o = {pos[1], pos[2], pos[3]}, info = info, floor = fl,
+		pieces = {}, ck = {}}
+	local bent = false
+	for i = 1, n do
+		local j, k = i % n + 1, (i + 1) % n + 1
+		if (xs[j] - xs[i]) * (ys[k] - ys[i]) - (ys[j] - ys[i]) * (xs[k] - xs[i]) < 0 then
+			bent = true
+		end
+	end
+	if not bent then
+		p.pieces[1] = {k = n, xs = xs, ys = ys, z0 = z0, z1 = z1}
+	else
+		local flat = {}
+		for i = 1, n do
+			flat[2 * i - 1], flat[2 * i] = xs[i], ys[i]
+		end
+		local t = M.triangulate(flat)
+		for i = 1, #t, 3 do
+			p.pieces[#p.pieces + 1] = {k = 3, xs = {xs[t[i]], xs[t[i + 1]], xs[t[i + 2]]},
+				ys = {ys[t[i]], ys[t[i + 1]], ys[t[i + 2]]}, z0 = z0, z1 = z1}
+		end
+		if not p.pieces[1] then
+			return nil
+		end
+	end
+	-- Its box in the world (its frame's box's corners turned), and each run of
+	-- TILT_CHUNK pieces' (from their points, bounded the same way)
+	local function box_of_local(lx0, ly0, lx1, ly1)
+		local b = {math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge}
+		for c = 0, 7 do
+			local x = c % 2 == 0 and lx0 or lx1
+			local y = floor(c / 2) % 2 == 0 and ly0 or ly1
+			local z = c < 4 and z0 or z1
+			for k = 0, 2 do
+				local v = pos[k + 1] + R[3 * k + 1] * x + R[3 * k + 2] * y + R[3 * k + 3] * z
+				if v < b[k + 1] then b[k + 1] = v end
+				if v > b[k + 4] then b[k + 4] = v end
+			end
+		end
+		return b
+	end
+	local function lbox(i0, i1)
+		local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+		for i = i0, i1 do
+			local c = p.pieces[i]
+			for q = 1, c.k do
+				local x, y = c.xs[q], c.ys[q]
+				if x < x0 then x0 = x end
+				if x > x1 then x1 = x end
+				if y < y0 then y0 = y end
+				if y > y1 then y1 = y end
+			end
+		end
+		return box_of_local(x0, y0, x1, y1)
+	end
+	p.b = lbox(1, #p.pieces)
+	for i0 = 1, #p.pieces, TILT_CHUNK do
+		local i1 = i0 + TILT_CHUNK - 1 < #p.pieces and i0 + TILT_CHUNK - 1 or #p.pieces
+		p.ck[#p.ck + 1] = {i0, i1, lbox(i0, i1)}
+	end
+	return p
+end
+
+-- A face's info: the polygon's surface and friction, its normal n = {x, y, z} out of
+-- it, nx its horizontal length and ny its up (w:move climbs it as a polygon's edge
+-- as far as the body's slope lets, else steps up it as a voxel's side)
+local function face_info(p, nx, ny, nz)
+	return {solid = true, friction = p.info.friction, surface = p.info.surface,
+		n = {nx, ny, nz}, nx = sqrt(nx * nx + nz * nz), ny = ny, tilt = true}
+end
+
+-- A piece's world: c.v {x1, y1, z1, ...} its corners (1...k the bottom, k + 1...2k
+-- the top), c.b its box, c.pl {nx, ny, nz, d...} its face planes (out of it: n.x <= d
+-- inside), c.pi their infos, c.ax {ux, uy, uz, lo, hi, +face, -face...} the axes
+-- that separate a box from it (the world's three, its faces' normals, the world's
+-- axes across its edges) with its extent along each and the faces facing each way
+local function prep(p, c)
+	if c.v then
+		return c
+	end
+	local R, o, k = p.R, p.o, c.k
+	local v, b = {}, {math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge}
+	for s = 0, 1 do
+		local z = s == 0 and c.z0 or c.z1
+		for i = 1, k do
+			local x, y = c.xs[i], c.ys[i]
+			local q = 3 * (s * k + i) - 2
+			for a = 0, 2 do
+				local u = o[a + 1] + R[3 * a + 1] * x + R[3 * a + 2] * y + R[3 * a + 3] * z
+				v[q + a] = u
+				if u < b[a + 1] then b[a + 1] = u end
+				if u > b[a + 4] then b[a + 4] = u end
+			end
+		end
+	end
+	c.v, c.b = v, b
+	local pl, pi = {}, {}
+	local function plane(nx, ny, nz, at)
+		pl[#pl + 1], pl[#pl + 2], pl[#pl + 3] = nx, ny, nz
+		pl[#pl + 1] = nx * v[at] + ny * v[at + 1] + nz * v[at + 2]
+		pi[#pi + 1] = face_info(p, nx, ny, nz)
+	end
+	-- Its top (its own +z) and bottom, its sides (out: right of a counter-clockwise edge)
+	local zx, zy, zz = R[3], R[6], R[9]
+	plane(zx, zy, zz, 3 * k + 1)
+	plane(-zx, -zy, -zz, 1)
+	local dirs = {zx, zy, zz}
+	for i = 1, k do
+		local j = i % k + 1
+		local ex, ey = c.xs[j] - c.xs[i], c.ys[j] - c.ys[i]
+		local l = sqrt(ex * ex + ey * ey)
+		if l > 1e-12 then
+			ex, ey = ex / l, ey / l
+			plane(R[1] * ey - R[2] * ex, R[4] * ey - R[5] * ex, R[7] * ey - R[8] * ex, 3 * i - 2)
+			dirs[#dirs + 1] = R[1] * ex + R[2] * ey
+			dirs[#dirs + 1] = R[4] * ex + R[5] * ey
+			dirs[#dirs + 1] = R[7] * ex + R[8] * ey
+		end
+	end
+	c.pl, c.pi = pl, pi
+	local ax = {}
+	local function axis(ux, uy, uz)
+		local l = sqrt(ux * ux + uy * uy + uz * uz)
+		if l < 1e-9 then
+			return
+		end
+		ux, uy, uz = ux / l, uy / l, uz / l
+		for q = 1, #ax, 8 do
+			if abs(ax[q] * ux + ax[q + 1] * uy + ax[q + 2] * uz) > 1 - 1e-9 then
+				return
+			end
+		end
+		local lo, hi = math.huge, -math.huge
+		for q = 1, #v, 3 do
+			local s = v[q] * ux + v[q + 1] * uy + v[q + 2] * uz
+			if s < lo then lo = s end
+			if s > hi then hi = s end
+		end
+		local up, down = 0, 0
+		for q = 1, #pl, 4 do
+			local s = pl[q] * ux + pl[q + 1] * uy + pl[q + 2] * uz
+			if s > 1 - 1e-6 then
+				up = (q + 3) / 4
+			elseif s < -1 + 1e-6 then
+				down = (q + 3) / 4
+			end
+		end
+		local at = #ax
+		ax[at + 1], ax[at + 2], ax[at + 3], ax[at + 4] = ux, uy, uz, lo
+		ax[at + 5], ax[at + 6], ax[at + 7], ax[at + 8] = hi, up, down, 0
+	end
+	axis(1, 0, 0)
+	axis(0, 1, 0)
+	axis(0, 0, 1)
+	for q = 1, #pl, 4 do
+		axis(pl[q], pl[q + 1], pl[q + 2])
+	end
+	for q = 1, #dirs, 3 do
+		local dx, dy, dz = dirs[q], dirs[q + 1], dirs[q + 2]
+		-- (x, y and z across it)
+		axis(0, -dz, dy)
+		axis(dz, 0, -dx)
+		axis(-dy, dx, 0)
+	end
+	c.ax = ax
+	return c
+end
+
+-- The boxes (a, b {x0, y0, z0, x1, y1, z1}) overlap (a hair in)
+local function boxes_meet(a, b)
+	return a[1] < b[4] - EPS and a[4] > b[1] + EPS and a[2] < b[5] - EPS and
+		a[5] > b[2] + EPS and a[3] < b[6] - EPS and a[6] > b[3] + EPS
+end
+
+-- The pieces of a prism whose boxes meet the box b, each prepped: f(c) for each
+-- until one returns true (then true)
+local function pieces_in(p, b, f)
+	if not boxes_meet(p.b, b) then
+		return false
+	end
+	for _, ck in ipairs(p.ck) do
+		if boxes_meet(ck[3], b) then
+			for i = ck[1], ck[2] do
+				local c = prep(p, p.pieces[i])
+				if boxes_meet(c.b, b) and f(c) then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+-- Where a ray (o, its unit v) enters a convex piece within len: t, its face's
+-- index, where it leaves; nil: not met, or from inside it (a hair in: at once)
+local function ray_piece(c, ox, oy, oz, vx, vy, vz, len)
+	local pl = c.pl
+	local t0, t1, face, entered = -math.huge, len, nil, false
+	for q = 1, #pl, 4 do
+		local nx, ny, nz = pl[q], pl[q + 1], pl[q + 2]
+		local den = nx * vx + ny * vy + nz * vz
+		local dist = pl[q + 3] - (nx * ox + ny * oy + nz * oz)
+		if den < -1e-12 then
+			local t = dist / den
+			if dist < EPS then
+				entered = true
+			end
+			if t > t0 then
+				t0, face = t, (q + 3) / 4
+			end
+		elseif den > 1e-12 then
+			local t = dist / den
+			if t < t1 then
+				t1 = t
+			end
+		elseif dist < 0 then
+			return nil
+		end
+		if t0 > t1 then
+			return nil
+		end
+	end
+	if not entered or not face then
+		return nil
+	end
+	return t0 < 0 and 0 or t0, face, t1
+end
+
+-- The tilted prisms whose boxes meet the box b: f(p) for each, by w.tck (M.world's
+-- runs of TILT_CHUNK prisms, each with its box) as pieces_in goes by p.ck
+local function tilts_in(w, b, f)
+	local l = w.tilts
+	for _, ck in ipairs(w.tck) do
+		if boxes_meet(ck[3], b) then
+			for i = ck[1], ck[2] do
+				if boxes_meet(l[i].b, b) then
+					f(l[i])
+				end
+			end
+		end
+	end
+end
+
+-- A ray against the tilted prisms: the nearest within len: t, the face's info, its
+-- normal (a table); nil: none
+local function ray_tilts(w, o, v, len)
+	local best, bi, bn = nil, nil, nil
+	-- (the ray's box)
+	local rb = {}
+	for k = 1, 3 do
+		local e = o[k] + v[k] * len
+		rb[k], rb[k + 3] = (o[k] < e and o[k] or e) - 2 * EPS, (o[k] < e and e or o[k]) + 2 * EPS
+	end
+	local function piece(c)
+		local t, f = ray_piece(c, o[1], o[2], o[3], v[1], v[2], v[3], best or len)
+		if t and (not best or t < best) then
+			best, bi = t, c.pi[f]
+			bn = bi.n
+		end
+	end
+	tilts_in(w, rb, function(p)
+		pieces_in(p, rb, piece)
+	end)
+	return best, bi, bn
+end
+
+-- The box b {x0, y0, z0, x1, y1, z1} moved d along axis a (1...3; 0: not moving)
+-- against a piece by its separating axes: nil (not met within the move, or in it
+-- already: it gets out), else the share of the move before they meet (0...1)
+-- and the face met (its info; an edge or corner: the polygon's); a 0: 0 where the
+-- box is in it
+local function sweep_piece(p, c, b, a, d)
+	local ax = c.ax
+	local cx, cy, cz = (b[1] + b[4]) / 2, (b[2] + b[5]) / 2, (b[3] + b[6]) / 2
+	local hx, hy, hz = (b[4] - b[1]) / 2, (b[5] - b[2]) / 2, (b[6] - b[3]) / 2
+	local te, tx, hit = -math.huge, math.huge, nil
+	for q = 1, #ax, 8 do
+		local ux, uy, uz = ax[q], ax[q + 1], ax[q + 2]
+		local m = ux * cx + uy * cy + uz * cz
+		local r = hx * abs(ux) + hy * abs(uy) + hz * abs(uz)
+		local lo, hi = m - r - ax[q + 4] + EPS, m + r - ax[q + 3] - EPS
+		-- (lo < 0 < hi: overlapping along it; the move shifts both by vu)
+		local vu = a == 0 and 0 or d * ax[q + a - 1]
+		if vu > -1e-12 and vu < 1e-12 then
+			if lo >= 0 or hi <= 0 then
+				return nil
+			end
+		else
+			local t1, t2 = -lo / vu, -hi / vu
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			if t1 > te then
+				te = t1
+				local f = vu < 0 and ax[q + 5] or ax[q + 6]
+				hit = f > 0 and c.pi[f] or nil
+			end
+			if t2 < tx then
+				tx = t2
+			end
+			if te >= tx or te >= 1 or tx <= 0 then
+				return nil
+			end
+		end
+	end
+	if a == 0 then
+		return 0
+	end
+	if te < 0 then
+		return nil
+	end
+	return te, hit or p.info
+end
+
+-- The box's move d along axis a past the tilted prisms: d, the info hit
+local function sweep_tilts(w, b, a, d)
+	local hit = nil
+	local sb = {b[1], b[2], b[3], b[4], b[5], b[6]}
+	if d > 0 then
+		sb[a + 3] = sb[a + 3] + d
+	else
+		sb[a] = sb[a] + d
+	end
+	tilts_in(w, sb, function(p)
+		if not p.floor then
+			pieces_in(p, sb, function(c)
+				local t, info = sweep_piece(p, c, b, a, d)
+				if t then
+					d, hit = d * t, info
+					if d > 0 then
+						sb[a + 3] = b[a + 3] + d
+					else
+						sb[a] = b[a] + d
+					end
+				end
+			end)
+		end
+	end)
+	return d, hit
+end
+
+-- Whether the box is in a tilted prism
+local function in_tilts(w, b)
+	local inside = false
+	tilts_in(w, b, function(p)
+		inside = inside or pieces_in(p, b, function(c) return sweep_piece(p, c, b, 0, 0) ~= nil end)
+	end)
+	return inside
+end
+
+-- A piece sliced across the world's axis N at z: its outline's points in the
+-- world's x and V, going round (a convex polygon), nil where it does not reach z
+local round_sort
+local function slice_piece(c, N, V, z)
+	local v, k = c.v, c.k
+	local px, py, n = {}, {}, 0
+	local function edge(i, j)
+		local a, b = 3 * i - 3, 3 * j - 3
+		local ca, cb = v[a + N], v[b + N]
+		if (ca < z) ~= (cb < z) then
+			local t = (z - ca) / (cb - ca)
+			n = n + 1
+			px[n] = v[a + 1] + (v[b + 1] - v[a + 1]) * t
+			py[n] = v[a + V] + (v[b + V] - v[a + V]) * t
+		end
+	end
+	for i = 1, k do
+		local j = i % k + 1
+		edge(i, j)
+		edge(k + i, k + j)
+		edge(i, k + i)
+	end
+	if n < 3 then
+		return nil
+	end
+	return round_sort(px, py, n)
 end
 
 -- [KIT_MOVING_OBJECTS] What the object's motion is at t (seconds): the turn over its
@@ -1184,10 +1626,27 @@ function M.world(t)
 	-- [KIT_TOP_DOWN] (1) the plane level: w.plane a y
 	w.horizontal = w.plane ~= nil and t.horizontal == true or nil
 	-- ([KIT_TOP_DOWN] (2) the floors apart: no walls)
-	w.polys, w.floors = {}, {}
+	-- ([KIT_STUNTS] (G6) the tilted ones apart: w.tilts, a tilted floor with the floors)
+	w.polys, w.floors, w.tilts = {}, {}, {}
 	for _, p in ipairs(t.polys or {}) do
-		local l = p.floor and w.floors or w.polys
+		local l = p.floor and w.floors or p.tilt and w.tilts or w.polys
 		l[#l + 1] = p
+	end
+	-- (and in runs of TILT_CHUNK with their boxes: tilts_in.
+	-- simplified: runs in the given order, a loop's facets each next to the last;
+	-- prisms strewn about would want a grid)
+	w.tck = {}
+	for i0 = 1, #w.tilts, TILT_CHUNK do
+		local i1 = math.min(i0 + TILT_CHUNK - 1, #w.tilts)
+		local b = {math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge}
+		for i = i0, i1 do
+			local pb = w.tilts[i].b
+			for k = 1, 3 do
+				b[k] = math.min(b[k], pb[k])
+				b[k + 3] = math.max(b[k + 3], pb[k + 3])
+			end
+		end
+		w.tck[#w.tck + 1] = {i0, i1, b}
 	end
 	-- [KIT_TOP_DOWN] (8) the other bodies a movement.bodies meets, {x, z, r, vx, vz,
 	-- by, y, h} each, their info made once; in a level plane only ([KIT_STUNTS] y, h:
@@ -1590,6 +2049,10 @@ function W:sweep(b, a, d)
 		local dp, hp = self:sweep_polys(b, a, d)
 		d, hit = dp, hp or hit
 	end
+	if self.tilts[1] then
+		local dp, hp = sweep_tilts(self, b, a, d)
+		d, hit = dp, hp or hit
+	end
 	local dt, ht = self:sweep_turned(b, a, d)
 	d, hit = dt, ht or hit
 	-- [KIT_HM_FREE] The heightmap's extent: a wall (one past it already:
@@ -1672,6 +2135,9 @@ function W:blocked(b, known_only)
 		if spans(self, p, b) and poly_over(p, lb[1], lb[2], lb[4], lb[5]) then
 			return true
 		end
+	end
+	if self.tilts[1] and in_tilts(self, b) then
+		return true
 	end
 	local r, h = (b[4] - b[1]) / 2, b[5] - b[2]
 	for _, o in ipairs(self.turned) do
@@ -1813,11 +2279,12 @@ function W:move(b, dx, dy, dz, step)
 	-- ([KIT_TOP_DOWN] (2) a flat one's edge is an upright wall: a voxel's step)
 	local pe = type(hx) == "table" and hx.ny and not hx.flat and hx or
 			type(hz) == "table" and hz.ny and not hz.flat and hz
+	-- ([KIT_STUNTS] (G6) a tilted face steeper than that: a voxel's side, a step)
 	if pe and step and step > 0 then
 		local k = b.slope or 1
 		local up = sqrt(dx * dx + dz * dz) * k + 2 * EPS
 		step = pe.ny > 0 and abs(pe.nx) <= pe.ny * k + 1e-9 and
-				(up < step and up or step) or 0
+				(up < step and up or step) or pe.tilt and step or 0
 	end
 	-- Up a step where blocked: lifted, slid, put down again; taken if it
 	-- went further
@@ -2093,6 +2560,13 @@ function ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground, no_polys)
 			best, bi, bn = t0, pi, pn
 		end
 	end
+	-- ([KIT_STUNTS] (G6) the tilted ones, W:segment's too: none was met before)
+	if self.tilts[1] then
+		local t0, pi, pn = ray_tilts(self, o, v, best or len)
+		if t0 then
+			best, bi, bn = t0, pi, pn
+		end
+	end
 	if self.ground_fn and not no_ground then
 		local stp, prev = 0.25, 0
 		local lim = best or len
@@ -2125,10 +2599,14 @@ function ray_cast(self, ox, oy, oz, dx, dy, dz, len, no_ground, no_polys)
 end
 
 -- How far down from x, y, z the first solid is (within len): the
--- distance and its info, or nil
+-- distance and its info, or nil ([KIT_STUNTS] (G6) and the normal out of what it
+-- meets, nx, ny, nz: up for a voxel's, a box's, a flat polygon's top and the
+-- ground, a standing polygon's edge's, a free object's face's, a tilted prism's
+-- face's (its info.n))
 function W:down(x, y, z, len)
 	local i, k = floor(x + 0.5), floor(z + 0.5)
 	local best, info = nil, nil
+	local nx, ny, nz = 0, 1, 0
 	local j = floor(y + 0.5)
 	local top = j
 	while top + 0.5 > y - len - 1 do
@@ -2176,9 +2654,14 @@ function W:down(x, y, z, len)
 		end
 	end
 	for _, o in ipairs(self.turned) do
-		local d = ray_turned(o, x, y, z, 0, -1, 0, len)
+		local d, na = ray_turned(o, x, y, z, 0, -1, 0, len)
 		if d and (not best or d < best) then
-			best, info = d, M.OBJECT
+			best, info, nx, ny, nz = d, M.OBJECT, 0, 1, 0
+			if na then
+				local ia, ib, ic = into(o, 0, -1, 0)
+				local q = (na == 1 and ia or na == 2 and ib or ic) > 0 and -1 or 1
+				nx, ny, nz = outof(o, na == 1 and q or 0, na == 2 and q or 0, na == 3 and q or 0)
+			end
 		end
 	end
 	-- [KIT_PLANE] stage 3: the polygons' tops (edges going +x: solid under them)
@@ -2189,7 +2672,7 @@ function W:down(x, y, z, len)
 				p.x1 >= x and p.y0 <= z and p.y1 >= z and poly_inside(p, x, z) then
 			local d = y - p.z1
 			if not best or d < best then
-				best, info = d < 0 and 0 or d, p.info
+				best, info, nx, ny, nz = d < 0 and 0 or d, p.info, 0, 1, 0
 			end
 		elseif p.da ~= 2 and p.z0 < z and p.z1 > z and p.x0 <= x and p.x1 >= x and
 				p.y0 <= y + EPS then
@@ -2205,11 +2688,19 @@ function W:down(x, y, z, len)
 									(bx - ax))
 							if d > -EPS and d <= len and (not best or d < best) then
 								best, info = d < 0 and 0 or d, edge_info(p, i)
+								nx, ny, nz = info.nx, info.ny, 0
 							end
 						end
 					end
 				end
 			end
+		end
+	end
+	-- ([KIT_STUNTS] (G6) the tilted prisms' faces)
+	if self.tilts[1] then
+		local d, ti, tn = ray_tilts(self, {x, y, z}, {0, -1, 0}, best or len)
+		if d then
+			best, info, nx, ny, nz = d, ti, tn[1], tn[2], tn[3]
 		end
 	end
 	local h = self:height(x, z)
@@ -2219,10 +2710,13 @@ function W:down(x, y, z, len)
 			d = 0
 		end
 		if d <= len and (not best or d < best) then
-			best, info = d, M.GROUND
+			best, info, nx, ny, nz = d, M.GROUND, 0, 1, 0
 		end
 	end
-	return best, info
+	if not best then
+		return nil
+	end
+	return best, info, nx, ny, nz
 end
 
 -- ([KIT_TOP_DOWN] (2) a floor polygon there first: W:floor_at; [KIT_3D_GAINS_1]
@@ -2242,7 +2736,18 @@ end
 function W:floor_at(x, y, z)
 	local top, info = nil, nil
 	for _, p in ipairs(self.floors) do
-		if p.z0 <= y + EPS and y - p.z1 <= 0.6 and (not top or p.z1 > top) and
+		-- ([KIT_STUNTS] (G6) a tilted one: down its vertical through x, z, its pieces'
+		-- tops and bottoms there)
+		if p.tilt then
+			local y0 = p.b[5] + 1
+			pieces_in(p, {x - EPS, p.b[2] - 1, z - EPS, x + EPS, y0, z + EPS}, function(c)
+				local t0, _, t1 = ray_piece(c, x, y0, z, 0, -1, 0, y0 - p.b[2] + 1)
+				if t0 and y0 - t1 <= y + EPS and y - (y0 - t0) <= 0.6 and
+						(not top or y0 - t0 > top) then
+					top, info = y0 - t0, p.info
+				end
+			end)
+		elseif p.z0 <= y + EPS and y - p.z1 <= 0.6 and (not top or p.z1 > top) and
 				p.x0 <= x and p.x1 >= x and p.y0 <= z and p.y1 >= z and
 				poly_inside(p, x, z) then
 			top, info = p.z1, p.info
@@ -2350,18 +2855,26 @@ function slice_box(o, f, y)
 	if not (below and above) then
 		return nil
 	end
-	local px, pz, n, mx, mz = {}, {}, 0, 0, 0
+	local px, pz, n = {}, {}, 0
 	for e = 1, 23, 2 do
 		local a, b = EDGES[e], EDGES[e + 1]
 		if (cy[a] < y) ~= (cy[b] < y) then
 			local t = (y - cy[a]) / (cy[b] - cy[a])
 			n = n + 1
 			px[n], pz[n] = cx[a] + (cx[b] - cx[a]) * t, cz[a] + (cz[b] - cz[a]) * t
-			mx, mz = mx + px[n], mz + pz[n]
 		end
 	end
 	if n < 3 then
 		return nil
+	end
+	return round_sort(px, pz, n)
+end
+-- Points px, pz (n of a convex outline, in any order) going round: {x1, z1, x2,
+-- z2...}
+function round_sort(px, pz, n)
+	local mx, mz = 0, 0
+	for i = 1, n do
+		mx, mz = mx + px[i], mz + pz[i]
 	end
 	mx, mz = mx / n, mz / n
 	-- Round the middle by a pseudo-angle (0...4), an insertion sort (the box has no
@@ -2541,6 +3054,21 @@ function W:circle(x, y, r, z)
 				end
 			end
 		end
+	end
+	-- [KIT_STUNTS] (G6) the tilted prisms' pieces sliced across N at z
+	if self.tilts[1] then
+		local b = {x - r, x - r, x - r, x + r, x + r, x + r}
+		b[N], b[N + 3], b[V], b[V + 3] = z - 1, z + 1, y - r, y + r
+		tilts_in(self, b, function(p)
+			if not p.floor then
+				pieces_in(p, b, function(c)
+					local q = slice_piece(c, N, V, z)
+					if q then
+						convex(q, x, y, r, add, c.pi[1])
+					end
+				end)
+			end
+		end)
 	end
 	-- [KIT_TOP_DOWN] (8) the other bodies: circles (one on the middle: out along +x)
 	-- ([KIT_STUNTS] one with its heights where they span the slice)

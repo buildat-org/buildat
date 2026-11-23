@@ -601,6 +601,12 @@ local function log_body()
 	log:info(string.format("kit: zoom %.3f (%s), input f %s r %s, yaw %s", C.zoom,
 			tostring(C.zoom_key), tostring(C.last_i and C.last_i.f),
 			tostring(C.last_i and C.last_i.r), tostring(C.s and C.s.yaw)))
+	-- [KIT_STUNTS] (G12) the step's up (a loop's: camera_frame "body" follows it)
+	local up = C.s and type(C.s.up) == "table" and C.s.up
+	if up then
+		log:info(string.format("kit: body up %.3f,%.3f,%.3f", tonumber(up[1]) or 0,
+				tonumber(up[2]) or 0, tonumber(up[3]) or 0))
+	end
 	-- [KIT_SIDE_LEAD] the side camera's middle and its lead
 	if C.side_at and C.side_lead then
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
@@ -1255,9 +1261,44 @@ end
 -- level (the world's). Only its tilt: the mouse's yaw stays the world's heading on
 -- a static object, so nothing jumps on entering; [KIT_MOVING_OBJECTS] one turning
 -- round its own up adds that to C.yaw.
+-- [KIT_STUNTS] (G12) "body": toward the predicted state's s.up (a unit vector the
+-- step sets: a car round a loop), past upside down: C.tilt carried on from the
+-- last frame's by the shortest turn between their ups (from level the shortest
+-- turn is undefined upside down), pulled back to the shortest from level while
+-- the up is above the horizon (no twist left once level). The heading (s.yaw,
+-- the chase's) is the body's in that frame.
+local function qmul(a, b)
+	return {a[1] * b[1] - a[2] * b[2] - a[3] * b[3] - a[4] * b[4],
+		a[1] * b[2] + a[2] * b[1] + a[3] * b[4] - a[4] * b[3],
+		a[1] * b[3] - a[2] * b[4] + a[3] * b[1] + a[4] * b[2],
+		a[1] * b[4] + a[2] * b[3] - a[3] * b[2] + a[4] * b[1]}
+end
+local function qnorm(q)
+	local l = math.sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4])
+	return {q[1] / l, q[2] / l, q[3] / l, q[4] / l}
+end
+-- (w, x, y, z: the shortest turn from unit a to unit b; nil: opposite)
+local function qarc(a, b)
+	local w = 1 + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+	if w < 1e-9 then
+		return nil
+	end
+	return qnorm({w, a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3],
+		a[1] * b[2] - a[2] * b[1]})
+end
+local function qup(q)
+	-- (q's turn of (0, 1, 0))
+	local w, x, y, z = q[1], q[2], q[3], q[4]
+	return {2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)}
+end
 local function update_tilt(dt)
 	local nx, ny, nz = 0, 1, 0
 	local heading = nil
+	local body = params().camera_frame == "body"
+	local su = body and C.s and type(C.s.up) == "table" and C.s.up
+	if su and tonumber(su[1]) and tonumber(su[2]) and tonumber(su[3]) then
+		nx, ny, nz = su[1], su[2], su[3]
+	end
 	if params().camera_frame == "object" and C.s and C.s.frame then
 		for _, o in ipairs(C.turned or {}) do
 			if o.id == C.s.frame then
@@ -1277,10 +1318,27 @@ local function update_tilt(dt)
 	local k = 1 - math.exp(-dt / 0.15)
 	u = {u[1] + (nx - u[1]) * k, u[2] + (ny - u[2]) * k, u[3] + (nz - u[3]) * k}
 	local l = math.sqrt(u[1] * u[1] + u[2] * u[2] + u[3] * u[3])
-	u = {u[1] / l, u[2] / l, u[3] / l}
+	-- (an up turned round at once: the new one)
+	u = l > 1e-6 and {u[1] / l, u[2] / l, u[3] / l} or {nx, ny, nz}
 	C.up = u
 	if u[2] > 0.9999999 then
-		C.tilt = nil
+		C.tilt, C.body_q = nil, nil
+		return
+	end
+	if body then
+		local q = C.body_q or {1, 0, 0, 0}
+		local a = qarc(qup(q), u)
+		q = a and qnorm(qmul(a, q)) or q
+		local level = u[2] > 0 and qarc({0, 1, 0}, u)
+		if level then
+			local d = q[1] * level[1] + q[2] * level[2] + q[3] * level[3] + q[4] * level[4]
+			local s = d < 0 and -1 or 1
+			local kk = k * u[2]
+			q = qnorm({q[1] + (s * level[1] - q[1]) * kk, q[2] + (s * level[2] - q[2]) * kk,
+				q[3] + (s * level[3] - q[3]) * kk, q[4] + (s * level[4] - q[4]) * kk})
+		end
+		C.body_q = q
+		C.tilt = magic.Quaternion(q[1], q[2], q[3], q[4])
 		return
 	end
 	-- Round up x u, the half angle's: the shortest way from up to u

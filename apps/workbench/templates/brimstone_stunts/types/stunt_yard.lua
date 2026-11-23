@@ -26,6 +26,15 @@
 --     jumps, a kicker to its lip, a table too high to climb from aside (its
 --     walls) and a landing ramp.
 -- Their checkpoints are put at the road's height (a zone 3 cells up from it).
+-- [KIT_STUNTS] (4z37zzd (3)) `loops` (metres along the centre line, each on a
+-- straight, its entry): a corkscrew loop of LOOP.n tilted kit/polygon facets
+-- (move.lua's tilted prisms, surface "loop"), entered from the lane left of the
+-- line (LOOP.lane m) and left LOOP.side m to its right: a helix round an axis
+-- tilted off square to the road (each facet a parallelogram, its own x along
+-- the axis, its inner face the driven one), a rail along each edge (surface
+-- "rail"). The racing line runs along the entry lane from LOOP.lead m before it
+-- to LOOP.past m after (a bot looks ahead along it; the car's own step holds
+-- it on the loop, stunt_car.lua).
 -- simplified: the generator's own yaw is taken as 0 (turned, its children
 -- turn with it but the race's pole is read unturned); the yard's size fixed;
 -- one crossing, a bridge
@@ -46,6 +55,13 @@ local DRUMS = {"#8a1a12", "#1d3a6a", "#7a5a1a", "#3a5a2a", "#5a5a5a"}
 -- its tunnel's roof and width
 local GROUND_Y, RAIL = Y_ROAD + D_ROAD / 2, 1.4
 local BRIDGE = {up = 34, deck = 20, h = 4.5, roof = 3.9, tunnel = 18}
+-- [KIT_STUNTS] (4z37zzd (3)) A loop: its radius (to the driven face), facets,
+-- the lane's half width between the rails, the rails' width and height, the
+-- facets' thickness, the entry lane's offset from the line and the exit's
+-- offset from the entry (to the right), the racing line held in the entry lane
+-- from lead m before it to past m after
+local LOOP = {r = 6.5, n = 32, w = 2.6, rail_w = 0.25, rail_h = 0.5, d = 0.3, lane = 3,
+	side = 6, lead = 30, past = 10}
 
 -- [KIT_STUNTS] A height's profile: {{d, h}...} along the way it is driven
 -- from its foot (m), h over the ground, d rising.
@@ -112,6 +128,53 @@ end
 -- (a child's place: Kit's grid, so that its points are where they were made)
 local function sixteenth(v)
 	return math.floor(v * 16 + 0.5) / 16
+end
+
+-- [KIT_STUNTS] (4z37zzd (3)) Vectors {x, y, z}
+local function v_add(a, b, k)
+	return {a[1] + b[1] * k, a[2] + b[2] * k, a[3] + b[3] * k}
+end
+local function v_dot(a, b)
+	return a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+end
+local function v_cross(a, b)
+	return {a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1]}
+end
+local function v_unit(a)
+	local l = math.sqrt(v_dot(a, a))
+	return {a[1] / l, a[2] / l, a[3] / l}
+end
+-- A turn as Kit keeps it (0...360 on a 16th of a degree)
+local function grid_turn(a)
+	a = math.fmod(a, 360)
+	a = a < 0 and a + 360 or a
+	a = math.floor(a * 16 + 0.5) / 16
+	return a >= 360 and 0 or a
+end
+-- The rows (the world's from the frame's, as move.lua's rotation(pitch, yaw,
+-- roll): Ry Rx Rz) of a turn
+local function turn_rows(yaw, pitch, roll)
+	local d = PI / 180
+	local ca, sa = math.cos(yaw * d), math.sin(yaw * d)
+	local cb, sb = math.cos(pitch * d), math.sin(pitch * d)
+	local cc, sc = math.cos(roll * d), math.sin(roll * d)
+	return {ca * cc + sa * sb * sc, -ca * sc + sa * sb * cc, sa * cb,
+		cb * sc, cb * cc, -sb,
+		-sa * cc + ca * sb * sc, sa * sc + ca * sb * cc, ca * cb}
+end
+-- The turn whose frame's axes are x, y, z (unit, right-handed): yaw, pitch, roll
+-- on Kit's grid, and its rows from those
+local function frame_turn(x, y, z)
+	local d = 180 / PI
+	local sb = -z[2]
+	sb = sb > 1 and 1 or sb < -1 and -1 or sb
+	local yaw = grid_turn(math.atan2(z[1], z[3]) * d)
+	local pitch = grid_turn(math.asin(sb) * d)
+	local roll = grid_turn(math.atan2(x[2], y[2]) * d)
+	return yaw, pitch, roll, turn_rows(yaw, pitch, roll)
+end
+local function round4(v)
+	return math.floor(v * 1e4 + 0.5) / 1e4
 end
 
 local function numbers(s)
@@ -228,16 +291,19 @@ end
 -- took 70 % of a build and put the Bone Yard near the build's budget;
 -- settled, it ends within 0.25 m of that line at well under half the cost)
 -- simplified: the road's width only, never the run-off's
+-- ([KIT_STUNTS] (4z37zzd (3)) a LINE point's pin: held that far left of it, a
+-- loop's entry lane)
 local RL_N, RL_IN, RL_SETTLED, RL_ROUNDS = 120, 2.8, 0.005, 200
 local function racing_line(LINE, W)
 	local N, n = #LINE, math.min(RL_N, math.floor(#LINE / 3))
-	local C, Q, d = {}, {}, {}
+	local C, Q, d, pin = {}, {}, {}, {}
 	for k = 1, n do
 		local s = (k - 1) * N / n
 		local i = math.floor(s)
 		local a, b = LINE[i % N + 1], LINE[(i + 1) % N + 1]
 		C[k] = {a[1] + (b[1] - a[1]) * (s - i), a[2] + (b[2] - a[2]) * (s - i)}
-		d[k] = 0
+		pin[k] = a.pin
+		d[k] = pin[k] or 0
 	end
 	for k = 1, n do
 		local a, b = C[(k - 2) % n + 1], C[k % n + 1]
@@ -261,6 +327,7 @@ local function racing_line(LINE, W)
 				local tz = (4 * (az + bz) - cz - ez) / 6
 				local v = (tx - C[k][1]) * Q[k][1] + (tz - C[k][2]) * Q[k][2]
 				v = v < -lim and -lim or v > lim and lim or v
+				v = pin[k] or v
 				moved = math.max(moved, math.abs(v - d[k]))
 				d[k] = v
 			end
@@ -293,6 +360,7 @@ return {
 			mud = "Mud patches: metres along the centre line, space-separated.",
 			oil = "Oil slicks: metres along the centre line, space-separated.",
 			tables = "Tabletop jumps (a kicker, a table, a landing ramp): their feet in metres along the centre line, each on a straight along x.",
+				loops = "Corkscrew loops: their entries in metres along the centre line, each on a straight (entered left of the line, left 6 m to the right).",
 		},
 	},
 	params = {
@@ -308,6 +376,7 @@ return {
 		mud = {type = "string", default = "218 358 468 576"},
 		oil = {type = "string", default = "265"},
 		tables = {type = "string", default = "318 534"},
+		loops = {type = "string", default = "208"},
 	},
 	on_build = function(c)
 		local W = c.params.width / 2
@@ -422,6 +491,34 @@ return {
 			local q = LINE[math.floor(s) % N + 1]
 			local prof, len = tabletop()
 			feature("tabletop", q.pi, q.d, prof, len, string.format("a tabletop at %.0f m", s))
+		end
+		-- [KIT_STUNTS] (4z37zzd (3)) The loops: on a straight, clear of the heights,
+		-- the racing line pinned in the entry lane round each
+		local LP = {}
+		for _, s in ipairs(numbers(c.params.loops)) do
+			local q = LINE[math.floor(s) % N + 1]
+			local pc = P[q.pi]
+			local what = string.format("a loop at %.0f m", s)
+			if pc.turn ~= 0 or q.d < LOOP.lead or q.d + LOOP.past + 3 > pc.len then
+				error(what .. ": not on a straight with room for it", 0)
+			end
+			for _, d in ipairs({q.d - LOOP.lead, q.d + LOOP.past}) do
+				if pc.off(1, d) > 0.01 or pc.off(-1, d) > 0.01 then
+					error(what .. ": on a bend's run-off", 0)
+				end
+			end
+			for _, f in ipairs(F) do
+				if f.pi == q.pi and q.d - LOOP.r < f.d0 + f.len + 3 and f.d0 < q.d + LOOP.r + 3 then
+					error(what .. ": on a height", 0)
+				end
+			end
+			local dx, dz = (pc.e[1] - pc.a[1]) / pc.len, (pc.e[2] - pc.a[2]) / pc.len
+			LP[#LP + 1] = {x = q[1] - dz * LOOP.lane, z = q[2] + dx * LOOP.lane, dx = dx, dz = dz}
+			for _, p in ipairs(LINE) do
+				if p.pi == q.pi and p.d >= q.d - LOOP.lead and p.d <= q.d + LOOP.past then
+					p.pin = LOOP.lane
+				end
+			end
 		end
 		-- Each point's height (its road's over the ground)
 		for _, q in ipairs(LINE) do
@@ -693,6 +790,68 @@ return {
 				end
 			end
 		end
+		-- [KIT_STUNTS] (4z37zzd (3)) Each loop: a helix from its entry E (on the
+		-- road, the way D) round the axis A (tilted b off the road's square so
+		-- one turn moves it S along A: LOOP.side to the right of D), radius r: its
+		-- driven face's points H(i) = E + r (sin t T + (1 - cos t) up) + S i / n A
+		-- (t = 2 pi i / n, T the way it starts, square to A), each facet H(i) to
+		-- H(i + 1) across A, its frame's x A, its y up the facet, its z out
+		local loop_at = {}
+		for li, l in ipairs(LP) do
+			local D, Lr = {l.dx, 0, l.dz}, {l.dz, 0, -l.dx}
+			local S = LOOP.side
+			for _ = 1, 4 do
+				S = LOOP.side / math.cos(math.atan2(S, 2 * PI * LOOP.r))
+			end
+			local b = math.atan2(S, 2 * PI * LOOP.r)
+			local A = v_add(v_add({0, 0, 0}, D, math.sin(b)), Lr, math.cos(b))
+			local T = v_add(v_add({0, 0, 0}, D, math.cos(b)), Lr, -math.sin(b))
+			local E = {l.x, GROUND_Y, l.z}
+			local function H(i)
+				local t = 2 * PI * i / LOOP.n
+				local h = v_add(v_add(E, T, LOOP.r * math.sin(t)), {0, 1, 0}, LOOP.r * (1 - math.cos(t)))
+				return v_add(h, A, S * i / LOOP.n)
+			end
+			-- A slab on the face between H(i) and H(i + 1), from u0 to u1 along A,
+			-- from the face h0 to h1 inward (negative: out)
+			local function slab(name, i, u0, u1, h0, h1, t)
+				local a, e = H(i), H(i + 1)
+				local y = v_unit(v_add(v_add(e, a, -1), A, -v_dot(v_add(e, a, -1), A)))
+				local z = v_cross(A, y)
+				local q = {v_add(a, A, u0), v_add(a, A, u1), v_add(e, A, u1), v_add(e, A, u0)}
+				local m = {0, 0, 0}
+				for _, c4 in ipairs(q) do
+					m = v_add(m, c4, 0.25)
+				end
+				local at = v_add(m, z, -(h0 + h1) / 2)
+				at = {sixteenth(at[1]), sixteenth(at[2]), sixteenth(at[3])}
+				local yaw, pitch, roll, R = frame_turn(A, y, z)
+				-- (its points in the frame as Kit turns it; its depth to the face's
+				-- own z there, so the face is where the helix has it)
+				local pts, fz = {}, 0
+				for k, c4 in ipairs(q) do
+					local r = v_add(c4, at, -1)
+					pts[k] = {round4(R[1] * r[1] + R[4] * r[2] + R[7] * r[3]),
+						round4(R[2] * r[1] + R[5] * r[2] + R[8] * r[3])}
+					fz = fz + (R[3] * r[1] + R[6] * r[2] + R[9] * r[3]) / 4
+				end
+				-- (the face at fz along its z, the place the slab's middle)
+				local p = {points = pts, depth = round4(2 * math.abs(fz)), surface = t.surface,
+					color = t.color, material = t.material}
+				c:child{type = "kit/polygon", name = name, pos = at, yaw = yaw, pitch = pitch,
+					roll = roll, params = p}
+			end
+			local w, rw = LOOP.w, LOOP.rail_w
+			for i = 0, LOOP.n - 1 do
+				slab("the loop", i, -w - rw, w + rw, 0, -LOOP.d, {surface = "loop",
+					color = i % 2 == 0 and "#6a7078" or "#5a6068", material = "metal"})
+				for _, u in ipairs({{w, w + rw}, {-w - rw, -w}}) do
+					slab("the loop's rail", i, u[1], u[2], LOOP.rail_h, 0, {surface = "rail",
+						color = math.floor(i / 2) % 2 == 0 and "#c8102e" or "#f2f2f2"})
+				end
+			end
+			loop_at[li] = string.format("loop at %.0f,%.0f", E[1], E[3])
+		end
 		-- (mud, oil and the like on the flat only)
 		local function flat(s)
 			return LINE[math.floor(s) % N + 1].h == 0 and LINE[(math.floor(s) + 8) % N + 1].h == 0 and
@@ -858,6 +1017,9 @@ return {
 		local kinds = {}
 		for _, f in ipairs(F) do
 			kinds[#kinds + 1] = string.format("%s at %.0f,%.0f", f.kind, fx(f, f.len / 2), f.zc)
+		end
+		for _, k in ipairs(loop_at) do
+			kinds[#kinds + 1] = k
 		end
 		c:log(string.format("the loop %d m, %d corners, %d checkpoints%s; %s", N, n, #cps,
 			missed > 0 and ", " .. missed .. " junk with no room" or "",

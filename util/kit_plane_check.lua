@@ -545,7 +545,7 @@ local f3 = flat(TRI, {1, 1, 5}, {yaw = 90})
 assert(f3.da == 2 and near(f3.x0, 1) and near(f3.x1, 2) and near(f3.y0, 2) and
 		near(f3.y1, 5), "flat turned 90: " .. f3.x0 .. " " .. f3.x1 .. " " .. f3.y0)
 assert(MV.look_poly({shape = "polygon", points = TRI, solid = true}, false, {0, 0, 0}, 0,
-	45, 0) == nil, "a tilted one met")
+	45, 0).tilt, "a tilted one not a tilted prism")
 assert(flat(TRI, {0, 0, 0}, {solid = false}) == nil, "a flat one not solid, no floor, met")
 assert(flat(TRI, {0, 0, 0}, {solid = false, floor = true}).floor, "a floor not a floor")
 assert(MV.look_poly({shape = "polygon", points = TRI, floor = true}, false, {0, 0, 0}, 0) ==
@@ -789,4 +789,85 @@ local t2 = os.clock()
 assert(met > 0)
 print(string.format("ok: 300 zones: built in %.0f us, met in %.0f us a frame (luajit)",
 		(t1 - t0) / FRAMES * 1e6, (t2 - t1) / FRAMES * 1e6))
+
+-- [KIT_STUNTS] (G6) A polygon tilted (pitch 45: neither standing nor flat): a prism
+-- met by w:down (with the face's normal), w:ray, w:sweep, w:blocked, w:circle's
+-- slice and, a floor, w:floor_at; a concave one by its triangles
+do
+	local SQ = {{-2, -2}, {2, -2}, {2, 2}, {-2, 2}}
+	local function tilt(points, t)
+		t = t or {}
+		return MV.look_poly({shape = "polygon", points = points, depth = 1,
+			solid = t.solid ~= false, floor = t.floor, surface = t.surface or "loop"},
+			false, t.at or {0, 0, 0}, t.yaw or 0, t.pitch or 45, t.roll or 0)
+	end
+	local s45 = math.sqrt(0.5)
+	local p = tilt(SQ)
+	assert(p and p.tilt and #p.pieces == 1, "the square not one piece")
+	local tw = MV.world{cell = function() return nil end, polys = {p}}
+	-- Down onto its upper face (its middle 0.5 out along a normal 45 degrees up)
+	local d, info, nx, ny, nz = tw:down(0, 5, 0, 10)
+	assert(d and near(d, 5 - 0.5 / s45, 1e-9) and info.surface == "loop" and
+			near(nx, 0, 1e-9) and near(ny, s45, 1e-9) and near(math.abs(nz), s45, 1e-9),
+			"down: " .. tostring(d) .. " " .. tostring(ny))
+	assert(near(info.n[3], nz) and near(info.ny, ny) and near(info.nx, s45, 1e-9),
+			"down: the face's info")
+	local uz = nz
+	-- Along z into its lower side (facing -uz), from in front
+	local t, ri, rx, ry, rz = tw:ray(0, 0, -5 * uz / math.abs(uz), 0, 0, uz / math.abs(uz), 10)
+	assert(t and near(t, 5 - 0.5 / s45, 1e-9) and ri.surface == "loop" and
+			near(rz * uz, -0.5, 1e-9) and near(ry, -s45, 1e-9), "ray: " .. tostring(t))
+	assert(tw:ray(0, 0.1, 0, 0, 1, 0, 10) == nil, "a ray from inside met it")
+	assert(tw:down(3, 5, 0, 10) == nil, "down past its side met it")
+	-- A box falling onto it: its lowest corner onto the face (its middle at
+	-- 0.5 / s45 + 0.25 * 2 over the middle's... along the normal: m.n - 0.25 (|ny| + |nz|) = 0.5)
+	local b = {-0.25, 2.75, -0.25, 0.25, 3.25, 0.25}
+	local dy, hit = tw:sweep(b, 2, -5)
+	local cy = (0.5 + 0.25 * 2 * s45) / s45
+	assert(hit and hit.surface == "loop" and near(3 + dy, cy, 2e-3), "sweep: " ..
+			tostring(3 + dy) .. " for " .. cy)
+	assert(tw:blocked({-0.25, -0.25, -0.25, 0.25, 0.25, 0.25}), "a box in it not blocked")
+	assert(not tw:blocked({-0.25, 2.75, -0.25, 0.25, 3.25, 0.25}), "a box over it blocked")
+	-- Sliced level at y 0: a band z -0.71...0.71 over x -2...2
+	local hw = MV.world{cell = function() return nil end, plane = 0, horizontal = true,
+		polys = {p}}
+	local c = hw:circle(0, 1.5, 1)
+	assert(#c == 1 and near(c[1].depth, 1 - (1.5 - 0.5 / s45), 1e-9) and
+			near(c[1].ny, 1, 1e-9) and c[1].info.surface == "loop", "circle: " .. #c)
+	assert(#hw:circle(0, 1.5, 1, 3) == 0, "circle over it met it")
+	-- A tilted floor: under its upper face, over its area
+	local fl = tilt(SQ, {solid = false, floor = true})
+	assert(fl and fl.tilt and fl.floor, "a tilted floor")
+	local fw = MV.world{cell = function() return nil end, polys = {fl}}
+	local fi, top = fw:floor_at(0, 0.8, 0)
+	assert(fi and fi.surface == "loop" and near(top, 0.5 / s45, 1e-9), "floor_at: " ..
+			tostring(top))
+	assert(fw:floor_at(0, 2, 0) == nil and fw:floor_at(3, 0.8, 0) == nil,
+			"floor_at too high or off it")
+	assert(#fw:circle(0, 0, 1) == 0 and fw:down(0, 5, 0, 10) == nil, "a floor a wall")
+	-- Concave (an L): its notch empty
+	local L = tilt({{-2, -2}, {2, -2}, {2, 0}, {0, 0}, {0, 2}, {-2, 2}})
+	assert(#L.pieces == 4, "the L's triangles: " .. #L.pieces)
+	local lw = MV.world{cell = function() return nil end, polys = {L}}
+	-- (down through its own x 1, y -1 and 1: an arm, the notch)
+	assert(lw:down(-1, 5, 0, 10) and lw:down(1, 5, -L.R[8], 10), "the L's arms missed")
+	assert(lw:down(1, 5, L.R[8], 10) == nil, "the L's notch met")
+	-- The server's angles (a double Turn) and a client's (a float quaternion): the
+	-- same bits
+	for _, ang in ipairs({{20, 30, 10}, {0, 45, 0}, {317.5, -60, 135}}) do
+		local w, x, y, z = turn_q(ang[1], ang[2], ang[3])
+		local sy, sp, sr = MV.turn_angles(w, x, y, z)
+		local cy2, cp, cr = MV.turn_angles(f32(w), f32(x), f32(y), f32(z))
+		local sv = tilt(SQ, {yaw = sy, pitch = sp, roll = sr, at = {1, 2, 3}})
+		local cv = tilt(SQ, {yaw = cy2, pitch = cp, roll = cr, at = {1, 2, 3}})
+		assert(sv and cv, "turned " .. table.concat(ang, " ") .. ": none")
+		local ws = MV.world{cell = function() return nil end, polys = {sv}}
+		local wc = MV.world{cell = function() return nil end, polys = {cv}}
+		local a1 = {ws:down(1, 9, 3, 20)}
+		local a2 = {wc:down(1, 9, 3, 20)}
+		assert(a1[1] and a1[1] == a2[1] and a1[3] == a2[3] and a1[4] == a2[4] and
+				a1[5] == a2[5], "turned " .. table.concat(ang, " ") .. ": the sides differ")
+	end
+	print("ok: a tilted polygon: down with its normal, ray, sweep, blocked, circle, a floor, an L's triangles, the same bits from a float turn")
+end
 -- vim: set noet ts=4 sw=4:
