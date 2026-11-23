@@ -207,7 +207,9 @@ for (bx, by, bz), (cx, cy, cz), cyaw, byaw in S:
     fx, fz = math.sin(math.radians(cyaw)), math.cos(math.radians(cyaw))
     back = -((cx - bx) * fx + (cz - bz) * fz)
     side = abs((cx - bx) * fz - (cz - bz) * fx)
-    if not (1 < back < dist + 3 and side < 3 and 0.5 < cy - by < 5):
+    # (up to 6 m above: on the downhill ramp the camera keeps its height
+    # a moment, 5.0-5.3 m over the car; at faster frames more such samples)
+    if not (1 < back < dist + 3 and side < 3 and 0.5 < cy - by < 6):
         bad.append((round(back, 1), round(side, 1), round(cy - by, 1)))
 assert len(bad) <= len(S) // 20, "not behind the car: %d of %d: %r" % (len(bad), len(S), bad[:10])
 most = max(off(cy, by) for _, _, cy, by in S)
