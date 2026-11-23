@@ -176,6 +176,8 @@ end
 function M.vehicle_of(seat)
 	return C.ctl and tonumber(C.ctl.vehicle) or seat
 end
+-- (below: a node's kit_frame and kit_parent, kept till the server changes it)
+local frame_parent
 -- Whether a node is the vehicle held or under it (the body meets none of them)
 local function on_vehicle(id, n)
 	local v = M.seated() and M.vehicle_of(M.seated())
@@ -186,8 +188,7 @@ local function on_vehicle(id, n)
 		if id == v then
 			return true
 		end
-		local pv = n.node:GetVar("kit_parent")
-		id = pv:IsEmpty() and 0 or pv:GetInt()
+		id = select(2, frame_parent(n))
 		n = P.nodes[id]
 	end
 	return false
@@ -210,8 +211,7 @@ local function craft()
 		if id == v or (C.turned_by and C.turned_by[id]) or (C.links and C.links[id]) then
 			root = id
 		end
-		local pv = n.node:GetVar("kit_parent")
-		id = pv:IsEmpty() and 0 or pv:GetInt()
+		id = select(2, frame_parent(n))
 		n = P.nodes[id]
 	end
 	return root
@@ -225,8 +225,7 @@ local function under(root, id, n)
 		if not n then
 			return false
 		end
-		local pv = n.node:GetVar("kit_parent")
-		id = pv:IsEmpty() and 0 or pv:GetInt()
+		id = select(2, frame_parent(n))
 		n = P.nodes[id]
 	end
 	return false
@@ -909,7 +908,7 @@ end
 -- A node's "kit_frame" and "kit_parent" (0: none), read again only once the server
 -- has changed the node (module.lua drops n.fp then: [KIT_3D_GAINS_1] (4z38) a read
 -- through the sandbox for each of a scene's nodes each frame was 10 ms of a frame)
-local function frame_parent(n)
+function frame_parent(n)
 	if not n.fp then
 		local v = n.node:GetVar("kit_frame")
 		local w = n.node:GetVar("kit_parent")

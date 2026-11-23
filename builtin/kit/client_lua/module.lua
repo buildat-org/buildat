@@ -384,14 +384,17 @@ local function parts_of(n)
 	return r
 end
 
--- (P.by_nid: the entity ids by their node's id; n.nid its node's id)
-P.by_nid = {}
+-- (P.by_nid: the entity ids by their node's id; n.nid its node's id;
+-- [KIT_STUNTS_PERF] P.nodes_gen counts the nodes come and gone, for what is
+-- kept across frames of them)
+P.by_nid, P.nodes_gen = {}, 0
 replicate.sub_sync_node_added({}, function(node)
 	local id = tonumber(node:GetName():match("^kit:(%d+)$"))
 	if id then
 		local nid = node:GetID()
 		P.nodes[id] = {node = node, id = id, nid = nid}
 		P.by_nid[nid] = id
+		P.nodes_gen = P.nodes_gen + 1
 	end
 end)
 replicate.sub_sync_node_removed(function(node, node_id)
@@ -406,6 +409,7 @@ replicate.sub_sync_node_removed(function(node, node_id)
 		end
 		drop_look(n)
 		P.nodes[id] = nil
+		P.nodes_gen = P.nodes_gen + 1
 	end
 end)
 
@@ -1420,12 +1424,19 @@ end
 
 -- [KIT_SIDE_SCENERY] (8) The kit/parallax layer an entity is under: the
 -- nearest up its kit_parent whose show has `parallax` ({follow, follow_y,
--- repeat}), its P.nodes entry; nil: none. Remembered for the frame
--- (update_play clears it): controls.lua's world() asks every step
-local par_memo, par_any = {}, false
+-- repeat}), its P.nodes entry; nil: none. Remembered across frames
+-- (controls.lua's world() asks for every node each step; [KIT_STUNTS_PERF]
+-- read each frame it was ~8 ms of Stunts' frame): forgotten as a node comes
+-- or goes, a remembered one's kit_parent changes (n.par_pid, read again once
+-- the server changes the node) or a show turns a layer or stops being one;
+-- each frame on a client without replicate.take_changed
+local par_memo, par_any, par_gen = {}, false, nil
 function M.parallax_layer(id, n)
 	if not par_any then
 		return nil
+	end
+	if par_gen ~= P.nodes_gen then
+		par_memo, par_gen = {}, P.nodes_gen
 	end
 	if par_memo[id] ~= nil then
 		return par_memo[id] or nil
@@ -1434,6 +1445,7 @@ function M.parallax_layer(id, n)
 	for _ = 1, 16 do
 		local pv = n.node:GetVar("kit_parent")
 		local pid = pv:IsEmpty() and 0 or pv:GetInt()
+		n.par_pid = pid
 		local p = pid ~= 0 and P.nodes[pid]
 		if not p then
 			break
@@ -1520,15 +1532,28 @@ end
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
 	local lines = {}
-	par_memo = {}
 	local layers = false
 	-- [KIT_MOVING_OBJECTS] what moves at this frame's time, before anything reads it
 	-- ([KIT_3D_GAINS_1] (4z38) controls.lua's kit_frame and kit_parent kept, n.fp,
 	-- till the server changes the node; each frame without take_changed)
 	changed = replicate.take_changed and replicate.take_changed() or changed
+	if not replicate.take_changed then
+		par_memo = {}
+	end
 	for _, n in pairs(P.nodes) do
 		if n.fp and (not replicate.take_changed or changed[n.nid]) then
 			n.fp = nil
+		end
+	end
+	-- ([KIT_STUNTS_PERF] the parallax layers remembered: again once a
+	-- remembered node's kit_parent changes)
+	for nid in pairs(changed) do
+		local n = P.nodes[P.by_nid[nid] or 0]
+		if n and n.par_pid then
+			local pv = n.node:GetVar("kit_parent")
+			if (pv:IsEmpty() and 0 or pv:GetInt()) ~= n.par_pid then
+				par_memo, n.par_pid = {}, nil
+			end
 		end
 	end
 	if M.moving_tick then
@@ -1558,7 +1583,11 @@ local function update_play(_, data)
 		end
 		if raw ~= n.show_raw then
 			n.show_raw = raw
+			local was_layer = type(n.show) == "table" and type(n.show.parallax) == "table"
 			n.show = network.parse_json(raw)
+			if was_layer ~= (type(n.show) == "table" and type(n.show.parallax) == "table") then
+				par_memo = {}
+			end
 			drop_look(n)
 			n.last_text = nil
 			n.gen, calm = (n.gen or 0) + 1, false
