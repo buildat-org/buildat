@@ -7883,9 +7883,11 @@ local function apply_viewport()
 		want = "walk"
 	end
 	-- ([KIT_LOBBY] the desktop HUD view's frame; a full screen up in play: no
-	-- world drawn, a pixel)
+	-- world drawn, a pixel; [KIT_STUNTS_PERF] and not given to the renderer:
+	-- the pixel was culled and drawn still, Brimstone Stunts' whole track)
 	local r = NT.sh.world_px() or NT.hud_frame_px()
-	if M.full_screen and M.full_screen() then
+	local full = M.full_screen and M.full_screen()
+	if full then
 		r = {0, 0, 1, 1}
 	end
 	local rect = r and magic.IntRect(r[1], r[2], r[1] + r[3], r[2] + r[4]) or
@@ -7895,7 +7897,7 @@ local function apply_viewport()
 		if S.vp and S.vp_rect ~= rk then
 			S.vp_rect = rk
 			S.vp:SetRect(rect)
-			magic.set_preferred_viewports({S.vp})
+			magic.set_preferred_viewports(full and {} or {S.vp})
 		end
 		return
 	end
@@ -7929,7 +7931,7 @@ local function apply_viewport()
 	end
 	vp:SetRect(rect)
 	S.vp, S.vp_rect = vp, rk
-	magic.set_preferred_viewports({vp})
+	magic.set_preferred_viewports(full and {} or {vp})
 	if O.set_camera then
 		O.set_camera(node)
 	end
