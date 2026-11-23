@@ -1043,6 +1043,7 @@ type kit/game_rules param item_line_anchor | {"choices": ["top_left", "top", "to
 type kit/game_rules param item_line_x | {"default": 0, "kind": "number", "max": 400, "min": -400}
 type kit/game_rules param item_line_y | {"default": 7.4, "kind": "number", "max": 400, "min": -400}
 type kit/game_rules param on_death | {"choices": ["keep", "drop", "lose"], "default": "keep", "kind": "string"}
+type kit/game_rules param pause_alone | {"default": true, "kind": "bool"}
 type kit/game_rules param peaceful | {"default": false, "kind": "bool"}
 type kit/game_rules param place | {"default": true, "kind": "bool"}
 type kit/game_rules param placed_only | {"default": false, "kind": "bool"}

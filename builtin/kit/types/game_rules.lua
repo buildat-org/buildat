@@ -32,6 +32,10 @@
 -- "on_signal": waiting (no actions, their body still, "Waiting to
 -- respawn" on their screen) until the input respawn, which respawns
 -- every player of the round waiting
+-- [KIT_PAUSE_ALONE] pause_alone: in play, a scene pauses while the one
+-- player in it (placed, not editing) has the pause menu open: its bodies,
+-- creatures, vehicles, projectiles, timers and clock (c.now) stop until
+-- the menu closes or a second player comes in
 -- [KIT_SCENE_TREE] One placed on a scene ("on": "scene") is that scene's
 -- and the scenes' under it, whole: a player's rules are the nearest copy's
 -- from their scene up, the root's last. The HUD's parameters go further:
@@ -120,6 +124,7 @@ return {
 		hand_level = {type = "number", default = 15, min = 0, max = 15},
 		respawn = {type = "string", default = "at_once",
 			choices = {"at_once", "on_signal"}},
+		pause_alone = {type = "bool", default = true},
 	},
 	about = {
 		group = "World",
@@ -172,6 +177,7 @@ return {
 			item_line_y = "The held item's line's place up or down, in percent of the screen's shorter side.",
 			hand_level = "The highest material level a bare hand digs (15: any).",
 			respawn = "A dead player respawns at once, or waits for the respawn input.",
+			pause_alone = "The scene pauses while its only player has the pause menu open.",
 		},
 	},
 	inputs = {respawn = "any"},

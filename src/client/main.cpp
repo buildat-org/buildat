@@ -315,6 +315,8 @@ int main(int argc, char *argv[])
 			"                       1 desktop, 2 touch RH, 3 touch LH),\n"
 			"                       fp_ui_mode (floorplanner's editor, the\n"
 			"                       same),\n"
+			"                       kit_pause_unfocused (1: Kit's pause menu\n"
+			"                       opens as the window loses focus),\n"
 			"                       cache_keep (days a cache file may go\n"
 			"                       unused: 7, 14, 30 or 90; 0 forever),\n"
 			"                       cache_per_server (1: a server's files\n"

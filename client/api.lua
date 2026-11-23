@@ -2216,10 +2216,12 @@ end
 -- declare_preference(name[, on_change]) -> its value; the game settings
 -- window gets its row, and on_change(value) is called when that row
 -- changes it. Only the preferences that are an app's: the editors' text,
--- Kit's editor layout and its fullscreen, floorplanner's layout.
+-- Kit's editor layout, its fullscreen and its pause menu on a lost focus
+-- ([KIT_PAUSE_ALONE]), floorplanner's layout.
 -- Until the connection ends.
 local DECLARABLE = {kit_editor_font = true, floorplanner_font = true,
-	kit_ui_mode = true, kit_fullscreen = true, fp_ui_mode = true}
+	kit_ui_mode = true, kit_fullscreen = true, fp_ui_mode = true,
+	kit_pause_unfocused = true}
 -- **A layout an app's own gesture sets** ([KIT_PHONE_EDITING]: Kit's touch
 -- mode's divider dragged, kept per device rather than per game):
 -- get_app_preference(name), set_app_preference(name, value) -> true, or

@@ -1122,6 +1122,10 @@ buildat.sub_packet("kit:controls", function(data)
 	end
 	local had = C.ctl
 	local was_free = M.pointer_free()
+	-- [KIT_PAUSE_ALONE] (for a drive)
+	if (c.paused == true) ~= (had ~= nil and had.paused == true) then
+		log:info("kit: the scene " .. (c.paused and "paused" or "runs"))
+	end
 	C.ctl = c
 	C.on = true
 	C.classes = {}
@@ -3194,7 +3198,12 @@ magic.SubscribeToEvent("Update", function(_, data)
 		log:info("player physics enabled")
 	end
 	local step_len = 1 / rate()
-	if C.s and C.ready and (C.def or riding) then
+	-- [KIT_PAUSE_ALONE] the scene paused (its server steps nothing): none
+	local held = C.ctl and C.ctl.paused == true
+	if held then
+		C.acc = 0
+	end
+	if C.s and C.ready and (C.def or riding) and not held then
 		-- [KIT_TEMPLATE_ROUGH_EDGES] A jump pressed (down and up) in a frame
 		-- with no step is kept for the next step, as a touch's is
 		if M.key_press("jump") then

@@ -665,6 +665,8 @@ struct Peer
 	// [KIT_AGENT_NEXT_1] The server's camera while it plays no body: no
 	// entity, no round, no act of its own (act_allowed())
 	bool still = false;
+	// [KIT_PAUSE_ALONE] Their pause menu (or a page of it) up ("kit:menu")
+	bool menu = false;
 	// [MUSIC_SYNTH] The music last sent ("kit:music"): "<entity>:<the
 	// song's hash>:<t0>" ("" none) and its mood
 	ss_ music_key, music_mood;
@@ -1814,6 +1816,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
 		sub(m_server, "network:packet_received/kit:ui_text", &Module::on_ui_text);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
+		sub(m_server, "network:packet_received/kit:menu", &Module::on_menu);
 		// [KIT_AIRSHIPS] a place or dig on a free object
 		sub(m_server, "network:packet_received/kit:obuild", &Module::on_obuild);
 		// [KIT_TOOLS_1] the hands, a melee hit, an item's use
@@ -3080,7 +3083,8 @@ struct Module: public interface::Module, public Interface
 			const Instance *mv = movement_on(e);
 			if(!d.gen){
 				d.gen = ++m_drive_gen;
-				d.t = motion_t();
+				scene_of(e, &d.scene);
+				d.t = motion_t(d.scene);
 				json::Value pos = json::array();
 				// [KIT_CREATURES_8A] a creature steps in the world
 				double w[3] = {e.pos[0], e.pos[1], e.pos[2]};
@@ -3098,7 +3102,6 @@ struct Module: public interface::Module, public Interface
 				d.state.set("yaw", d.creature ? wq.yaw() : e.yaw);
 				d.keys.push_back({{std::floor(d.t * 1000), e.pos[0], e.pos[1], e.pos[2],
 						e.yaw, e.pitch, e.roll}});
-				scene_of(e, &d.scene);
 				log_i(MODULE, "Entity %s's %s steps in play", cs(itos(e.id)),
 						cs(mv->type));
 			}
@@ -3194,6 +3197,49 @@ struct Module: public interface::Module, public Interface
 		return (now_us() - m_motion_base) / 1e6;
 	}
 
+	// [KIT_PAUSE_ALONE] A scene's own clock: the round's less the time it was
+	// paused (pause_tick()), so what it times stops while it is. Running only
+	// (play() starts them all at the round's)
+	int64_t scene_lag(const ss_ &scene)
+	{
+		auto it = m_pauses.find(scene);
+		if(it == m_pauses.end())
+			return 0;
+		return it->second.lag + (it->second.since ? now_us() - it->second.since : 0);
+	}
+	double motion_t(const ss_ &scene)
+	{
+		return motion_t() - scene_lag(scene) / 1e6;
+	}
+	bool paused(const ss_ &scene)
+	{
+		auto it = m_pauses.find(scene);
+		return it != m_pauses.end() && it->second.since;
+	}
+	// The scene an entity is in: a player's their client's, else its scene
+	// entity's ("": none)
+	ss_ scene_name_of(const Entity &e)
+	{
+		if(e.kind == "player")
+			if(const size_t peer = peer_of_player(e.id))
+				return m_peers[peer].scene;
+		ss_ s;
+		scene_of(e, &s);
+		return s;
+	}
+	// An entity's clock (no scene paused yet this round: the round's)
+	double motion_t(const Entity &e)
+	{
+		return m_pauses.empty() ? motion_t() : motion_t(scene_name_of(e));
+	}
+	bool in_paused(const Entity &e)
+	{
+		for(auto &p : m_pauses)
+			if(p.second.since)
+				return paused(scene_name_of(e));
+		return false;
+	}
+
 	static double swing(const json::Value &m, const char *k, double t)
 	{
 		const double period = row_num(m, (ss_(k)+"_period").c_str());
@@ -3260,7 +3306,7 @@ struct Module: public interface::Module, public Interface
 		Turn own = Turn::of(e);
 		if(!m_at_rest)
 			if(const json::Value *m = motion_of(e))
-				moved_local(*m, motion_t(), v, own);
+				moved_local(*m, motion_t(e), v, own);
 		pq.apply(v);
 		for(int k = 0; k < 3; k++)
 			w[k] = o[k] + v[k];
@@ -18266,10 +18312,14 @@ struct Module: public interface::Module, public Interface
 		// draft's)
 		o += ",session="+itos(m_active);
 		// [KIT_RECORDS] c.now: the round's clock, the shared time the
-		// clients have (kit:clock), in seconds
+		// clients have (kit:clock), in seconds ([KIT_PAUSE_ALONE] its scene's,
+		// else that of the player who set it off)
 		{
 			char now[32];
-			snprintf(now, sizeof now, ",now=%.6f", motion_t());
+			ss_ at = m_pauses.empty() ? ss_() : scene_name_of(e);
+			if(at.empty() && !m_pauses.empty())
+				at = actor_scene(r.by);
+			snprintf(now, sizeof now, ",now=%.6f", motion_t(at));
 			o += now;
 		}
 		if(GameSession *gs = active_session())
@@ -24688,11 +24738,17 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Timers due on the game's clock: on_timer(c, name, player), as by
-	// whoever set it off
+	// whoever set it off ([KIT_PAUSE_ALONE] none in a paused scene: its
+	// wake moves them on)
 	void run_timers()
 	{
 		const int64_t now = now_us();
-		for(auto &p : m_entities)
+		for(auto &p : m_entities){
+			bool any = false;
+			for(const Instance &in : p.second.comps)
+				any = any || !in.timers.empty();
+			if(!any || in_paused(p.second))
+				continue;
 			for(size_t i = 0; i < p.second.comps.size() && !asleep(p.first); i++){
 				Instance &in = p.second.comps[i];
 				// In the order they are due; one set again in its own
@@ -24728,6 +24784,7 @@ struct Module: public interface::Module, public Interface
 					queue_run(r);
 				}
 			}
+		}
 	}
 
 	// [KIT_ZONE_SHAPES] zone = "look": the entity's own look as the clients
@@ -26194,6 +26251,7 @@ struct Module: public interface::Module, public Interface
 	// (MAX_SESSIONS of them at most), not a share of one
 	void tick_round(std::deque<Write> &writes)
 	{
+		pause_tick(); // [KIT_PAUSE_ALONE]
 		for(auto &w : m_worlds){
 			WorldScope ws(m_w, &w.second);
 			sky_relight_tick();
@@ -26917,6 +26975,9 @@ struct Module: public interface::Module, public Interface
 		const World *pw = world_named(pe.scene);
 		if(pw && pw->world_scene && pw->wp.none())
 			c.set("void", true);
+		// [KIT_PAUSE_ALONE] the scene paused: the prediction steps nothing
+		if(paused(pe.scene) && !pe.editing)
+			c.set("paused", true);
 		return c;
 	}
 
@@ -26946,8 +27007,10 @@ struct Module: public interface::Module, public Interface
 			if(s != sent || (real - clock_at >= 1000000 && any_moving())){
 				clock_at = real;
 				char clk[64];
-				snprintf(clk, sizeof clk, "%.0f %.9g", motion_t() * 1000,
-						interface::os::game_rate());
+				// ([KIT_PAUSE_ALONE] its scene's, at rate 0 while paused)
+				const ss_ &sn = p.second.scene;
+				snprintf(clk, sizeof clk, "%.0f %.9g", motion_t(sn) * 1000,
+						paused(sn) ? 0.0 : interface::os::game_rate());
 				network::access(m_server, [&](network::Interface *inetwork){
 					inetwork->send(p.first, "kit:clock", clk);
 				});
@@ -27455,7 +27518,8 @@ struct Module: public interface::Module, public Interface
 			// fraction of a swing, the window narrower is the upgrade if it is ever
 			// worth more
 			if(got >= 13 && std::isfinite(v[11]) && v[11] != 0){
-				const double t_now = motion_t() * 1000;
+				const double t_now = motion_t(m_peers.count(packet.sender) ?
+						m_peers[packet.sender].scene : ss_()) * 1000;
 				o += ",t=";
 				lua_lit(json::Value(std::floor(std::max(t_now - 1000,
 						std::min(t_now + 250, v[11])))), o);
@@ -27899,7 +27963,7 @@ struct Module: public interface::Module, public Interface
 		o += "}";
 		// [KIT_MOVING_OBJECTS] The time a step with no stamp of its own goes by
 		o += ",t=";
-		lua_lit(json::Value(motion_t()), o);
+		lua_lit(json::Value(motion_t(scene_name)), o);
 		// [KIT_FREE_PREFAB] The free objects' boxes near it
 		o += ",turned={";
 		for(auto &f : m_free_objects){
@@ -28007,7 +28071,7 @@ struct Module: public interface::Module, public Interface
 	void tracks_lit(ss_ &o, const ss_ &scene_name, const std::set<uint64_t> *used = nullptr)
 	{
 		o += ",tracks={";
-		const double from = (motion_t() - 1.5) * 1000;
+		const double from = (motion_t(scene_name) - 1.5) * 1000;
 		char buf[48];
 		for(auto &d : m_drives){
 			if(d.second.scene != scene_name || d.second.keys.empty() ||
@@ -28059,7 +28123,6 @@ struct Module: public interface::Module, public Interface
 	int64_t step_drives(int64_t budget)
 	{
 		int64_t spent = 0;
-		const double now = motion_t();
 		// [KIT_GUIDE_STATIONS] the seats of bots gone (removed, a round over)
 		for(auto it = m_bot_seats.begin(); it != m_bot_seats.end();){
 			auto bi = m_entities.find(it->first);
@@ -28080,8 +28143,11 @@ struct Module: public interface::Module, public Interface
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
-			if(ei == m_entities.end() || d.failed || !m_box || spent >= budget)
+			// ([KIT_PAUSE_ALONE] its scene's time: none while paused)
+			if(ei == m_entities.end() || d.failed || !m_box || spent >= budget ||
+					paused(d.scene))
 				continue;
+			const double now = motion_t(d.scene);
 			const Entity &e = ei->second;
 			const Instance *mv = movement_on(e);
 			if(!mv)
@@ -28499,7 +28565,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
-			if(!d.creature || d.asleep_us || ei == m_entities.end())
+			if(!d.creature || d.asleep_us || ei == m_entities.end() || paused(d.scene))
 				continue;
 			const Entity &e = ei->second;
 			Mind &m = m_minds[e.id];
@@ -30403,7 +30469,7 @@ struct Module: public interface::Module, public Interface
 			double r, double h, double reach)
 	{
 		o += "{x0=0,y0=0,z0=0,nx=0,ny=0,nz=0,cells=\"\",classes={},looks={},t=";
-		lua_lit(json::Value(motion_t()), o);
+		lua_lit(json::Value(motion_t(d.scene)), o);
 		o += ",turned={";
 		auto fi = m_free_objects.find(d.deck);
 		if(fi != m_free_objects.end()){
@@ -30533,6 +30599,11 @@ struct Module: public interface::Module, public Interface
 			auto pi = m_peers.find(bp.first);
 			if(!b.put || pi == m_peers.end())
 				continue;
+			// [KIT_PAUSE_ALONE] (its client steps nothing meanwhile)
+			if(paused(pi->second.scene) && !pi->second.editing){
+				b.last_us = now;
+				continue;
+			}
 			// [KIT_COMPONENTS] An edit took the seat or the movement off (or the
 			// entity away) under its holder
 			if(b.seat){
@@ -30915,6 +30986,91 @@ struct Module: public interface::Module, public Interface
 		if(bi == m_bodies.end() || !bi->second.seat)
 			return;
 		unseat(packet.sender, bi->second);
+	}
+
+	// [KIT_PAUSE_ALONE] "kit:menu" "open" or "closed": the player's pause menu
+	// (or a page of it) up or not. Any round's: the flag goes with them
+	void on_menu(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		auto pi = m_peers.find(packet.sender);
+		const bool open = packet.data == "open";
+		if(pi == m_peers.end() || pi->second.menu == open ||
+				(!open && packet.data != "closed"))
+			return;
+		pi->second.menu = open;
+		log_i(MODULE, "[KIT_PAUSE_ALONE] %s's pause menu %s", cs(pi->second.name),
+				open ? "open" : "closed");
+	}
+
+	// [KIT_PAUSE_ALONE] Running, a scene pauses while the one player who
+	// counts in it has the pause menu open, by kit/game_rules' pause_alone
+	// (the scene's): its bodies, drives, creatures, projectiles, held actions
+	// and timers stop, and its clock (scene_lag(): c.now, the clients'
+	// kit:clock, what moves by it). Counting: placed, in play, not the
+	// server's camera nor editing. A second one coming in wakes it, the menu
+	// staying open. The day's clock and the music go on (the round's).
+	// simplified: a timer's time left as saved meanwhile counts the pause
+	// (a restart mid-pause cuts it short); an action held through it
+	// counts it in its "held" time
+	struct Pause
+	{
+		int64_t since = 0; // now_us() as it paused (0: running)
+		int64_t lag = 0; // its pauses' sum before
+	};
+	std::map<ss_, Pause> m_pauses; // by the scene (a round's: Ctx)
+	void pause_tick()
+	{
+		if(!m_session.running){
+			m_pauses.clear();
+			return;
+		}
+		// (each scene's counting players and whether the last one's menu is up)
+		std::map<ss_, std::pair<int, const Peer*>> in;
+		for(auto &p : m_peers){
+			const Peer &pe = p.second;
+			auto bi = m_bodies.find(p.first);
+			if(!pe.player || pe.still || pe.editing || bi == m_bodies.end() ||
+					!bi->second.put)
+				continue;
+			auto &s = in[pe.scene];
+			s.first++;
+			s.second = &pe;
+		}
+		std::set<ss_> want;
+		for(auto &s : in)
+			if(s.second.first == 1 && s.second.second->menu &&
+					game_rules(s.first).get("pause_alone").is_true())
+				want.insert(s.first);
+		const int64_t now = now_us();
+		for(auto &ps : m_pauses){
+			Pause &pa = ps.second;
+			if(!pa.since || want.count(ps.first))
+				continue;
+			const int64_t d = now - pa.since;
+			pa.lag += d;
+			pa.since = 0;
+			// Its timers on by the pause (a creature asleep: its wake's)
+			for(auto &ep : m_entities){
+				if(asleep(ep.first) || scene_name_of(ep.second) != ps.first)
+					continue;
+				for(Instance &i : ep.second.comps)
+					for(Instance::Timer &t : i.timers)
+						t.due_us += d;
+			}
+			const auto c = in.find(ps.first);
+			log_i(MODULE, "[KIT_PAUSE_ALONE] Scene %s runs again after %.1f s (%s)",
+					cs(ps.first), d * 1e-6, c == in.end() ? "nobody in it counts" :
+					c->second.first > 1 ? "another player came in" : "the menu closed");
+		}
+		for(const ss_ &s : want){
+			Pause &pa = m_pauses[s];
+			if(pa.since)
+				continue;
+			pa.since = now;
+			log_i(MODULE, "[KIT_PAUSE_ALONE] Scene %s paused: %s, alone in it, has "
+					"the pause menu open", cs(s), cs(in[s].second->name));
+		}
 	}
 
 	// Stop: everyone out of the seats, the vehicles (and what c:move moved,
@@ -34030,6 +34186,12 @@ struct Module: public interface::Module, public Interface
 				scene_of(mi->second, &scene);
 			else if(!ended)
 				scene = pi->second.scene;
+			// [KIT_PAUSE_ALONE] held where it is, its lifetime on by the pause
+			if(!ended && paused(scene)){
+				m_projectiles[i].until_us += now - pr.at_us;
+				m_projectiles[i++].at_us = now;
+				continue;
+			}
 			const ss_ name = ended ? ss_() : pr.bot ? bot_name(mi->second) :
 					pi->second.name;
 			const main_context::SceneReference sref = ended ?
@@ -35594,7 +35756,8 @@ struct Module: public interface::Module, public Interface
 	{
 		const int64_t now = now_us();
 		for(auto &pp : m_peers){
-			if(pp.second.editing || out_of_play(pp.second.player))
+			if(pp.second.editing || out_of_play(pp.second.player) ||
+					paused(pp.second.scene)) // [KIT_PAUSE_ALONE]
 				continue;
 			for(auto &h : pp.second.held){
 				if(now - h.second.second < HELD_EVERY_US)
@@ -39802,7 +39965,7 @@ struct Module: public interface::Module, public Interface
 	// a game action's key. simplified: {key:} of Kit's own actions (forward,
 	// jump, use...) and a player's own bindings are left as written: the
 	// keys are the client's
-	ss_ shown_text(ss_ s, const json::Value &value)
+	ss_ shown_text(ss_ s, const json::Value &value, const ss_ &scene)
 	{
 		auto replace = [&](const ss_ &what, const std::function<ss_()> &with){
 			for(size_t at = s.find(what); at != ss_::npos; at = s.find(what, at)){
@@ -39820,7 +39983,7 @@ struct Module: public interface::Module, public Interface
 		double n = 0;
 		bool has_n = false;
 		if(value.is_object() && value.get("since").is_number()){
-			n = std::floor(std::max(0.0, motion_t() - value.get("since").as_number()) *
+			n = std::floor(std::max(0.0, motion_t(scene) - value.get("since").as_number()) *
 					10) / 10;
 			has_n = true;
 			v = fmt("%.1f", n);
@@ -39920,7 +40083,7 @@ struct Module: public interface::Module, public Interface
 					for(const Instance &pin : pi->second.comps)
 						if(m_types[pin.type].health && pin.state.get("hp").is_number())
 							value = pin.state.get("hp");
-				const ss_ text = shown_text(jstr(u, "text"), value);
+				const ss_ text = shown_text(jstr(u, "text"), value, pe.scene);
 				if(text.empty())
 					break;
 				json::Value o = json::object();
@@ -45094,6 +45257,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_session.running = true;
 		m_motion_base = now_us();
+		m_pauses.clear(); // [KIT_PAUSE_ALONE]
 		music_restart();
 		// [KIT_VEHICLE_MOVEMENTS] steered from their rows again, play's parameters gone
 		m_drives.clear();
@@ -48351,6 +48515,7 @@ struct Module: public interface::Module, public Interface
 		sm_<size_t, std::set<ss_>> boxes_sent;
 		int64_t clock_base = 0;
 		int64_t motion_base = 0;
+		std::map<ss_, Pause> pauses; // [KIT_PAUSE_ALONE]
 	};
 
 	void swap_ctx(Ctx &c)
@@ -48414,6 +48579,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_scene_pos, c.scene_pos);
 		swap(m_clock_base, c.clock_base);
 		swap(m_motion_base, c.motion_base);
+		swap(m_pauses, c.pauses);
 		swap(m_projectiles, c.projectiles);
 	}
 

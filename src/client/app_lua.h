@@ -2011,6 +2011,7 @@
 				"default_username", "page_size", "lighting", "cache_keep",
 				"cache_per_server", "kit_editor_font", "floorplanner_font",
 				"kit_ui_mode", "kit_ui_split", "fp_ui_mode", "fp_ui_split",
+				"kit_pause_unfocused",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps", "kit_fullscreen",
@@ -2133,6 +2134,8 @@
 			lua_pushstring(L, o.fp_ui_split.c_str());
 		else if(name == "kit_fullscreen")
 			lua_pushboolean(L, o.kit_fullscreen);
+		else if(name == "kit_pause_unfocused")
+			lua_pushboolean(L, o.kit_pause_unfocused);
 		else if(name == "cache_keep")
 			lua_pushinteger(L, o.cache_keep);
 		else if(name == "cache_per_server")

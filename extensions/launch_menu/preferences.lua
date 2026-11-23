@@ -205,6 +205,14 @@ local PREFERENCES = {
 		web = true,
 		values = {false, true},
 	},
+	-- [KIT_PAUSE_ALONE] Kit's pause menu as the window (the web page) loses
+	-- the focus
+	{
+		name = "kit_pause_unfocused",
+		label = "Open the pause menu when the window loses focus",
+		declared = true,
+		values = {false, true},
+	},
 	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
 	-- web client's only, and no row natively
 	{
@@ -785,7 +793,7 @@ local GAME_ROWS = {
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
 		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "fp_ui_mode",
-		"kit_fullscreen"}},
+		"kit_fullscreen", "kit_pause_unfocused"}},
 }
 local game = nil
 
