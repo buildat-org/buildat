@@ -567,8 +567,11 @@ buildat.declare_preference(name[, on_change]) -> value
   (0 the device's: touch on a touchscreen, else desktop; 1 desktop; 2
   touch, the UI on the right; 3 touch, on the left); kit_fullscreen (the
   web client's only: Kit's editor puts the page fullscreen with
-  set_web_fullscreen("always")); and fp_ui_mode, floorplanner's editor
-  layout (as kit_ui_mode). Any other name: nil and why.
+  set_web_fullscreen("always")); kit_pause_unfocused ([KIT_PAUSE_ALONE],
+  off by default: Kit opens the pause menu in play as the window loses the
+  input focus, natively and as the web page's window blurs); and
+  fp_ui_mode, floorplanner's editor layout (as kit_ui_mode). Any other
+  name: nil and why.
 - extensions/launch_menu/preferences.lua is the screen over these.
 buildat.get_app_preference(name) -> value or nil
 buildat.set_app_preference(name, value) -> true, or false and why

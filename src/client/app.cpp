@@ -584,6 +584,8 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->fp_ui_mode = (int)v;
 		} else if(key == "kit_fullscreen"){
 			opt->kit_fullscreen = (v != 0);
+		} else if(key == "kit_pause_unfocused"){
+			opt->kit_pause_unfocused = (v != 0);
 		} else if(key == "page_size"){
 			in_range = (v >= 1 && v <= 100 && v == (int)v);
 			opt->page_size = (int)v;
@@ -893,6 +895,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jfm = o.get("fp_ui_mode");
 	const json::Value &jfs = o.get("fp_ui_split");
 	const json::Value &jkfs = o.get("kit_fullscreen");
+	const json::Value &jkpu = o.get("kit_pause_unfocused");
 	const json::Value &jck = o.get("cache_keep");
 	const json::Value &jcp = o.get("cache_per_server");
 	const json::Value &jlt = o.get("lighting");
@@ -922,6 +925,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"fp_ui_split="+jfs.as_string();
 	if(jkfs.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"kit_fullscreen="+(jkfs.as_boolean()?"1":"0");
+	if(jkpu.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"kit_pause_unfocused="+(jkpu.as_boolean()?"1":"0");
 	if(jck.is_integer())
 		items += ss_()+(items.empty()?"":",")+"cache_keep="+itos(jck.as_integer());
 	if(jrs.is_number())
@@ -1158,6 +1163,7 @@ static void save_preferences(const app::Options &opt)
 	if(!opt.fp_ui_split.empty())
 		o.set("fp_ui_split", opt.fp_ui_split);
 	o.set("kit_fullscreen", opt.kit_fullscreen);
+	o.set("kit_pause_unfocused", opt.kit_pause_unfocused);
 	o.set("cache_keep", opt.cache_keep);
 	o.set("cache_per_server", opt.cache_per_server);
 	if(!opt.lighting.empty())

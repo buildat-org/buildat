@@ -866,6 +866,40 @@ function M.add_menu_items(menu)
 			{order = 70, page = true})
 	menu.on_escape(M.escape)
 	M.on_change(menu.refresh)
+	-- [KIT_PAUSE_ALONE] The server told the menu's state ("kit:menu"): open
+	-- (a page of it too), or closed before an item acts (pause_menu closes
+	-- it before the item's action)
+	local open, close, told = menu.open, menu.close, nil
+	local function tell(s)
+		if s ~= told then
+			told = s
+			buildat.send_packet("kit:menu", s)
+		end
+	end
+	function menu.open()
+		open()
+		tell("open")
+	end
+	function menu.close()
+		close()
+		tell("closed")
+	end
+	-- The preference kit_pause_unfocused (off by default): the window losing
+	-- the focus (natively, the web page's blur alike) opens the menu in play
+	local unfocused
+	unfocused = buildat.declare_preference and buildat.declare_preference(
+			"kit_pause_unfocused", function(v) unfocused = v == true end) == true
+	magic.SubscribeToEvent("InputFocus", function(_, d)
+		if d:GetBool("Focus") then
+			return
+		end
+		log:info("kit: the window lost the focus" .. (not unfocused and
+				" (kit_pause_unfocused off)" or E.editing and " (editing)" or
+				menu.held() and "" or ": the pause menu"))
+		if unfocused and not E.editing and not menu.held() then
+			menu.open()
+		end
+	end)
 	O.menu = O.menu or function() menu.open() end
 end
 

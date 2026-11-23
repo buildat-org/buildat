@@ -168,6 +168,9 @@ namespace app
 		// Kit's editor fullscreen (on the web the page, which also holds
 		// screen_orientation then); a check run pins it off
 		bool kit_fullscreen = false;
+		// [KIT_PAUSE_ALONE] Kit's pause menu opened as the window loses the
+		// focus
+		bool kit_pause_unfocused = false;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

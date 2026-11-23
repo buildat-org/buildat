@@ -1754,6 +1754,27 @@ namespace interface
 // game time as the run began; only differences mean anything (a time is
 // c.now - an earlier c.now). The clients have the same clock (kit:clock):
 // a kit/stopwatch's running time is counted on there from a c.now stamp.
+// [KIT_PAUSE_ALONE] It is the clock of the entity's scene (one with none:
+// that of the scene of the player who set the run off), which stops while
+// the scene is paused.
+//
+// **The pause menu pauses a scene played alone** ([KIT_PAUSE_ALONE]): the
+// client tells the server its app's pause menu (extensions/pause_menu,
+// kit.add_menu_items' menu: the menu or a page of it) is up or not, the
+// packet "kit:menu" "open" or "closed" ("closed" before an item acts).
+// While Running, a scene whose one counting player (placed, in play, not
+// editing, not the server's camera) has it up pauses, by the scene's
+// kit/game_rules' pause_alone (on by default): its players' bodies (their
+// clients' prediction held: kit:controls' paused), the steered movements
+// and creatures, the projectiles, the actions held, the timers (on_timer;
+// moved on by the pause as it ends, never early) and the scene's clock
+// (c.now, kit:clock at rate 0: a kit/stopwatch, what moves by time) stop.
+// A second counting player coming in, the menu closing, the player
+// leaving or editing ends it; the first one's menu stays up. The day's
+// clock, the music and what runs on other events go on; other scenes, and
+// a session's round, are their own. The client's preference
+// kit_pause_unfocused (off by default) opens the menu in play as the window
+// loses the focus.
 //
 // **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
 // owns a round's lifecycle, each game its goal. kit/arena is the lobby
