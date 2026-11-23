@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-23)
-# covers: apps/workbench/templates/brimstone_stunts/** builtin/kit/types/controls.lua builtin/kit/client_lua/controls.lua util/kit_racer_drive.py
+# covers: apps/workbench/templates/brimstone_stunts/** builtin/kit/types/controls.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/types/path.lua util/kit_racer_drive.py
 # [KIT_STUNTS] (kit_plan 4z37zzd (1)) The Brimstone Stunts template (Brimstone
 # Speedway's fork in kit/controls' chase camera) on Workbench; one server,
 # kitboss on a headless weston's Xwayland of the check's own:
@@ -14,7 +14,18 @@
 #      faces, near the chase's distance and above the car, its yaw following
 #      the car's (never far off, on it once straight); screenshots round the
 #      lap (lap_*.png) and the result card (trial.png).
-# Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lap_*.png, $t/trial.png
+#   3. [KIT_STUNTS] (4z37zzd (2)) The heights, from the same samples and the
+#      template's own polygons (the trial scene's generator's): off each
+#      tabletop jump's lip the car over 0.4 m above its floor (the floor as
+#      the car finds it: the highest top edge at most 0.6 over it, the road
+#      0.555), then on it again; at the figure eight's crossing (the bridge)
+#      the car once on the deck (y 5.055) and once under it (0.555), nowhere
+#      between, not slowed there (no wall of the other level met); the
+#      camera never inside a height's prism (w:ray meets them: under the deck
+#      it comes in under the roof).
+# Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lap_*.png (the start,
+# the bridge's ramp, its deck, the east, a jump in the air and landed, under
+# the bridge, the second jump, the last straight), $t/trial.png
 #   util/kit_stunts_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -42,9 +53,8 @@ assert ctl["camera"] == "chase" and ctl["chase_follow"] > 0, ctl
 print("TRIAL=%d DIST=%s" % (trial, ctl["distance"]))
 PY
 . "$t/ids"
-# The Bone Yard's line (util/kit_racer_check.sh's: the generator's output is
-# Brimstone's)
-export PATH_PTS="-100,-58,12 60,-58,10 60,-34,10 10,-34,9 0,-14,9 30,0,10 95,0,12 95,55,12 50,55,9 40,30,8 25,30,8 15,58,10 -40,58,12 -55,20,10 -30,5,9 -60,-10,10 -100,-20,12"
+# The Bone Yard's line: stunt_yard's default corners (a figure eight)
+export PATH_PTS="-100,10,16 100,10,16 100,68,16 0,68,14 0,-68,14 -100,-68,16"
 
 sock=buildat-stunts-$$
 weston --backend=headless --xwayland --socket=$sock --width=1100 \
@@ -123,7 +133,7 @@ m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/stunt_race $TRIAL: kitboss starts a time trial"
 mc=$(mark "$CL")
-SHOTS="-40,-58,$t/lap_1_start.png 60,-58,$t/lap_2_u_bend.png 10,-34,$t/lap_3_chicane.png 95,0,$t/lap_4_east.png 95,55,$t/lap_5_ne.png 15,58,$t/lap_6_north.png -55,20,$t/lap_7_west.png -100,-20,$t/lap_8_last.png" \
+SHOTS_IN_ORDER=1 SHOTS="-100,-10,$t/lap_1_start.png -30,10,$t/lap_2_ramp.png -3,10,$t/lap_3_deck.png 100,39,$t/lap_4_east.png 53,68,$t/lap_5_jump.png 30,68,$t/lap_6_landed.png 0,10,$t/lap_7_under.png -42,-68,$t/lap_8_jump2.png -100,-40,$t/lap_9_last.png" \
 	python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 150 \
 	'panel .* shown, layer [0-9]+: "The flag is down' > "$t/drive.log" 2>&1 ||
 	fail "the driver: $(tail -2 "$t/drive.log")"
@@ -181,9 +191,88 @@ print("ok: the chase camera over %d samples: behind the car %.1f m (median; %d o
       "its yaw at most %.0f deg off the car's through %.0f deg of turns" %
       (len(S), backs[len(backs) // 2], len(bad), most, turned))
 PY
-for f in lap_1_start lap_2_u_bend lap_3_chicane lap_4_east lap_5_ne lap_6_north lap_7_west lap_8_last; do
+# 3. The heights: the jumps, the bridge over and under, the camera out of them
+python3 -I - "$CL" "$mc" "$here/apps/workbench/templates/brimstone_stunts/composition.json" <<'PY' ||
+import json, math, re, sys
+s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
+d = json.load(open(sys.argv[3]))
+scene = {e["name"]: e["id"] for e in d["entities"] if e.get("kind") == "scene"}
+gen = [e["id"] for e in d["entities"] if e.get("parent") == scene["trial"] and
+       e["components"][0]["type"] == "local/stunt_yard"][0]
+# The standing polygons (no pitch): their outline in the world's x, y, z0...z1
+polys = []
+for e in d["entities"]:
+    c = e["components"][0] if e.get("parent") == gen else {}
+    if c.get("type") == "kit/polygon" and not e.get("pitch"):
+        x, y, z = e["pos"]
+        h = c["params"]["depth"] / 2
+        polys.append((e["name"], [(x + a, y + b) for a, b in c["params"]["points"]], z - h, z + h))
+assert sum(1 for p in polys if p[0] == "the bridge") == 1, [p[0] for p in polys]
+jumps = [p for p in polys if p[0] == "a tabletop jump"]
+assert len(jumps) >= 2, [p[0] for p in polys]
+def floor(x, y, z):
+    """The car's floor: the highest top edge (going +x: the generator writes
+    the outline clockwise) at most 0.6 over y, else the road's top"""
+    best = 0.555
+    for _, pts, z0, z1 in polys:
+        if not z0 < z < z1:
+            continue
+        for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1]):
+            if ax < bx and ax <= x <= bx:
+                t = ay + (by - ay) * (x - ax) / (bx - ax)
+                if t <= y + 0.6:
+                    best = max(best, t)
+    return best
+def inside(x, y, z):
+    for name, pts, z0, z1 in polys:
+        if z0 < z < z1:
+            c = False
+            for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1]):
+                if (ay > y) != (by > y) and x < ax + (bx - ax) * (y - ay) / (by - ay):
+                    c = not c
+            if c:
+                return name
+S, b, c = [], None, None
+for l in s.splitlines():
+    m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),", l)
+    if m:
+        b, c = tuple(map(float, m.groups())), None
+    m = re.search(r"kit: camera at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+) ", l)
+    if m:
+        c = tuple(map(float, m.groups()))
+    m = re.search(r"kit: vehicle speed (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),", l)
+    if m and b and c:
+        S.append((b, c, math.hypot(float(m[1]), float(m[3]))))
+        b = c = None
+assert len(S) > 100, len(S)
+# The jumps: over each one's span, some sample 0.4 m over the floor, a later
+# one on it
+for name, pts, z0, z1 in jumps:
+    xs = [p[0] for p in pts]
+    on = [(bx, by - floor(bx, by, bz)) for (bx, by, bz), _, _ in S
+          if min(xs) - 15 < bx < max(xs) and z0 < bz < z1]
+    up = [i for i, (_, h) in enumerate(on) if h > 0.4]
+    assert up and any(abs(h) < 0.05 for _, h in on[up[-1]:]), (name, xs[0], on)
+    print("ok: the jump at x %.0f...%.0f: %d samples, %.2f m over the floor at most, landed" %
+          (min(xs), max(xs), len(on), max(h for _, h in on)))
+# The crossing: on the deck, under it
+cross = [(by, v) for (bx, by, bz), _, v in S if abs(bx) < 8 and 4 < bz < 16]
+over = [v for y, v in cross if abs(y - 5.055) < 0.06]
+under = [v for y, v in cross if abs(y - 0.555) < 0.06]
+assert over and under and len(over) + len(under) == len(cross), cross
+assert min(over + under) > 8, cross
+print("ok: the bridge: %d samples on its deck (y 5.055), %d under it (y 0.555), none between, "
+      "at %.1f m/s at least" % (len(over), len(under), min(over + under)))
+bad = [(b, c, inside(*c)) for b, c, _ in S if inside(*c)]
+assert not bad, bad[:5]
+cu = [c for (bx, by, bz), c, _ in S if abs(bx) < 8 and 4 < bz < 16 and by < 1]
+print("ok: the camera out of every height's prism over %d samples (under the deck: at y %s)" %
+      (len(S), ", ".join("%.2f" % c[1] for c in cu)))
+PY
+	fail "the heights ($CL)"
+for f in lap_1_start lap_2_ramp lap_3_deck lap_4_east lap_5_jump lap_6_landed lap_7_under lap_8_jump2 lap_9_last; do
 	[ -f "$t/$f.png" ] || fail "no screenshot $t/$f.png ($t/drive.log)"
 done
 cmd "quit"
-echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading; screenshots $t/lobby.png $t/lap_*.png $t/trial.png"
+echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading, over two jumps and the bridge and under it; screenshots $t/lobby.png $t/lap_*.png $t/trial.png"
 # vim: set noet ts=4 sw=4:

@@ -415,6 +415,7 @@ move movement.click
 move movement.eye
 move movement.h
 move movement.help
+move movement.own_height
 move movement.pose
 move movement.r
 move movement.raw_keys

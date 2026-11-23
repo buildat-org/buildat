@@ -453,7 +453,32 @@ local function back(c, by, r)
 	c:log(c:name(by), "back on the road at checkpoint", r.last or 0)
 end
 
-local function effects_wreck(c, at)
+local effects_wreck
+-- A wreck: the car disarmed, stopped, its blast; the announcer's line; back
+-- on the road wreck_wait s later
+local function wreck(c, pb, player, r, by, kind)
+	r.wrecked = true
+	c:emit("disarm", nil, pb)
+	c:body_var(pb, "wreck", true)
+	local p = player_of(c, pb)
+	if p and p.pos then
+		effects_wreck(c, p.pos)
+	end
+	local killer = type(by) == "string" and (by:match("^player:") or is_bot(by)) and
+			by ~= pb and
+			c:name(by) or nil
+	local vars = {name = c:name(pb), killer = killer}
+	if not c.state.first_blood then
+		c.state.first_blood = true
+		say(c, killer and "say_first_blood" or "say_first_wreck", vars)
+	else
+		say(c, killer and "say_kill" or "say_wreck", vars)
+	end
+	c:log(c:name(pb), "wrecked by", tostring(kind), killer or "")
+	c:after(c.params.wreck_wait, "wrecked", {player = player})
+end
+
+function effects_wreck(c, at)
 	local up = {at[1], at[2] + 0.6, at[3]}
 	-- The blast, the fire, the debris
 	c:effect{at = up, count = 60, shape = "round", colors = {"#ffe14a",
@@ -524,6 +549,7 @@ local type_t = {
 			checkpoint = "The player passed a checkpoint. Value: its order (1...).",
 			lap = "The player's car crossed the finish line with every checkpoint passed.",
 			back = "Sent by itself: a wrecked car goes back on the road, as its player.",
+			crash = "The player's car landed too hard (the car's crash): wrecked, in a race or a time trial.",
 			lap_clock = "A trial's lap time (the kit/stopwatch's lap).",
 			trial_clock = "A finished trial's whole time (the kit/stopwatch's elapsed).",
 			record = "The player's lap record (the kit/records' best): the lap's note or the trial's result.",
@@ -581,7 +607,7 @@ local type_t = {
 		scorches = {default = {}},
 	},
 	inputs = {entered = "none", left = "none",
-		start = "none", checkpoint = "number", lap = "none", back = "none",
+		start = "none", checkpoint = "number", lap = "none", back = "none", crash = "number",
 		lap_clock = "number", trial_clock = "number", record = "number",
 		new_record = "number"},
 	outputs = {hud = "string", announce = "string", result = "string",
@@ -707,25 +733,7 @@ local type_t = {
 		if not (r and r.mode == "race") or r.wrecked then
 			return
 		end
-		r.wrecked = true
-		c:emit("disarm", nil, pb)
-		c:body_var(pb, "wreck", true)
-		local p = player_of(c, pb)
-		if p and p.pos then
-			effects_wreck(c, p.pos)
-		end
-		local killer = type(by) == "string" and (by:match("^player:") or is_bot(by)) and
-				by ~= pb and
-				c:name(by) or nil
-		local vars = {name = c:name(pb), killer = killer}
-		if not c.state.first_blood then
-			c.state.first_blood = true
-			say(c, killer and "say_first_blood" or "say_first_wreck", vars)
-		else
-			say(c, killer and "say_kill" or "say_wreck", vars)
-		end
-		c:log(c:name(pb), "wrecked by", tostring(kind), killer or "")
-		c:after(c.params.wreck_wait, "wrecked", {player = player})
+		wreck(c, pb, player, r, by, kind)
 	end,
 	on_input = function(c, input, value, by)
 		if type(by) ~= "string" or not (by:match("^player:%d+$") or is_bot(by)) then
@@ -757,6 +765,13 @@ local type_t = {
 			return
 		elseif input == "back" then
 			return back(c, by, r)
+		elseif input == "crash" then
+			-- [KIT_STUNTS] a landing too hard: wrecked, a race's or a trial's
+			if r.mode and not r.done and not r.wrecked then
+				local p = player_of(c, by)
+				wreck(c, by, p and p.id, r, nil, "landing")
+			end
+			return
 		elseif input == "lap_clock" then
 			-- [KIT_RECORDS] (a trial's: its note once the record is back)
 			r.lap_t = tonumber(value) or 0

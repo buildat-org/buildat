@@ -4,6 +4,9 @@
 # Bone Yard) util/kit_stunts_check.sh: a scripted client's
 # keys from its log's body lines, over its command fifo
 #   python3 -I util/kit_racer_drive.py <client log> <fifo> <seconds> <stop regex>
+# SHOTS "x,z,file ...": a screenshot each within 6 m of its place;
+# SHOTS_IN_ORDER=1 ([KIT_STUNTS]): each only after the one before it (a
+# place the lap passes twice, over a bridge and under it)
 import json, math, os, re, sys, time
 log, fifo, secs, stop = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 target = [float(v) for v in os.environ["TARGET"].split(",")] if os.environ.get("TARGET") else None
@@ -14,6 +17,7 @@ drift = [float(v) for v in os.environ["DRIFT"].split(",")] if os.environ.get("DR
 drift_s = float(os.environ.get("DRIFT_S", "0.5"))
 drift_shot = os.environ.get("DRIFT_SHOT")
 shots = [s.split(",", 2) for s in os.environ.get("SHOTS", "").split()]
+in_order = bool(os.environ.get("SHOTS_IN_ORDER"))
 aim_file, aim = os.environ.get("AIM_FILE"), None
 A_LAT, A_BRAKE, TOP = 8.0, 6.0, 30.0
 out = open(fifo, "w", buffering=1)
@@ -146,7 +150,7 @@ while time.time() - t0 < secs:
         (xc, zc), (xd, zd) = P[(u + 15) % N], P[(u + 16) % N]
         drift_left = (xb - xa) * (zd - zc) - (zb - za) * (xd - xc) > 0
         print("drift from %.2f" % now, flush=True)
-    for sh in shots[:]:
+    for sh in shots[:1] if in_order else shots[:]:
         if math.hypot(float(sh[0]) - x, float(sh[1]) - z) < 6:
             shots.remove(sh)
             send("screenshot " + sh[2])

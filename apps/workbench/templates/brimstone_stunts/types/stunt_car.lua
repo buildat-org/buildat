@@ -1,7 +1,8 @@
 -- Brimstone Stunts' car (4z37zzd: a fork of Brimstone Speedway's brim_car,
 -- seen by kit/controls' chase camera): a movement (kit/controls'
--- movement), stepped in kit/controls' plane "horizontal" (the body held
--- at its height, x and z the plane's 2D x and y). W gas, S brake and
+-- movement), stepped in kit/controls' plane "horizontal" (x and z the
+-- plane's 2D x and y) with movement.own_height ([KIT_STUNTS]): its own
+-- height and speed up (s.pos[2], s.vel[2]), not held. W gas, S brake and
 -- reverse, A and D steer, Space the handbrake; a weapon fires on its own
 -- key (stunt_weapons' action "fire": Ctrl, the left mouse button).
 -- A rigid body with a mass and a yaw inertia on four tyres (the user's
@@ -13,7 +14,8 @@
 -- of half the slide's angle. Air drag (the speed squared), rolling
 -- resistance and each tyre's drag on the floor slow it, so the top speed
 -- (`speed`) is approached slowly as the drag nears the engine's push.
--- The floor (w:under: a kit/polygon floor's surface under each tyre) sets
+-- The floor (w:under: a kit/polygon floor's surface under each tyre, else
+-- the solid polygon's it stands on: the road, the run-off, a ramp) sets
 -- the grip and drag: dirt (and anything else: the track's ground), "gravel"
 -- (the run-off beside it: less grip, more drag, short of "mud"), "mud",
 -- "oil", "asphalt" holds best, "boost" pushes it on; "finish" is the lap
@@ -43,9 +45,25 @@
 -- the contact (s.vel is that) and gives up its own share, once each time
 -- the other has stepped (s.met): a car pushed along keeps up with the one
 -- pushing.
+-- [KIT_STUNTS] (4z37zzd (2)) The height: each tyre's floor is w:down's
+-- from CLIMB over the car (a kit/polygon ramp's top, the ground, a bridge's
+-- deck; nothing under it within REACH: far down), the car's the axles' mean
+-- at its middle, its pitch and roll the tyres' differences. It falls under
+-- `gravity` (Kit scales it by kit/environment's) and stands where it meets
+-- its floor, at the floor's speed up (the slope ahead times the speed):
+-- off a ramp's lip it flies on, its tyres gripping nothing, no engine,
+-- the pitch easing toward the way it flies. A landing whose speed into the
+-- floor passes `hard_landing` slows it (by `landing_loss`) and shakes it
+-- (a bump); past `wreck_landing`, or upside down, is the event "crash"
+-- (the race wrecks it). Going up a slope gravity slows it, down one speeds
+-- it. The walls and the cars are met at its own slice (KNEE over its
+-- floor): a bridge's deck and walls are not there for a car under it.
+-- simplified: one rigid car on four points (no springs); the floor read
+-- along the tyres' places only (a ledge between the axles is not felt)
 -- Events (the movement's outputs; lap the race's input, fire and ram
--- stunt_weapons'): lap, fire (value: the heading), smash (a wall hit hard;
--- value: the speed into it), ram.
+-- stunt_weapons', crash the race's): lap, fire (value: the heading), smash
+-- (a wall hit hard; value: the speed into it), ram, crash (a landing hard
+-- enough to wreck it; value: the speed into the floor).
 -- Its state: s.c {x, z, vx, vz}, s.h the heading (radians from +z toward
 -- +x, kit's yaw), s.w its yaw rate, s.st the steering angle, s.bumps the
 -- hard wall hits so far and s.bump_v the last one's speed (its client's
@@ -54,7 +72,9 @@
 -- the steering, flags (1 boosting, 2 wrecked, 4 a tyre slipping much, 8
 -- braking, 16 handbrake, 32 throttle, 64 and 128 the front and the back
 -- scraping a wall), speed, floor (SURF's index), slips (the tyres slipping
--- much, bits 1 2 4 8: the tyres' order), bumps (its hard hits). s.spheres
+-- much, bits 1 2 4 8: the tyres' order), bumps (its hard hits and hard
+-- landings), pitch and roll (radians, nose up, right side down; 256 in
+-- flags: in the air). s.spheres
 -- two circles, front and back, as the zones (checkpoints, crates, mines)
 -- meet it. The tyres' places are params (track, front, rear), the client
 -- part's draw's p too. The grid's freeze (the race's c:speed(by, 0)): i.speed
@@ -84,6 +104,9 @@ local GROUND = {asphalt = {1, 0.16}, dirt = {0.5, 0.33}, mud = {0.25, 2.5, true}
 local SURF = {dirt = 1, mud = 2, oil = 3, asphalt = 4, boost = 5, gravel = 6}
 local WALL_E, WALL_MU = 0.35, 0.35
 local CAR_E = 0.2
+-- [KIT_STUNTS] A tyre's floor looked for from CLIMB over the car, REACH more
+-- down; the walls' slice KNEE over the car's floor
+local CLIMB, REACH, KNEE = 0.6, 6, 0.5
 local PI = math.pi
 local NOVEL = {0, 0}
 local BIT = {1, 2, 4, 8}
@@ -127,6 +150,7 @@ return {
 			fire = "The fire key was pressed (its body var fire, stunt_weapons'). Value: the car's heading (degrees, kit's yaw).",
 			smash = "It hit a wall hard. Value: its speed at impact.",
 			ram = "It hit another car while boosted. Value: the other's by.",
+			crash = "It landed hard enough to wreck (or upside down). Value: its speed into the floor.",
 		},
 		params = {
 			speed = "The top speed on dirt, m/s; the air drag is made to match it.",
@@ -153,13 +177,19 @@ return {
 			rear = "The rear tyres behind the middle, m.",
 			rate = "Inputs a second; Kit draws the car between them.",
 			substeps = "Physics steps an input; 120 a second as at 60 and 2.",
+			gravity = "Its fall, m/s^2 (kit/environment's gravity scales it).",
+			hard_landing = "A landing's speed into the floor past which it slows and shakes, m/s.",
+			landing_loss = "The share of its speed a hard landing takes.",
+			wreck_landing = "A landing's speed into the floor past which it wrecks (the event crash), m/s.",
 		},
 	},
 	root = true,
 	-- [KIT_SINGLE] the nearest copy is used: one a holder (the root, a scene)
 	single = true,
-	outputs = {lap = "none", fire = "number", smash = "number", ram = "string"},
+	outputs = {lap = "none", fire = "number", smash = "number", ram = "string",
+		crash = "number"},
 	movement = {body = BODY, raw_keys = true, touch = "drive", bodies = true,
+		own_height = true,
 		-- (4z37i: Brake, Gas, Handbrake, each brake beside Gas)
 		touch_buttons = {{"Handbrake", "jump", "low"}},
 		touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}},
@@ -170,7 +200,8 @@ return {
 		touch_help = {{"Gas/Brake", "drive", "f"}, {"Stick", "steer", "r"},
 			{"Handbrake", "slide", "jump"}},
 		-- s.pose's slots by name (the client part's draw reads them so)
-		pose = {"h", "paint", "steer", "flags", "speed", "floor", "slips", "bumps"}},
+		pose = {"h", "paint", "steer", "flags", "speed", "floor", "slips", "bumps",
+			"pitch", "roll"}},
 	params = {
 		speed = {cat = "physics", type = "number", default = 28, min = 1,
 			max = 80},
@@ -222,6 +253,14 @@ return {
 			max = 120},
 		substeps = {cat = "advanced", type = "number", default = 4, min = 1,
 			max = 8},
+		gravity = {cat = "physics", type = "number", default = 14, min = 1,
+			max = 60},
+		hard_landing = {cat = "physics", type = "number", default = 7, min = 1,
+			max = 60},
+		landing_loss = {cat = "physics", type = "number", default = 0.25, min = 0,
+			max = 1},
+		wreck_landing = {cat = "physics", type = "number", default = 15, min = 1,
+			max = 100},
 	},
 	step = function(s, i, dt, w, p)
 		if type(s.c) ~= "table" then
@@ -234,12 +273,19 @@ return {
 		if v.wreck or i.out_of_play then
 			f, r, hb = 0, 0, false
 		end
+		-- [KIT_STUNTS] (in the air: no engine, no brakes, the tyres on nothing)
+		local air = s.air == true
+		if air then
+			f, hb = 0, false
+		end
 		local top = (p.speed or 28) * (v.boost and (p.boost or 1.45) or 1)
 		local push = (p.accel or 7) * (v.boost and (p.boost_push or 2) or 1)
 		local grip = p.grip or 7
 		-- (rolling resistance and the brakes, m/s^2)
 		local ROLL, BRAKE = p.roll or 0.25, p.brake or 9
 		local y = type(s.pos) == "table" and tonumber(s.pos[2]) or 0
+		local vy = tonumber(s.vy) or 0
+		local G = p.gravity or 14
 		local sh, ch = math.sin(s.h), math.cos(s.h)
 		-- The body's frame: ahead (sh, ch), right (ch, -sh); m = {the speed
 		-- right, the speed ahead, the yaw rate} (the yaw rate turning its
@@ -291,6 +337,10 @@ return {
 				throttle = true
 			end
 		end
+		-- ([KIT_STUNTS] on a slope: gravity along it)
+		if not air then
+			af = af - G * math.sin(tonumber(s.pt) or 0)
+		end
 		if v.wreck and not frozen then
 			af = af - clamp(vf / dt, -BRAKE, BRAKE)
 			brake = true
@@ -317,7 +367,8 @@ return {
 			local lx, lz = t[1], t[2]
 			local tx = c[1] + lx * ch + lz * sh
 			local tz = c[2] - lx * sh + lz * ch
-			local info = w:under(tx, y + 0.1, tz)
+			-- ([KIT_STUNTS] its floor as last stepped: a slope's top ahead)
+			local info = w:under(tx, y + 0.1 + (tonumber(s.pt) or 0) * lz, tz)
 			local sf = info and GROUND[info.surface] and info.surface or "dirt"
 			local g = GROUND[sf]
 			local fr = info and tonumber(info.friction) or 1
@@ -325,14 +376,14 @@ return {
 			local pr, pf = d0[1] + d0[3] * lz, d0[2] - d0[3] * lx
 			local ts = math.sqrt(pr * pr + pf * pf)
 			if ts > 1e-6 then
-				kick(m, -math.min(g[2] / 4 * dt, ts / 4), pr / ts, pf / ts, lx, lz)
+				kick(m, -math.min(air and 0 or g[2] / 4 * dt, ts / 4), pr / ts, pf / ts, lx, lz)
 			end
 			-- The grip: across the tyre (turned by the steering for the front)
 			local a = k <= 2 and (lx > 0 and turned_r or turned_l) or 0
 			local sa, ca = math.sin(a), math.cos(a)
 			local across = pr * ca - pf * sa
 			local j = -across / 4
-			local lim = grip * (p[sf .. "_grip"] or g[1]) * fr * dt
+			local lim = air and 0 or grip * (p[sf .. "_grip"] or g[1]) * fr * dt
 			local slip = g[3] == true
 			if k > 2 then
 				lim = lim * (p.rear_grip or 1.2)
@@ -354,7 +405,7 @@ return {
 			end
 			local aj = j < 0 and -j or j
 			if aj > lim then
-				slip = aj > lim * 2.14
+				slip = aj > lim * 2.14 and not air
 				j = j * lim / aj
 			end
 			kick(m, j, ca, -sa, lx, lz)
@@ -416,7 +467,7 @@ return {
 			local lz = side == 1 and AX or side == 2 and -AX or 0
 			local n_hit = 0
 			for _, h in ipairs(w:circle(c[1] + sh * lz, c[2] + ch * lz,
-					side == 3 and BODY.r or R)) do
+					side == 3 and BODY.r or R, y + KNEE)) do
 				n_hit = n_hit + 1
 				if n_hit > 4 then
 					break
@@ -483,6 +534,46 @@ return {
 			end
 		end
 		s.met = seen
+		-- [KIT_STUNTS] The height: the tyres' floors, the car's, its fall
+		local TF, TR, TX = p.front or 1.3, p.rear or 1.25, p.track or 0.92
+		local fl = {}
+		for k = 1, 4 do
+			local t = TYRES[k]
+			local d = w:down(c[1] + t[1] * ch + t[2] * sh, y + CLIMB, c[2] - t[1] * sh + t[2] * ch,
+				CLIMB + REACH)
+			fl[k] = y + CLIMB - (d or CLIMB + REACH + 50)
+		end
+		local ff, fb = (fl[1] + fl[2]) / 2, (fl[3] + fl[4]) / 2
+		local fy = fb + (ff - fb) * TR / (TF + TR)
+		local pt = math.atan2(ff - fb, TF + TR)
+		local rl = math.atan2((fl[2] + fl[4] - fl[1] - fl[3]) / 2, 2 * TX)
+		local vf1 = c[3] * sh + c[4] * ch
+		vy = vy - G * dt
+		if y + vy * dt <= fy then
+			-- On it: at its speed up; a landing's speed into it
+			local up = vf1 * (ff - fb) / (TF + TR)
+			local hit = up - vy
+			if air and hit > (p.hard_landing or 7) then
+				local keep = 1 - (p.landing_loss or 0.25)
+				c[3], c[4] = c[3] * keep, c[4] * keep
+				s.bumps = (tonumber(s.bumps) or 0) + 1
+				s.bump_v = math.floor(hit)
+				if hit > (p.wreck_landing or 15) or math.abs(tonumber(s.rl) or 0) > PI / 2 or
+						math.abs(tonumber(s.pt) or 0) > PI / 2 then
+					events = events or {}
+					events[#events + 1] = {"crash", math.floor(hit)}
+				end
+			end
+			y, vy, s.air = fy, up, nil
+			s.pt, s.rl = pt, rl
+		else
+			-- In the air: the nose easing toward the way it flies
+			y, s.air = y + vy * dt, true
+			local want = math.atan2(vy, math.max(1, math.abs(vf1)))
+			local pa = tonumber(s.pt) or 0
+			s.pt = pa + (want - pa) * math.min(1, 2 * dt)
+		end
+		s.vy = vy
 		-- The lap line: once a crossing, with the lap open
 		local on_line = surf == "finish"
 		if on_line and not s.on_line and v.lap_open then
@@ -500,7 +591,7 @@ return {
 		end
 		s.events = events
 		s.pos = {c[1], y, c[2]}
-		s.vel = {vx0, 0, vz0}
+		s.vel = {vx0, vy, vz0}
 		s.yaw = math.fmod(s.h * 180 / PI, 360)
 		if v.boost then
 			flags = flags + 1
@@ -508,9 +599,14 @@ return {
 		if v.wreck then
 			flags = flags + 2
 		end
+		if s.air then
+			flags = flags + 256
+		end
 		s.pose = {h = s.h, paint = tonumber(v.paint) or 1, steer = st, flags = flags,
 			speed = math.floor(speed * 10 + 0.5) / 10, floor = SURF[surf] or 1,
-			slips = slips, bumps = tonumber(s.bumps) or 0}
+			slips = slips, bumps = tonumber(s.bumps) or 0,
+			pitch = math.floor((tonumber(s.pt) or 0) * 1000 + 0.5) / 1000,
+			roll = math.floor((tonumber(s.rl) or 0) * 1000 + 0.5) / 1000}
 		s.spheres = {{sh * AX, 0.5, ch * AX, 0.9}, {-sh * AX, 0.5, -ch * AX, 0.9}}
 	end,
 }
