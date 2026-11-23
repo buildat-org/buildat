@@ -6,7 +6,9 @@
 #   python3 -I util/kit_racer_drive.py <client log> <fifo> <seconds> <stop regex>
 # SHOTS "x,z,file ...": a screenshot each within 6 m of its place;
 # SHOTS_IN_ORDER=1 ([KIT_STUNTS]): each only after the one before it (a
-# place the lap passes twice, over a bridge and under it)
+# place the lap passes twice, over a bridge and under it); (4z37zzd (3))
+# UP_SHOT a file: a screenshot the first time the body's up (a loop's,
+# "kit: body up") points down; TOP the speed it drives at most (30)
 import json, math, os, re, sys, time
 log, fifo, secs, stop = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 target = [float(v) for v in os.environ["TARGET"].split(",")] if os.environ.get("TARGET") else None
@@ -19,7 +21,8 @@ drift_shot = os.environ.get("DRIFT_SHOT")
 shots = [s.split(",", 2) for s in os.environ.get("SHOTS", "").split()]
 in_order = bool(os.environ.get("SHOTS_IN_ORDER"))
 aim_file, aim = os.environ.get("AIM_FILE"), None
-A_LAT, A_BRAKE, TOP = 8.0, 6.0, 30.0
+A_LAT, A_BRAKE, TOP = 8.0, 6.0, float(os.environ.get("TOP", "30"))
+up_shot = os.environ.get("UP_SHOT")
 out = open(fifo, "w", buffering=1)
 def rounded(pts):
     """The closed line: straights between the corners, an arc of r round each"""
@@ -99,6 +102,10 @@ while time.time() - t0 < secs:
         armed = False
         send("keypress Left Ctrl")
         print("fired", flush=True)
+    m = re.search(r"kit: body up -?[0-9.]+,(-?[0-9.]+),", line)
+    if m and up_shot and float(m[1]) < -0.9:
+        send("screenshot " + up_shot)
+        up_shot = None
     m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", line)
     if m:
         if x is not None and (float(m[1]) - x) ** 2 + (float(m[3]) - z) ** 2 > 64:

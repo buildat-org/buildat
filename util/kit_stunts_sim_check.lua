@@ -9,8 +9,10 @@
 -- "crash", no "smash"), and: on the bridge's deck its feet at the deck's
 -- top (5.055), under it at the road's (0.555), never between there; off a
 -- kicker's lip in the air for a while, at some height over its floor, and
--- landed again on its tyres. Then a car dropped 0.4 m lands softly, one
--- dropped 2.5 m lands hard (slowed, a bump), one dropped 12 m crashes.
+-- landed again on its tyres; (4z37zzd (3)) round the loop (its up pointing
+-- down at the top) and off it level, on its tyres. Then a car dropped 0.4 m
+-- lands softly, one dropped 2.5 m lands hard (slowed, a bump), one dropped
+-- 12 m crashes; one into the loop too slow falls off it and lands.
 -- Run: lua util/kit_stunts_sim_check.lua (Lua 5.1 or LuaJIT), from the source tree's root.
 local function load_env(path, env)
 	local f = assert(loadfile(path))
@@ -47,6 +49,8 @@ local function upvalue(f, name, depth)
 end
 bot.follow = assert(upvalue(bot.on_timer, "follow", 3), "bot.lua's follow not found")
 local yard = load_env(T .. "stunt_yard.lua", env())
+-- (the loop's radius: stunt_yard's LOOP.r)
+local LOOP_R = 6.5
 local poly_t = load_env("builtin/kit/types/polygon.lua", env())
 local kids = {}
 -- (the race's pole where the template has it)
@@ -57,7 +61,11 @@ for k, d in pairs(yard.params) do
 end
 function gc:child(t) kids[#kids + 1] = t return #kids end
 function gc:link() end
-function gc:log() end
+local loop_e
+function gc:log(m)
+	local x, z = tostring(m):match("loop at (%-?%d+),(%-?%d+)")
+	loop_e = x and {tonumber(x), tonumber(z)} or loop_e
+end
 function gc:random(seed)
 	local s = math.floor(tonumber(seed) or 0) % 2147483646 + 1
 	local function nxt() s = s * 16807 % 2147483647 return (s - 1) / 2147483646 end
@@ -65,8 +73,11 @@ function gc:random(seed)
 		int = function(_, a, b) return a + math.floor(nxt() * (b - a + 1)) end}
 end
 yard.on_build(gc)
-local polys, path, cps = {}, nil, {}
+local polys, path, cps, facets = {}, nil, {}, {}
 for _, k in ipairs(kids) do
+	if k.name == "the loop" then
+		facets[#facets + 1] = k
+	end
 	if k.type == "kit/polygon" then
 		local look = {shape = "polygon"}
 		for n, d in pairs(poly_t.params) do
@@ -87,6 +98,13 @@ for _, k in ipairs(kids) do
 	end
 end
 assert(path and #path.points >= 60, "no racing line from stunt_yard")
+assert(loop_e and #facets >= 24, "no loop from stunt_yard")
+-- (the way into the loop: its first facets' way)
+local loop_d = {facets[2].pos[1] - facets[1].pos[1], facets[2].pos[3] - facets[1].pos[3]}
+do
+	local l = math.sqrt(loop_d[1] ^ 2 + loop_d[2] ^ 2)
+	loop_d = {loop_d[1] / l, loop_d[2] / l}
+end
 assert(#cps == 3 and math.floor(cps[1].pos[2]) == 5, "checkpoint 1 not on the deck (y 5): " ..
 	tostring(cps[1] and cps[1].pos[2]))
 local yw = MV.world{cell = function() return nil end, plane = 1, horizontal = true,
@@ -113,6 +131,9 @@ local function lap(skill)
 	local inp = {f = 0, r = 0, jump = 0}
 	local done, last, steps = 0, 1, 0
 	local over, under, air, most, landed, flown, high, off, fast = 0, 0, 0, 0, 0, 0, 0, nil, 0
+	-- (the loop: steps on it, its up's lowest y there, the steps since off it,
+	-- level and on its tyres then)
+	local looped, low, since, level = 0, 1, nil, false
 	MV.steps(car, s, {inp}, 1 / p.rate, p.substeps, yw, p)
 	while done < n do
 		if steps % per == 0 then
@@ -133,6 +154,16 @@ local function lap(skill)
 			assert(name ~= "crash" and name ~= "smash", string.format("skill %d: %s (%s) at " ..
 				"%.1f,%.1f,%.1f after %.1f s", skill, name, tostring(e[2]), s.pos[1], y,
 				s.pos[3], t))
+		end
+		if s.lp then
+			looped, since = looped + 1, 0
+			low = math.min(low, s.up and s.up[2] or 1)
+		elseif since then
+			since = since + 1
+			if since == p.rate then
+				level = not s.air and math.abs(tonumber(s.pt) or 0) < 0.05 and
+					math.abs(tonumber(s.rl) or 0) < 0.05 and math.abs(y - 0.555) < 0.05
+			end
 		end
 		if at_crossing(s) then
 			assert(math.abs(y - 5.055) < 0.05 or math.abs(y - 0.555) < 0.05, string.format(
@@ -164,12 +195,16 @@ local function lap(skill)
 	end
 	assert(over > 0 and under > 0, string.format("skill %d: %d steps over the crossing, %d under",
 		skill, over, under))
+	assert(looped > 0 and low < -0.95 and level, string.format("skill %d: %d steps on the loop, " ..
+		"its up's y %.2f at the lowest, %s a second after it", skill, looped, low,
+		level and "level" or "not level"))
 	assert(air > 0.5 and most > 0.3 and landed >= 2, string.format("skill %d: %.2f s in the " ..
 		"air, %.2f m over the floor at most, %d flights", skill, air, most, landed))
 	print(string.format("ok: a bot at skill %d drove a lap of the figure eight in %.1f s, over the " ..
 		"bridge (%d steps on its deck) and under it (%d), %d flights over 0.2 s (%.2f s, %.2f m " ..
-		"over its floor at most, off its lip at %.1f m/s), never crashed", skill, steps / p.rate, over, under, landed,
-		air, most, fast))
+		"over its floor at most, off its lip at %.1f m/s), round the loop in %.1f s (up %.2f at the " ..
+		"top) and off it level, never crashed", skill, steps / p.rate, over, under, landed,
+		air, most, fast, looped / p.rate, low))
 end
 lap(100)
 lap(50)
@@ -201,3 +236,37 @@ assert(b2 == 1 and not c2 and v2 < v1 - 1.5, string.format("a 2.5 m drop: %.1f m
 assert(c3, "a 12 m drop did not crash")
 print(string.format("ok: dropped 0.4 m it lands at %.1f m/s, 2.5 m slowed to %.1f with a bump, " ..
 	"12 m it crashes", v1, v2))
+
+-- Into the loop at 10 m/s (the gas held): up its side short of the top,
+-- off it, then down (as hard as the landing rules have it: a crash from
+-- there)
+do
+	local p = defaults()
+	local v = 10
+	local s = {pos = {loop_e[1] - 3 * loop_d[1], 0.555, loop_e[2] - 3 * loop_d[2]},
+		yaw = math.deg(math.atan2(loop_d[1], loop_d[2]))}
+	local inp = {{f = 1, r = 0, jump = 0}}
+	MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+	s.c[3], s.c[4] = v * loop_d[1], v * loop_d[2]
+	local on, top, fell, landed, n, crash = false, -1, nil, nil, 0, false
+	while not landed do
+		MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+		n = n + 1
+		for _, e in ipairs(s.events or {}) do
+			crash = crash or type(e) == "table" and e[1] == "crash"
+		end
+		if s.lp then
+			on, top = true, math.max(top, s.pos[2])
+		elseif on and not fell then
+			fell = s.pos[2]
+		elseif fell and not s.air then
+			landed = s.pos[2]
+		end
+		assert(n < 6 * p.rate, string.format("too slow into the loop: %s after 6 s (at %.1f,%.1f,%.1f)",
+			fell and "not landed" or on and "still on it" or "not on it", s.pos[1], s.pos[2], s.pos[3]))
+	end
+	assert(fell > 3 and top < 2 * LOOP_R, string.format("too slow into the loop: off it at %.1f m " ..
+		"(%.1f at the highest)", fell, top))
+	print(string.format("ok: into the loop at %.0f m/s it falls off it at %.1f m and lands at %.2f%s",
+		v, fell, landed, crash and " (a crash)" or ""))
+end

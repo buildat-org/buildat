@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2.5 min (2026-11-23)
+# cost: ~3 min (2026-11-23)
 # covers: apps/workbench/templates/brimstone_stunts/** builtin/kit/types/controls.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/types/path.lua util/kit_racer_drive.py builtin/kit/types/parallax.lua builtin/kit/types/part.lua
 # [KIT_STUNTS] (kit_plan 4z37zzd (1)) The Brimstone Stunts template (Brimstone
 # Speedway's fork in kit/controls' chase camera) on Workbench; one server,
@@ -16,7 +16,7 @@
 #      lap (lap_*.png) and the result card (trial.png).
 #   3. [KIT_STUNTS] (4z37zzd (2)) The heights, from the same samples and the
 #      template's own polygons (the trial scene's generator's): off each
-#      tabletop jump's lip the car over 0.4 m above its floor (the floor as
+#      tabletop jump's lip the car over 0.2 m above its floor (the floor as
 #      the car finds it: the highest top edge at most 0.6 over it, the road
 #      0.555), then on it again; at the figure eight's crossing (the bridge)
 #      the car once on the deck (y 5.055) and once under it (0.555), nowhere
@@ -33,9 +33,18 @@
 #      the first hammer's head swings low (walk_here), pushed out of its reach
 #      (kit/wave on the free kit/hammer: w:circle's sliced boxes), its
 #      samples there (hammer.png).
+#   5. [KIT_STUNTS] (4z37zzd (3)) The loop on that lap (the line through its
+#      entry lane: PATH_PTS): on it (the body's up logged) its up pointing
+#      down at the top (y over 12), the camera's up turned with it (its
+#      camera_frame "body"), the camera never inside one of the loop's facets
+#      (w:ray keeps it out); off it level on the road again, the camera level;
+#      screenshots before it, upside down at its top, after it (loop_*.png).
+#      Then into it at 12 m/s (the driver's TOP): up its side, off it short of
+#      the top and down on the road again.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lap_*.png (the start,
-# the bridge's ramp, its deck, the east, a jump in the air and landed, under
-# the bridge, the second jump, the last straight), $t/trial.png,
+# the bridge's ramp, its deck, the loop, the east, a jump in the air and
+# landed, under the bridge, the second jump, the last straight),
+# $t/loop_before.png, $t/loop_top.png, $t/loop_after.png, $t/trial.png,
 # $t/hammer.png
 #   util/kit_stunts_check.sh
 set -u
@@ -64,8 +73,11 @@ assert ctl["camera"] == "chase" and ctl["chase_follow"] > 0, ctl
 print("TRIAL=%d DIST=%s" % (trial, ctl["distance"]))
 PY
 . "$t/ids"
-# The Bone Yard's line: stunt_yard's default corners (a figure eight)
-export PATH_PTS="-100,10,16 100,10,16 100,68,16 0,68,14 0,-68,14 -100,-68,16"
+# The Bone Yard's line: stunt_yard's default corners (a figure eight),
+# ([KIT_STUNTS] (4z37zzd (3))) 3 m left of the middle into the loop at 58,10
+# (its entry lane, the yard's LOOP.lane; out of it 3 m right), then the
+# middle again (the gantry's hammer swings over the left side)
+export PATH_PTS="-100,10,16 30,10,60 50,13,60 60,13,60 74,10,60 100,10,20 100,68,16 0,68,14 0,-68,14 -100,-68,16"
 
 sock=buildat-stunts-$$
 weston --backend=headless --xwayland --socket=$sock --width=1100 \
@@ -148,7 +160,7 @@ await "$SL" "$m" 10 "local/stunt_race $TRIAL: kitboss starts a time trial"
 # (the lap's frames counted from here: kit_looks starts them over)
 step 10 "kit: looks: " "event kit_looks"
 mc=$(mark "$CL")
-SHOTS_IN_ORDER=1 SHOTS="-100,-10,$t/lap_1_start.png -30,10,$t/lap_2_ramp.png -3,10,$t/lap_3_deck.png 100,39,$t/lap_4_east.png 53,68,$t/lap_5_jump.png 30,68,$t/lap_6_landed.png 0,10,$t/lap_7_under.png -42,-68,$t/lap_8_jump2.png -100,-40,$t/lap_9_last.png" \
+UP_SHOT=$t/loop_top.png SHOTS_IN_ORDER=1 SHOTS="-100,-10,$t/lap_1_start.png -30,10,$t/lap_2_ramp.png -3,10,$t/lap_3_deck.png 47,13,$t/loop_before.png 76,9,$t/loop_after.png 101,46,$t/lap_4_east.png 53,68,$t/lap_5_jump.png 30,68,$t/lap_6_landed.png 0,10,$t/lap_7_under.png -42,-68,$t/lap_8_jump2.png -100,-40,$t/lap_9_last.png" \
 	python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 150 \
 	'panel .* shown, layer [0-9]+: "The flag is down' > "$t/drive.log" 2>&1 ||
 	fail "the driver: $(tail -2 "$t/drive.log")"
@@ -167,7 +179,8 @@ PY
 # Each sample (event kit_body: the body, the camera's place and the chase's
 # yaw in turn): the camera behind the body along its own yaw, near the
 # distance (a wall between shortens it; smoothing and the drawn place lag
-# the step's a little) and above it; the yaw following the car's
+# the step's a little) and above it; the yaw following the car's (on the
+# level: the loop's samples, its up logged, in 5.)
 python3 -I - "$CL" "$mc" "$DIST" <<'PY' || fail "the chase camera ($CL)"
 import math, re, sys
 s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
@@ -177,6 +190,8 @@ for l in s.splitlines():
     m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),", l)
     if m:
         b, c = tuple(map(float, m.groups())), None
+    if "kit: body up " in l:
+        b = None
     m = re.search(r"kit: camera at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+) ", l)
     if m:
         c = tuple(map(float, m.groups()))
@@ -260,13 +275,14 @@ for l in s.splitlines():
         S.append((b, c, math.hypot(float(m[1]), float(m[3]))))
         b = c = None
 assert len(S) > 100, len(S)
-# The jumps: over each one's span, some sample 0.4 m over the floor, a later
-# one on it
+# The jumps: over each one's span, some sample 0.2 m over the floor, a later
+# one on it (0.4 flaked: a sample some 0.15 s apart, a slower lap's lower
+# flight, 0.3 at most once)
 for name, pts, z0, z1 in jumps:
     xs = [p[0] for p in pts]
     on = [(bx, by - floor(bx, by, bz)) for (bx, by, bz), _, _ in S
           if min(xs) - 15 < bx < max(xs) and z0 < bz < z1]
-    up = [i for i, (_, h) in enumerate(on) if h > 0.4]
+    up = [i for i, (_, h) in enumerate(on) if h > 0.2]
     assert up and any(abs(h) < 0.05 for _, h in on[up[-1]:]), (name, xs[0], on)
     print("ok: the jump at x %.0f...%.0f: %d samples, %.2f m over the floor at most, landed" %
           (min(xs), max(xs), len(on), max(h for _, h in on)))
@@ -285,9 +301,95 @@ print("ok: the camera out of every height's prism over %d samples (under the dec
       (len(S), ", ".join("%.2f" % c[1] for c in cu)))
 PY
 	fail "the heights ($CL)"
-for f in lap_1_start lap_2_ramp lap_3_deck lap_4_east lap_5_jump lap_6_landed lap_7_under lap_8_jump2 lap_9_last; do
+for f in lap_1_start lap_2_ramp lap_3_deck loop_before loop_top loop_after lap_4_east lap_5_jump lap_6_landed lap_7_under lap_8_jump2 lap_9_last; do
 	[ -f "$t/$f.png" ] || fail "no screenshot $t/$f.png ($t/drive.log)"
 done
+
+# 5. The loop on the lap: upside down at its top, the camera turned with it
+# and out of its facets; level after it
+cat > "$t/loop.py" <<'PY'
+import json, math, re, sys
+def samples(path, at):
+    """Each sample: the body's place, its up (None off a loop), the camera's
+    place and up"""
+    s = open(path, "rb").read()[at:].decode(errors="replace")
+    S, b, u = [], None, None
+    for l in s.splitlines():
+        m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),", l)
+        if m:
+            b, u = tuple(map(float, m.groups())), None
+        m = re.search(r"kit: body up (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", l)
+        if m:
+            u = tuple(map(float, m.groups()))
+        m = re.search(r"kit: camera at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+) turn "
+                      r"(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", l)
+        if m and b:
+            c = tuple(map(float, m.groups()[:3]))
+            w, x, y, z = map(float, m.groups()[3:])
+            cu = (2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x))
+            S.append((b, u, c, cu))
+            b = u = None
+    return S
+def facets(path):
+    """The trial's loop facets and rails: their frame (move.lua's rotation:
+    yaw, then pitch, then roll), outline and depth"""
+    d = json.load(open(path))
+    scene = {e["name"]: e["id"] for e in d["entities"] if e.get("kind") == "scene"}
+    gen = [e["id"] for e in d["entities"] if e.get("parent") == scene["trial"] and
+           e["components"][0]["type"] == "local/stunt_yard"][0]
+    out = []
+    for e in d["entities"]:
+        if e.get("parent") == gen and e.get("name", "").startswith("the loop"):
+            def rot(a, k):
+                c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+                return {"y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+                        "x": [[1, 0, 0], [0, c, -s], [0, s, c]],
+                        "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[k]
+            def mul(a, b):
+                return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+            R = mul(rot(e.get("yaw", 0), "y"), mul(rot(e.get("pitch", 0), "x"), rot(e.get("roll", 0), "z")))
+            p = e["components"][0]["params"]
+            out.append((e["pos"], R, p["points"], p.get("depth", 1)))
+    return out
+def in_facet(f, q):
+    (px, py, pz), R, pts, dep = f
+    r = (q[0] - px, q[1] - py, q[2] - pz)
+    lx, ly, lz = (sum(R[i][k] * r[i] for i in range(3)) for k in range(3))
+    if abs(lz) > dep / 2:
+        return False
+    c = False
+    for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1]):
+        if (ay > ly) != (by > ly) and lx < ax + (bx - ax) * (ly - ay) / (by - ay):
+            c = not c
+    return c
+PY
+python3 -I - "$CL" "$mc" "$here/apps/workbench/templates/brimstone_stunts/composition.json" "$t/loop.py" <<'PY' ||
+import sys
+exec(open(sys.argv[4]).read())
+S = samples(sys.argv[1], int(sys.argv[2]))
+F = facets(sys.argv[3])
+assert len(F) >= 72, len(F)
+on = [i for i, (_, u, _, _) in enumerate(S) if u]
+assert on, "no sample on the loop"
+# (the top: the body's up its lowest; the camera's up turned toward it)
+top = min(on, key=lambda i: S[i][1][1])
+(b, u, c, cu) = S[top]
+assert u[1] < -0.8 and b[1] > 12, ("not upside down at the top", b, u)
+lean = sum(a * k for a, k in zip(u, cu))
+assert cu[1] < 0.3 and lean > 0.3, ("the camera not turned with the car", u, cu)
+bad = [(S[i][2], S[i][0]) for i in range(len(S)) if any(in_facet(f, S[i][2]) for f in F)]
+assert not bad, ("the camera inside a facet", bad[:5])
+# (after it: on the road again, level, the camera level)
+after = [S[i] for i in range(on[-1] + 1, len(S)) if 66 < S[i][0][0] < 95 and S[i][0][2] < 17]
+assert after and all(abs(b[1] - 0.555) < 0.06 and not u for b, u, _, _ in after), after[:3]
+# (its up the chase's pitch, 14 degrees, off the vertical)
+assert after[-1][3][1] > 0.95, ("the camera not level after the loop", after[-1])
+print("ok: the loop: %d samples on it, at its top (%.1f m) the car's up %.2f,%.2f,%.2f, the "
+      "camera's %.2f,%.2f,%.2f (%.2f along it); the camera in no facet over %d samples; %d "
+      "after it level on the road, the camera's up %.3f" % (len(on), b[1], u[0], u[1], u[2],
+      cu[0], cu[1], cu[2], lean, len(S), len(after), after[-1][3][1]))
+PY
+	fail "the loop ($CL)"
 
 # 4. The scenery on the lap; the frames' time; a hammer met
 step 10 "kit: looks: " "event kit_looks"
@@ -357,6 +459,35 @@ assert max(off) < 8 and off[-1] > 1.5, (off, at)
 print("ok: a hammer met: the car put under its head's low point, found %.1f m off it "
       "(%.2f,%.2f) over %d samples" % (off[-1], at[-1][0], at[-1][2], len(at)))
 PY
+# Into the loop too slow: a trial again (a finished one holds the car), the
+# car put on the line short of the loop in its countdown, driven at 12 m/s
+# at most along it from its GO; up the loop's side, off it, down on the road
+mh=$(mark "$SL")
+cmd "frames 3" 'click Button "Again"'
+await "$SL" "$mh" 10 "kitboss starts a time trial"
+mh=$(mark "$SL")
+cmd 'event kit_edit {"op": "mode", "on": true}' 'event kit_edit {"op": "walk_here", "pos": [16, 0.555, 10]}'
+await "$SL" "$mh" 10 "kitboss walks here"
+step 10 "kit editor: edit mode off" "frames 3" 'event kit_edit {"op": "mode", "on": false}'
+ms=$(mark "$CL")
+TOP=12 python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 12 NEVER > "$t/drive_slow.log" 2>&1
+python3 -I - "$CL" "$ms" "$t/loop.py" <<'PY' || fail "too slow into the loop ($CL, $t/drive_slow.log)"
+import sys
+exec(open(sys.argv[3]).read())
+S = samples(sys.argv[1], int(sys.argv[2]))
+on = [i for i, (_, u, _, _) in enumerate(S) if u]
+assert on, "never on the loop"
+high = max(S[i][0][1] for i in on)
+low = min(S[i][1][1] for i in on)
+fell = [i for i in range(on[0], len(S)) if not S[i][1] and S[i][0][1] > 3]
+assert high > 4 and low > -0.95 and fell, ("not off its side", high, low)
+# (down: under 1.5 m and still, on the road or the loop's foot)
+down = [i for i in range(fell[0], len(S) - 1) if not S[i][1] and S[i][0][1] < 1.5 and
+        abs(S[i + 1][0][1] - S[i][0][1]) < 0.05]
+assert down, ("not down again", S[fell[0]:fell[0] + 10])
+print("ok: into the loop at 12 m/s: up it to %.1f m (its up %.2f at the lowest), off it at %.1f m, "
+      "down at %.2f,%.2f,%.2f" % (high, low, S[fell[0]][0][1], *S[down[0]][0]))
+PY
 cmd "quit"
-echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading, over two jumps and the bridge and under it, its scenery on the way; a hammer met; screenshots $t/lobby.png $t/lap_*.png $t/trial.png $t/hammer.png"
+echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading, over two jumps and the bridge and under it, round the loop upside down, its scenery on the way; a hammer met; too slow off the loop; screenshots $t/lobby.png $t/lap_*.png $t/loop_*.png $t/trial.png $t/hammer.png"
 # vim: set noet ts=4 sw=4:
