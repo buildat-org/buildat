@@ -207,10 +207,11 @@ namespace interface
 //              the state's keys ([KIT_AGENT_FEEDBACK_1117]).
 //              An entry is dropped when the body goes ([KIT_REPORT_1123]:
 //              a guest's as they leave, a bot's as it is removed; at a
-//              game's load those of bodies not there): an id is handed
-//              out again. A player with an account keeps their body, so
-//              their entry stays until the round's start resets the
-//              state, in a persistent world for good. Keys other than
+//              game's load those of bodies not there, a guest's at a stop
+//              included: it is not saved). A player with an account
+//              keeps their body, so their entry stays until the round's
+//              start resets the state, in a persistent world for good.
+//              Keys other than
 //              "player:<id>"/"bot:<id>" are left alone.
 //              [CRAG_BEST_RESET] A kept = true one (not
 //              per_player) play never resets: Play, Stop, a round's start,
@@ -631,11 +632,12 @@ namespace interface
 //   on_leave, a guest's entity may be gone by then: its id still).
 //   Players are entities: each player has one in their scene (kind
 //   "player", made the first time they come, its id theirs from then on,
-//   1000000 and up),
+//   1000000 and up, never handed out again),
 //   carrying each type with `player = true` -- Kit's kit/inventory (the
 //   default inventory provider) and kit/score -- not placed, not edited;
 //   their state is play state (the round's start resets it), kept in the
-//   runtime row (its "players": {name: {id, aside}}). A type with
+//   runtime row (its "players": {name: {id, aside}}; a guest's not, an
+//   agent's play body's neither). A type with
 //   `reads_players = true` reads every player: c.players = {{id, name, here,
 //   state = {type = state}, scene}}: every scene's players, each with
 //   the scene they are in ([KIT_AGENT_FEEDBACK_1117] "" none); a

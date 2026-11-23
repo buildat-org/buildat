@@ -2011,7 +2011,9 @@ function M.walk_finger(x, y)
 end
 
 local function touch_begin(id, x, y)
-	if not E.editing then
+	-- [UI_MODAL_DIM_LEFT] a dialog's or the pause menu's, as mouse_down's
+	-- (a finger on the palette under the shade pressed it)
+	if not E.editing or NT.screen_over() then
 		return
 	end
 	local item = palette_at(x, y)

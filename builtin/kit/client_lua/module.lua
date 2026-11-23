@@ -114,6 +114,16 @@ local function label(parent, s, width)
 	return t
 end
 
+-- [UI_MODAL_DIM_LEFT] Whether a screen pushed over the game (the pause
+-- menu, a dialog) is over b: b not in it (in one top-level element with
+-- it), the music editor's buttons being in its own
+local function screen_over(b)
+	local us = require("buildat/extension/uistack")
+	local top = (us.safe or us).main:top()
+	return top ~= nil and not top:GetName():find("game is running", 1, true) and
+			b:IsDrawnOver(top) ~= nil
+end
+
 local function button(parent, s, fn, down)
 	local b = parent:CreateChild("Button")
 	b:SetStyleAuto()
@@ -126,8 +136,12 @@ local function button(parent, s, fn, down)
 	if down then
 		t:SetColor(magic.Color(1.0, 0.85, 0.3))
 	end
+	-- (a Kit window beside the screen, under its shade, took the clicks:
+	-- the editor's bar, inspector and palette)
 	magic.SubscribeToEvent(b, "Released", function()
-		fn()
+		if not screen_over(b) then
+			fn()
+		end
 	end)
 	return b, t
 end
