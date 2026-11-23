@@ -1825,14 +1825,14 @@
 		const char *iso = getenv("BUILDAT_ISOLATED");
 		isolated = iso && ss_(iso) == "1";
 		// iPadOS says it is a Mac, with touch
-		const int os = EM_ASM_INT({
+		const int web_os = EM_ASM_INT({
 			var ua = navigator.userAgent || '';
 			if(/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) &&
 					navigator.maxTouchPoints > 1))
 				return 1;
 			return /Android/.test(ua) ? 2 : 0;
 		});
-		platform = os == 1 ? "web_ios" : os == 2 ? "web_android" : "web";
+		platform = web_os == 1 ? "web_ios" : web_os == 2 ? "web_android" : "web";
 #else
 		memory_mb = (double)(magic::GetTotalMemory() / (1024 * 1024));
 		const ss_ p = magic::GetPlatform().CString();
