@@ -3230,6 +3230,15 @@ do
 	install({M = M, E = E, O = O, log = log})
 end
 
+-- ---- [KIT_PLAYTEST_REC] A builder's playtest recorded: rec.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/rec.lua")
+	assert(ok and type(install) == "function", "kit: rec.lua: " ..
+			tostring(err))
+	install({M = M, E = E, O = O, log = log, STYLE = STYLE, text = text,
+		row = row, button = button})
+end
+
 -- ---- [KIT_SOUNDS] The project's sounds, played: sounds.lua
 -- (before the editor: its Sounds tab's)
 do

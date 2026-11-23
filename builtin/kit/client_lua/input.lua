@@ -69,6 +69,9 @@ local KIT_KEYS = {
 	{id = "drop", label = "Drop one held item (Ctrl: all)",
 		default = "Q"},
 	{id = "edit", label = "Turn edit mode on or off", default = "F6"},
+	-- [KIT_PLAYTEST_REC] (rec.lua)
+	{id = "mark", label = "Mark this moment for the game's agent (a builder's)",
+		default = "F8"},
 	{id = "view_2d", label = "Editor: the 2D view", default = "F1"},
 	{id = "view_3d", label = "Editor: the 3D view", default = "F2"},
 	{id = "view_walk", label = "Editor: the Walk view", default = "F3"},

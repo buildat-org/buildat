@@ -858,6 +858,10 @@ function M.add_menu_items(menu)
 	menu.add(function()
 		return E.can_edit and E.bots and "Remove all bots" or nil
 	end, function() send({op = "remove_bots"}) end, {order = 13})
+	-- [KIT_PLAYTEST_REC] while this playtest is recorded (rec.lua)
+	menu.add(function()
+		return M.rec_on and M.rec_on() and "Mark this moment" or nil
+	end, function() M.rec_mark(true) end, {order = 60, page = true})
 	menu.add("Credits...", function() M.show_credits(menu) end,
 			{order = 70, page = true})
 	menu.on_escape(M.escape)
