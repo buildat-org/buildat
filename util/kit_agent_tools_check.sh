@@ -1150,8 +1150,11 @@ elif phase == "stop_play":
         assert call("start") == "Running"
     said, body = join()
     me = body["by"]
+    # (an empty Lua table comes as [] until the entry is set; the body in
+    # pp's zone first: its on_enter's "met" would overwrite an early "set")
+    until(lambda: (entity(s["EP"])["components"][0].get("state", {}).get(
+        "got") or {}).get(me) == "met " + me, "the body's entry in pp's got met")
     call("try_input", {"id": s["EP"], "input": "set", "as": "me"})
-    # (an empty Lua table comes as [] until the entry is set)
     until(lambda: (entity(s["EP"])["components"][0].get("state", {}).get(
         "got") or {}).get(me) == "set " + me, "the body's entry in pp's got")
     save(AB=me)

@@ -1840,8 +1840,95 @@
 				p == "Mac OS X" ? "macos" : p == "Android" ? "android" :
 				p == "iOS" ? "ios" : "other";
 #endif
+		// [KIT_PLAYTEST_REC_2] What a frame's cost depends on: the GPU's
+		// name, the OS's version and (web) the browser's name and major
+		// version, from the user agent. (No comma outside parentheses nor
+		// a backslash in the JS: EM_ASM_PTR would split at the one and the
+		// stringized code eat the other.)
+		// simplified: macOS's version as the agent says it, which Safari
+		// froze at 10.15.7, and an iPad says it is a Mac
+		ss_ os, browser;
+#ifdef __EMSCRIPTEN__
+		char *got = (char*)EM_ASM_PTR({
+			var r = '';
+			try {
+				var gl = (typeof GLctx !== 'undefined' && GLctx) || Module['ctx'];
+				if(gl){
+					r = gl.getParameter(gl.RENDERER) || '';
+					// Firefox names the GPU there (its debug extension
+					// deprecated); Chrome and Safari by the extension
+					if(/^(webkit webgl|mozilla)$/i.test(r)){
+						var e = gl.getExtension('WEBGL_debug_renderer_info');
+						if(e)
+							r = gl.getParameter(e.UNMASKED_RENDERER_WEBGL) || r;
+					}
+				}
+			} catch(x){}
+			var ua = navigator.userAgent || '';
+			var m = null;
+			var os = '';
+			var br = '';
+			if((m = /Windows NT ([0-9.]+)/.exec(ua)))
+				os = 'Windows NT ' + m[1];
+			else if((m = /(?:iPhone|CPU) OS ([0-9_]+)/.exec(ua)))
+				os = 'iOS ' + m[1].split('_').join('.');
+			else if((m = /Mac OS X ([0-9_.]+)/.exec(ua)))
+				os = 'macOS ' + m[1].split('_').join('.');
+			else if((m = /Android ([0-9.]+)/.exec(ua)))
+				os = 'Android ' + m[1];
+			else if(/CrOS/.test(ua))
+				os = 'ChromeOS';
+			else if((m = /Linux ([A-Za-z0-9_]+)/.exec(ua)))
+				os = 'Linux ' + m[1];
+			else if(/Linux/.test(ua))
+				os = 'Linux';
+			var names = ([['Edge', /Edg[A-Za-z]*[/]([0-9]+)/],
+				['Opera', /OPR[/]([0-9]+)/],
+				['Samsung Internet', /SamsungBrowser[/]([0-9]+)/],
+				['Firefox', /(?:Firefox|FxiOS)[/]([0-9]+)/],
+				['Chrome', /(?:Chrome|CriOS)[/]([0-9]+)/],
+				['Safari', /Version[/]([0-9]+)[0-9.]* .*Safari/]]);
+			for(var i = 0; i < names.length; i++){
+				if((m = names[i][1].exec(ua))){
+					br = names[i][0] + ' ' + m[1];
+					break;
+				}
+			}
+			var nl = String.fromCharCode(10);
+			return stringToNewUTF8(r + nl + os + nl + br);
+		});
+		if(got){
+			const ss_ s = got;
+			free(got);
+			const size_t a = s.find('\n'), b = s.find('\n', a + 1);
+			if(self->m_gl_renderer.empty())
+				self->m_gl_renderer = s.substr(0, a);
+			os = s.substr(a + 1, b - a - 1);
+			browser = s.substr(b + 1);
+		}
+#else
+		os = magic::GetOSVersion().CString();
+#endif
+		magic::Graphics *g = self->GetSubsystem<magic::Graphics>();
+		const app::Options &o = self->m_options;
 		const char *t = getenv("BUILDAT_TOUCH");
 		lua_newtable(L);
+		lua_pushstring(L, self->m_gl_renderer.c_str());
+		lua_setfield(L, -2, "renderer");
+		lua_pushstring(L, g ? g->GetApiName().CString() : "");
+		lua_setfield(L, -2, "api");
+		lua_pushstring(L, os.c_str());
+		lua_setfield(L, -2, "os");
+		if(!browser.empty()){
+			lua_pushstring(L, browser.c_str());
+			lua_setfield(L, -2, "browser");
+		}
+		lua_pushinteger(L, o.graphics.multisampling);
+		lua_setfield(L, -2, "msaa");
+		lua_pushboolean(L, o.graphics.vsync);
+		lua_setfield(L, -2, "vsync");
+		lua_pushinteger(L, o.graphics.max_fps);
+		lua_setfield(L, -2, "max_fps");
 		lua_pushnumber(L, memory_mb);
 		lua_setfield(L, -2, "memory_mb");
 		lua_pushinteger(L, self->m_mesh_threads);
@@ -1852,6 +1939,28 @@
 		lua_setfield(L, -2, "touch");
 		lua_pushstring(L, platform.c_str());
 		lua_setfield(L, -2, "platform");
+		return 1;
+	}
+
+	// [KIT_PLAYTEST_REC_2] idle_rate() -> bool: the frames held at the rate
+	// for a user away (doc/client_api.txt). simplified: on the web only with
+	// web_idle_fps under 60 (the drives' pages, unfocused, ask for 60: their
+	// frames count); a hidden page's at 60 the browser slows anyway
+	static int l_idle_rate(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+#ifdef __EMSCRIPTEN__
+		lua_pushboolean(L, self->m_web_idle &&
+				self->m_options.graphics.web_idle_fps < 60);
+#else
+		magic::Input *in = self->GetSubsystem<magic::Input>();
+		magic::Engine *e = self->GetSubsystem<magic::Engine>();
+		const int max = e ? e->GetMaxFps() : 0;
+		lua_pushboolean(L, in && e && (!in->HasFocus() || in->IsMinimized()) &&
+				(max <= 0 || e->GetMaxInactiveFps() < max));
+#endif
 		return 1;
 	}
 

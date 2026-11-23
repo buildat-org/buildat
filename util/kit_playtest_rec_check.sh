@@ -2,21 +2,29 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1.5 min (2026-11-23)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/rec.lua builtin/kit/client_lua/input.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/module.lua extensions/pause_menu/init.lua
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/rec.lua builtin/kit/client_lua/ui.lua src/client/app_lua.h builtin/kit/client_lua/input.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/module.lua extensions/pause_menu/init.lua
 # [KIT_PLAYTEST_REC] (kit_plan 4z37zzf) A builder's playtest recorded for
 # the game's agent. Workbench's server of Puzzle room (a project made of
 # the template's zip); kitboss (the admin) on a headless weston's
 # Xwayland of the check's own (its clipboard carries the agent token):
-#   1. kitboss makes a builder token, leaves edit mode (F6), walks (W),
-#      presses a kit/ui_button "Press me" the agent placed, marks a moment
-#      by the key (F8): the note typed, Enter; the pause menu's "Mark this
-#      moment" opened and Escape: cancelled, back to the menu. kitbob (no
-#      edit rights) plays beside him and is not recorded.
+#   1. kitboss makes a builder token, leaves edit mode (F6), walks (W)
+#      beside a hidden kit/ui_panel the agent placed and (S) beside it shown
+#      with its kit/ui_button "Press me" hidden ([KIT_PANEL_HIDDEN_INPUT]:
+#      neither stops the walk nor frees the pointer), presses the button
+#      once shown, marks a moment by the key (F8): the note typed, Enter;
+#      [KIT_PLAYTEST_REC_2] his window unfocused for a while ("focus off"):
+#      idle time; the pause menu's "Mark this moment" opened and Escape:
+#      cancelled, back to the menu. kitbob (no edit rights) plays beside
+#      him and is not recorded.
 #   2. get_session: the list has kitboss's session with its summary
-#      (player, start, length, scene, median fps, 1 mark, no errors) and
+#      (player, start, length, scene, median fps with the draw calls,
+#      triangles, Kit ms and 3D size, the seconds idle, 1 mark, no errors,
+#      native, its OS and GPU) and
 #      none of kitbob's; its rows: the session's start (native, the
-#      window's size, keyboard/mouse), pos rows (one moving), the press,
-#      perf (fps, the tick's gaps), the mark (note, pos, scene, picture
+#      window's size, keyboard/mouse, its renderer, API, OS and settings),
+#      pos rows (one moving), the press, perf (fps, the tick's gaps, draws,
+#      tris, kit_ms, render; [KIT_PLAYTEST_REC_2] idle_s apart: a row of
+#      idle time alone has no figures, the head's sum the rows'), the mark (note, pos, scene, picture
 #      480 wide) and its picture as an image block of that size; kinds
 #      filters; a session not there refused.
 #   3. The server again with BUILDAT_KIT_REC_CAP a little over the first
@@ -25,7 +33,9 @@
 #      at its end (the newest never is, past the cap alone or not).
 #   4. Workbench's web client in headless Firefox (skipped without it or
 #      web/): webboss New from Puzzle room, F6: recorded as web, its perf
-#      report, a mark by the pause menu's item with a picture 480 wide.
+#      report, a mark by the pause menu's item with a picture 480 wide;
+#      the browser, OS and API logged; web_idle_fps 30 and no input for a
+#      minute (buildatInputAt set back): idle time reported.
 # The mark's picture, kept with KEEP_TMP=1: $t/mark.png
 #   util/kit_playtest_rec_check.sh
 set -u
@@ -165,20 +175,30 @@ def sessions(**a):
     return s["sessions"]
 if phase == "button":
     # A kit/ui_button "Press me" on a kit/ui_panel (a bare one is not up in
-    # mouse look), placed in the round after the walk (a panel with a
-    # button stops the walk: it wants the clicks)
+    # mouse look), both hidden: [KIT_PANEL_HIDDEN_INPUT] a panel takes no
+    # clicks (nor stops the walk) until it and a button in it are shown
     num = lambda text: int(re.search(r"placed \S+ (\d+)", text).group(1))
     P = num(call("place", {"type": "kit/ui_panel", "pos": [0, 0, 0],
-        "params": {"title": "Test", "shown": True}})[0])
-    num(call("place", {"type": "kit/ui_button", "pos": [0, 0, 0], "parent": P,
-        "params": {"label": "Press me"}})[0])
+        "params": {"title": "Test"}})[0])
+    B = num(call("place", {"type": "kit/ui_button", "pos": [0, 0, 0], "parent": P,
+        "params": {"label": "Press me", "shown": False}})[0])
+    open(out + "/panel", "w").write("%d %d" % (P, B))
+elif phase in ("show_panel", "show_button"):
+    P, B = map(int, open(out + "/panel").read().split())
+    call("set_param", {"id": P if phase == "show_panel" else B, "param": "shown",
+        "value": True})
 elif phase == "list":
     ss = sessions()
     boss = [s for s in ss if s["summary"].startswith("kitboss, ")]
     assert len(boss) == 1 and not any("kitbob" in s["summary"] for s in ss), ss
     s = boss[0]
-    assert re.match(r"kitboss, \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ, \d+ min \d+ s, "
-        r"scenes world, median [0-9.]+ fps, 1 mark, 0 errors$", s["summary"]), s
+    # ([KIT_PLAYTEST_REC_2] the frames' cost, the time idle: "focus off";
+    # the client's OS and GPU)
+    mt = re.match(r"kitboss, \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ, \d+ min \d+ s, "
+        r"scenes world, median [0-9.]+ fps \(\d+ draws, \d+ triangles, Kit "
+        r"[0-9.]+ ms, \d+x\d+\), (\d+) s idle, 1 mark, 0 errors; native, "
+        r"Linux [^,]+, .+ \(GL\w+\)$", s["summary"])
+    assert mt and int(mt.group(1)) > 0, s
     assert s["platform"] == "native" and s["input"] == "keyboard/mouse", s
     assert sessions(player="kitbob") == [], "kitbob's"
     open(out + "/session", "w").write("%d %d" % (s["session"], s["bytes"]))
@@ -193,6 +213,12 @@ elif phase == "rows":
     st = kinds["session"][0]
     assert st["what"] == "start" and st["t"] == 0 and st["platform"] == "native" and \
         st["input"] == "keyboard/mouse" and st["screen"] == [1024, 700], st
+    # [KIT_PLAYTEST_REC_2] the client's GPU, OS and settings
+    assert all(isinstance(st.get(k), str) and st[k] for k in ("renderer", "api",
+        "os")) and "browser" not in st, st
+    assert st["msaa"] >= 1 and isinstance(st["vsync"], bool) and \
+        st["max_fps"] >= 0 and st["mesh_threads"] >= 0 and st["memory_mb"] > 0 and \
+        0 < st["render_scale"] <= 4 and 0 < st["ui_scale"] <= 8, st
     assert kinds["session"][-1]["what"] == "end", kinds["session"]
     pos = kinds["pos"]
     assert len(pos) >= 3 and all(len(p["pos"]) == 3 and "scene" in p for p in pos), pos
@@ -202,10 +228,20 @@ elif phase == "rows":
     assert any(e["what"] == "emit" and e["output"] == "pressed" and
         e["entity"] == ui["entity"] for e in ev for ui in ev if ui["what"] == "ui"), ev
     assert any(e["what"] == "edit" and e["on"] is False for e in ev), ev
-    pf = kinds["perf"][0]
+    pfs = kinds["perf"]
+    pf = [p for p in pfs if "fps" in p][0]
     assert pf["fps"] > 0 and pf["fps5"] > 0 and pf["fps5"] <= pf["fps"] + 0.1 and \
         pf["worst_ms"] > 0 and pf["frames"] > 10 and "tick_ms" in pf and \
         pf["tick_max_ms"] >= pf["tick_ms"], pf
+    # [KIT_PLAYTEST_REC_2] the frames' cost; the idle time (kitboss's window
+    # unfocused by "focus off") apart from the figures: a row of it alone
+    # has none, and the head's sum is the rows'
+    assert pf["draws"] > 0 and pf["tris"] > 0 and 0 <= pf["kit_ms"] < 1000 and \
+        len(pf["render"]) == 2 and min(pf["render"]) > 0, pf
+    idle = [p for p in pfs if p.get("idle_s", 0) > 0]
+    assert idle and all("fps" in p or p.get("idle_s", 0) > 0 for p in pfs), pfs
+    assert any("fps" not in p and "draws" not in p for p in idle), ("no row of idle time alone", pfs)
+    assert abs(sum(p["idle_s"] for p in idle) - r["head"]["idle_s"]) < 0.5, (r["head"], pfs)
     mk = kinds["mark"]
     assert len(mk) == 1, mk
     m = mk[0]
@@ -233,7 +269,7 @@ elif phase == "capped":
     ss = sessions()
     assert [s["session"] for s in ss] == [sid + 1], ss
     assert ss[0]["summary"].startswith("kitboss, ") and \
-        ss[0]["summary"].endswith(", 1 mark, 0 errors"), ss
+        re.search(r", 1 mark, 0 errors(; .*)?$", ss[0]["summary"]), ss
 print("ok:", phase)
 PY
 mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
@@ -282,15 +318,38 @@ tok=$(clip)
 cmd "frames 3" 'click Button "Done"'
 step 10 "pause: the menu shown" "frames 3" "keypress Escape"
 step 10 "pause: the menu closed" "frames 3" "keypress Escape"
-mc=$(mark "$CL")
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
-# Walks: two goes at it (a held key may read as not held for a while)
-for i in 1 2; do
-	step 10 "kit: body at" "frames 3" "keydown w" "frames 60" "keyup w" "frames 3" \
-		"event kit_body"
-done
 mc=$(mark "$CL")
 mcp button
+await "$CL" "$mc" 10 'kit: ui [0-9]+ button .* hidden.*: "Press me"'
+# [KIT_PANEL_HIDDEN_INPUT] Walks (two goes each: a held key may read as not
+# held for a while) beside the hidden panel, then beside it shown with its
+# button still hidden: no clicks wanted, the walk goes on (and no pointer
+# freed, where mouse look hid it); the button shown, its click presses it
+body() { tail -c +$((mw + 1)) "$CL" | grep -aoP 'kit: body at \K[-0-9.]+,[-0-9.]+,[-0-9.]+' | tail -1; }
+walk() # <what> <key>: it walks beside that
+{
+	local b0 b1
+	mw=$(mark "$CL")
+	step 10 "kit: body at" "frames 3" "event kit_body"
+	b0=$(body)
+	for i in 1 2; do
+		step 10 "kit: body at" "frames 3" "keydown $2" "frames 60" "keyup $2" \
+			"frames 3" "event kit_body"
+	done
+	b1=$(body)
+	python3 -c "import sys; a, b = ($b0), ($b1); sys.exit(abs(b[0] - a[0]) + abs(b[2] - a[2]) < 1)" ||
+		fail "no walk beside $1: $b0 -> $b1 ($CL)"
+	tail -c +$((mc + 1)) "$CL" | grep -aq "kit: ui: the pointer freed for a panel's button" &&
+		fail "the pointer freed for $1 ($CL)"
+	echo "ok: walked $b0 -> $b1 beside $1"
+}
+walk "a hidden panel with a button" w
+mcp show_panel
+await "$CL" "$mc" 10 'kit: ui [0-9]+ panel .* shown.*: "Test"'
+walk "a shown panel with its button hidden" s
+mc=$(mark "$CL")
+mcp show_button
 await "$CL" "$mc" 10 'kit: ui [0-9]+ button .* shown.*: "Press me"'
 m=$(mark "$SL")
 cmd "frames 10" 'click Button "Press me"'
@@ -299,6 +358,12 @@ f8_mark "the door here sticks"
 await "$CL" 0 10 "kit: rec: the first perf report sent, [0-9]+ frames"
 # kitbob now (his window takes the input focus: kitboss's held keys would
 # read as not held)
+# [KIT_PLAYTEST_REC_2] kitboss's window unfocused (the drive's forced focus
+# dropped: a driven window never has the desk's): his frames at the idle
+# rate, a perf report of idle time alone (no figures) within two of them
+step 15 "kit: rec: idle time reported, [0-9.]+ s" "focus off"
+await "$CL" 0 15 "kit: rec: a report of idle time alone, [0-9.]+ s"
+step 10 "command: focus on" "focus on"
 BUILDAT_JOIN_CREATE=1 client bob 4
 BOB=$CLIENT
 CL=$t/bob.log
@@ -368,7 +433,7 @@ web=skipped
 if command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm" ]; then
 	cat > "$t/steps.json" <<'J'
 [
- ["nav", "${URL}"],
+ ["nav", "${URL}?pref=web_idle_fps=30"],
  ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
  ["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
  ["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
@@ -395,6 +460,8 @@ if command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm"
  ["waitlog", "kit: mark: the picture taken, [0-9]+ bytes", 10], ["frames", 2],
  ["type", "on the web"], ["frames", 2], ["key", "Enter"],
  ["waitlog", "kit: mark: sent, 10 bytes of note, [0-9]+ bytes of picture", 10],
+ ["eval", "window.Module.buildatInputAt = 0"],
+ ["waitlog_any", "kit: rec: idle time reported, [0-9.]+ s", 15],
  ["frames", 10]
 ]
 J
@@ -402,6 +469,7 @@ J
 		fail "the web drive ($t/web)"
 	for re in "Playtest session 1: webboss's play recorded" \
 			"Playtest session 1: webboss's client: web, [0-9]+x[0-9]+, keyboard/mouse" \
+			"Playtest session 1: webboss's client runs on Firefox [0-9]+, Linux.* \(GLES[0-9]\)" \
 			"Playtest session 1: webboss marked a moment \(10 bytes of note, a picture 480x[0-9]+"; do
 		grep -aqE "$re" "$t/web/server.log" || fail "no \"$re\" in $t/web/server.log"
 	done
@@ -411,4 +479,4 @@ echo "ok: the web client: $web"
 for f in "$t"/*.log; do
 	grep -qaF "${tok#bat_}" "$f" && fail "the token in $f"
 done
-echo "PASS: a builder's playtest recorded (start, places, a UI press, perf, a mark with its 480x328 picture by F8; the pause menu's mark cancelled by Escape), a non-builder's not; get_session's list and rows, kinds and since; the oldest session dropped past BUILDAT_KIT_REC_CAP; the web client: $web; $t/mark.png"
+echo "PASS: a builder's playtest recorded (start with its GPU, OS and settings, places, walks beside a hidden panel and a hidden button, a UI press, perf with draws, tris, Kit ms and render, idle time apart, a mark with its 480x328 picture by F8; the pause menu's mark cancelled by Escape), a non-builder's not; get_session's list and rows, kinds and since; the oldest session dropped past BUILDAT_KIT_REC_CAP; the web client: $web; $t/mark.png"

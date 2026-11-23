@@ -140,6 +140,12 @@ max_fps <n>
     for this run only): Kit's server camera draws 4 a second while idle, 20 at
     work.
 
+focus on|off
+    off: the input focus a sequence forces dropped, so the window reads as
+    unfocused (a driven window never has the desk's focus) and draws at
+    Urho3D's unfocused rate, buildat.idle_rate() true; keys and clicks are
+    dropped until focus on gives it back ([KIT_PLAYTEST_REC_2]).
+
 frames <n>
     n frames rendered: the frame after an input has read it, a UI laid out
     and drawn after a click or a key. Where a delay of a second waited for

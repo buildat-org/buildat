@@ -2546,9 +2546,13 @@ end
 -- as a drive's idle reads it ([KIT_AGENT_NEXT_1]: the server's camera
 -- waits for it before it draws)
 buildat.safe.idle_pending = __buildat_idle_pending
--- resources() -> {memory_mb, mesh_threads, isolated, touch, platform}: what
--- this client got to run in ([WEB_MESH_OFF_THREAD]; doc/client_api.txt)
+-- resources() -> {memory_mb, mesh_threads, isolated, touch, platform,
+-- renderer, api, os, browser, msaa, vsync, max_fps}: what this client got to
+-- run in ([WEB_MESH_OFF_THREAD], [KIT_PLAYTEST_REC_2]; doc/client_api.txt)
 buildat.safe.resources = __buildat_resources
+-- idle_rate() -> whether the frames are held at the rate for a user away
+-- ([KIT_PLAYTEST_REC_2]; doc/client_api.txt)
+buildat.safe.idle_rate = __buildat_idle_rate
 -- The join's loading screen ([JOIN_STRIPES]): state.cpp says what the wait
 -- for the game's files is at, and ui_utils draws it. An error in it is
 -- the log's, not the client's end.

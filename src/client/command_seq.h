@@ -89,6 +89,9 @@ namespace command_seq
 		// max_fps <n>: the engine's frame limit from now on (the server's
 		// camera idle, [KIT_AGENT_FEEDBACK_1117])
 		MaxFps,
+		// focus on|off: the forced input focus kept or dropped
+		// ([KIT_PLAYTEST_REC_2]: an unfocused window's idle rate)
+		Focus,
 		// window <w> <h>: the window made that size, windowed, by
 		// Graphics::SetMode as F11 does it: the window and the GL context
 		// made again, every GPU object lost and restored
