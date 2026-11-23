@@ -8,7 +8,7 @@
 #   3 kit/ui_text "Presses: {value}" (top), 4 kit/ui_button "Press me"
 #   (bottom), 5 kit/counter, 6 kit/ui_bar 0..4 (top left), 7 kit/ui_panel
 #   "Hello" for the player (to "player"), under it 8 a kit/ui_text with
-#   "[fire]" and 9 kit/ui_button "Close" (closes), 10 kit/action fire
+#   "[{key:fire}]" and 9 kit/ui_button "Close" (closes), 10 kit/action fire
 #   (key R) and 11 a kit/ui_button bound to it (no label: "Fire");
 #   4 pressed -> 5 count and -> 7 show, 10 pressed -> 7 show, 5 changed ->
 #   3 value and 6 value;
@@ -116,7 +116,7 @@ EOF
 	edit '{"op": "parent", "id": 8, "parent": 7}'
 	set_p 8 anchor '"left"'
 	set_p 8 y 0
-	set_p 8 text '"Only you see this. [fire] fires."'
+	set_p 8 text '"Only you see this. [{key:fire}] fires."'
 	place kit/ui_button 6
 	edit '{"op": "parent", "id": 9, "parent": 7}'
 	set_p 9 label '"Close"'
@@ -258,7 +258,7 @@ want "$s" "UI button 4 pressed by kitboss" "kit/counter 5: count 1 by kitboss" \
 	"Action fire pressed by kitboss" "UI button 9 pressed by kitboss" \
 	"kit/ui_panel 7: shown for kitboss" "kit/ui_panel 7: hidden for kitboss"
 grep -aq 'kit: ui 8 text .*"Only you see this. \[R\] fires."' "$b" ||
-	fail "the dialog's text has no [R] for [fire] ($b)"
+	fail "the dialog's text has no [R] for [{key:fire}] ($b)"
 # [KIT_UI_CROSSHAIR] No crosshair over the dialog (a panel with a button
 # wants the clicks), back once Close hid it
 awk '/kit: action fire pressed/ && !p { p = 1 }
