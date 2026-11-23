@@ -8,7 +8,7 @@
 -- charred black. Facing +z, turned by the pose's heading. Its effects from
 -- the pose (stunt_car.lua's head, its slots by name): exhaust smoke
 -- (more on the throttle), road dust by the floor and the speed, sparks
--- where it scrapes a wall, flames out of the back boosted, tyre marks
+-- where it scrapes a wall, flames out of the back boosted (or on a boost pad), tyre marks
 -- where a tyre slips much (coloured by the floor), and on this player's own
 -- car the camera shaken in the frame its predicted step hits a wall hard.
 local magic = require("buildat/extension/urho3d")
@@ -260,7 +260,11 @@ local function effects(s, node, q, h, flags, p)
 		local px, pz = world(0.55, -2.45)
 		puff("smoke", LOOKS.smoke, px, y + 0.4, pz, -sh, -ch)
 	end
-	if bit(flags, 1) then
+	-- (4z38: a boost pad's floor, SURF's 5, flames too)
+	if surf == 5 then
+		said_once("boost_pad", x, y, z)
+	end
+	if bit(flags, 1) or surf == 5 then
 		local px, pz = world(0, -2.6)
 		puff("flame", LOOKS.flame, px, y + 0.5, pz, -sh, -ch)
 	end
