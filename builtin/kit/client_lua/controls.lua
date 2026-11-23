@@ -941,7 +941,14 @@ function frame_parent(n)
 	if not n.fp then
 		local v = n.node:GetVar("kit_frame")
 		local w = n.node:GetVar("kit_parent")
-		n.fp = {v:IsEmpty() and 0 or v:GetInt(), w:IsEmpty() and 0 or w:GetInt()}
+		local fp = {v:IsEmpty() and 0 or v:GetInt(), w:IsEmpty() and 0 or w:GetInt()}
+		-- ([KIT_STUNTS_PERF] a node's frame or parent changed: every node's
+		-- links_kept found again)
+		local was = n.fp_was
+		if was and (was[1] ~= fp[1] or was[2] ~= fp[2]) then
+			C.fp_gen = (C.fp_gen or 0) + 1
+		end
+		n.fp, n.fp_was = fp, fp
 	end
 	return n.fp[1], n.fp[2]
 end
@@ -974,6 +981,21 @@ function M.links_of(id, n)
 		pid = pp
 	end
 	return nil
+end
+
+-- [KIT_STUNTS_PERF] M.links_of kept per node till the links, the node, the
+-- nodes there or any node's frame or parent change (a walk up its parents
+-- for each of a scene's nodes each frame was ~1.8 ms of a Stunts lap's).
+-- simplified: a frame or parent changed is seen as frame_parent reads it
+-- again, the nodes after it that frame at the next
+local function links_kept(id, n)
+	local k = n.lk_key
+	if not (k and k[1] == C.links and k[2] == n.fp and k[3] == P.nodes_gen and
+			k[4] == C.fp_gen) then
+		n.lk = M.links_of(id, n)
+		n.lk_key = {C.links, n.fp, P.nodes_gen, C.fp_gen}
+	end
+	return n.lk
 end
 
 -- A link's change at the draw's time, once a frame
@@ -1084,7 +1106,7 @@ function M.moving_tick()
 		C.pose_world:pose_at(C.draw_t)
 	end
 	for id, n in pairs(P.nodes) do
-		local links = M.links_of(id, n)
+		local links = links_kept(id, n)
 		-- A body on a deck: its rest in "kit_rest" (kit.cpp's place_player)
 		if links and frame_parent(n) ~= 0 then
 			local rs = n.node:GetVar("kit_rest"):GetString()
