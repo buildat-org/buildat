@@ -336,11 +336,20 @@ local function state(n, id, key)
 	if type(own) == "table" and own[key] ~= nil then
 		return own[key]
 	end
-	local v = n.node:GetVar("kit:" .. key)
-	if v:IsEmpty() then
-		return nil
+	-- ([KIT_STUNTS_PERF] kept till the server changes the node: module.lua's
+	-- n.vgen)
+	local c = n.vars
+	if not (c and c.gen == n.vgen) then
+		c = {gen = n.vgen}
+		n.vars = c
 	end
-	return network.parse_json(v:GetString())
+	local got = c[key]
+	if not got then
+		local v = n.node:GetVar("kit:" .. key)
+		got = v:IsEmpty() and {} or {network.parse_json(v:GetString())}
+		c[key] = got
+	end
+	return got[1]
 end
 
 local function shown_text(s, value)
@@ -851,6 +860,22 @@ end
 
 -- ---- One element's drawing
 
+-- [KIT_STUNTS_PERF] Whether an element's property k is to be written (v
+-- not what was written last; each write a call through the sandbox, some
+-- 20 elements' each frame ~1.5 ms): what was written, per element
+local function differs(r, k, v)
+	local c = r.put
+	if not c or r.put_el ~= r.el then
+		c = {}
+		r.put, r.put_el = c, r.el
+	end
+	if c[k] == v then
+		return false
+	end
+	c[k] = v
+	return true
+end
+
 local function fit_text(r, text, px, aw, ah, pw, pad)
 	local key = text .. "|" .. px .. "|" .. tostring(aw) .. "|" .. tostring(ah) ..
 			"|" .. pw
@@ -882,8 +907,12 @@ local function fit_text(r, text, px, aw, ah, pw, pad)
 			tw = math.max(8, pw - 2 * pad)
 		end
 		r.tw = tw
+		-- (its text set again: its width Urho3D's again)
+		differs(r, "tw", nil)
 	end
-	r.t.width = r.tw
+	if differs(r, "tw", r.tw) then
+		r.t.width = r.tw
+	end
 end
 
 -- [KIT_PLAYER_LIST] A player list's rows ({name, team colour, score}): a
@@ -2101,8 +2130,15 @@ local function update()
 			if drag and drag.id == id and drag.at then
 				x, y = drag.at[1], drag.at[2]
 			end
-			r.el:SetPosition(math.floor(x), math.floor(y))
-			r.el:SetFixedSize(math.floor(w), math.floor(h))
+			-- ([KIT_STUNTS_PERF] each written as it changes: differs())
+			local fx, fy, fw, fh = math.floor(x), math.floor(y), math.floor(w), math.floor(h)
+			r.moved = differs(r, "pos", fx .. " " .. fy) or (pr and pr.moved) or false
+			if r.moved then
+				r.el:SetPosition(fx, fy)
+			end
+			if differs(r, "size", fw .. " " .. fh) then
+				r.el:SetFixedSize(fw, fh)
+			end
 			if u.kind == "players" then
 				r.t:SetPosition(pad, pad)
 			elseif u.kind == "list" then
@@ -2118,7 +2154,8 @@ local function update()
 							e.t.minWidth) / 2)), math.floor((rh - e.t.height) / 2))
 					y = y + rh + math.floor(0.6 * V)
 				end
-			elseif u.kind ~= "panel" then
+			elseif u.kind ~= "panel" and differs(r, "t_at", fw .. " " .. fh .. " " .. tw ..
+					" " .. tostring(r.wrap) .. " " .. tostring(r.px)) then
 				r.t:SetPosition(math.max(1, math.floor((w - tw) / 2)),
 						math.floor((h - r.t.height) / 2))
 			end
@@ -2179,22 +2216,30 @@ local function update()
 				recolor(r, u)
 			end
 			-- (r.vis above)
-			r.el.visible = r.vis
+			if differs(r, "vis", r.vis) then
+				r.el.visible = r.vis
+			end
 			if r.vis and up and r.layer == up and r.kind == "button" and
 					u.action == "pause_menu" then
 				menu_on = true
 			end
-			r.el.enabled = frame or r.kind ~= "text"
+			if differs(r, "enabled", frame or r.kind ~= "text") then
+				r.el.enabled = frame or r.kind ~= "text"
+			end
 			local blink = tonumber(u.blink_below) or 0
 			r.blinking = not E.editing and r.frac ~= nil and blink > 0 and
 					r.frac < blink
+			local op
 			if frame then
-				r.el.opacity = (r.on or r.own) and 0.95 or 0.45
+				op = (r.on or r.own) and 0.95 or 0.45
 			elseif r.blinking then
-				r.el.opacity = ((now * 2) % 1 < 0.5 and 1 or 0.25) *
+				op = ((now * 2) % 1 < 0.5 and 1 or 0.25) *
 						(cp and cp.opacity or 1) * eop
 			else
-				r.el.opacity = (cp and cp.opacity or 1) * eop
+				op = (cp and cp.opacity or 1) * eop
+			end
+			if differs(r, "opacity", op) then
+				r.el.opacity = op
 			end
 			-- (a Text's opacity is its own, not its parent's times it; a
 			-- panel's emphasis it takes)
@@ -2203,7 +2248,7 @@ local function update()
 				r.t_op = top
 				r.t.opacity = top
 			end
-			if r.kind == "button" and r.parts.bg then
+			if r.kind == "button" and r.parts.bg and r.vis then
 				-- simplified: a pointer over it brightens it, no fade
 				local mp = magic.input:GetMousePosition()
 				local sc, sp = magic.ui.scale, r.el.screenPosition
@@ -2219,8 +2264,6 @@ local function update()
 				end
 			end
 			local selected = sel == id or (own_sel and own_sel.name == r.own)
-			local col = selected and M.HOVER or (r.own and
-					magic.Color(0.55, 0.8, 1) or magic.Color(0.8, 0.8, 0.8))
 			-- [KIT_SIGNALS_VIEW] In the Signals viewport the selected one on an
 			-- amber rectangle a little larger: beside it, not in it (a bar and
 			-- a button clip their children)
@@ -2250,7 +2293,10 @@ local function update()
 			local e = math.max(1, math.ceil(1 / magic.ui.scale))
 			local bars = {{0, 0, w, e}, {0, h - e, w, e}, {0, 0, e, h},
 				{w - e, 0, e, h}}
-			for i, b in ipairs(r.edge) do
+			local col = frame and (selected and M.HOVER or (r.own and
+					magic.Color(0.55, 0.8, 1) or magic.Color(0.8, 0.8, 0.8)))
+			local edged = differs(r, "edges", frame)
+			for i, b in ipairs((frame or edged) and r.edge or {}) do
 				b.visible = frame
 				if frame then
 					b.color = col
@@ -2273,8 +2319,12 @@ local function update()
 			end
 			-- Said as it changes: where it is and what it shows
 			local sw, sh = bw, bh
-			local sp = r.el.screenPosition
-			r.ax, r.ay = sp.x, sp.y
+			-- (read again as it or its panel moves)
+			if r.moved or not r.ax then
+				local p = r.el.screenPosition
+				r.ax, r.ay = p.x, p.y
+			end
+			local sp = {x = r.ax, y = r.ay}
 			local em = es ~= 1 or eop ~= 1 or edy ~= 0
 			local line = string.format("kit: ui %s %s at %d,%d %dx%d in %dx%d" ..
 					" font %d %s order %g %s%s%s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
