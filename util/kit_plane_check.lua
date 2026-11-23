@@ -670,6 +670,51 @@ assert(#MV.snapshot{plane = 1, bodies = OTHERS}:circle(1.5, 0, 1) == 0,
 		"no bodies in a vertical plane")
 print("ok: the other bodies in a level plane: met as circles, their by and velocity; none unasked or upright")
 
+-- [KIT_STUNTS] (G1, G3, G4, G5) movement.own_height: M.steps holds no height in a
+-- level plane (held without it); a body with its y and h met only at a slice they
+-- span; w:ray against a deck (a flat prism) from under and from above, a standing
+-- ramp's slope, a wall's side, W:segment as before (no prism through its ray); a
+-- pose of 16 slots by name
+local rising = {movement = {own_height = true, pose = {"a", "b", "c", "d", "e", "f",
+	"g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q"}},
+	step = function(s, i, dt)
+		s.pos = {s.pos[1], s.pos[2] + dt, s.pos[3]}
+		s.vel = {0, 1, 0}
+		s.pose = {a = 1, p = 16, q = 17}
+	end}
+local lw = MV.world{cell = function() return nil end, plane = 1, horizontal = true}
+local sr = MV.steps(rising, {pos = {0, 0.5, 0}}, {{f = 0}, {f = 0}}, 0.5, 1, lw, {})
+assert(near(sr.pos[2], 1.5) and sr.vel[2] == 1, "own height kept: " .. sr.pos[2])
+assert(#sr.pose == 16 and sr.pose[1] == 1 and sr.pose[16] == 16, "16 pose slots: " .. #sr.pose)
+rising.movement.own_height = nil
+sr = MV.steps(rising, {pos = {0, 0.5, 0}}, {{f = 0}}, 0.5, 1, lw, {})
+assert(sr.pos[2] == 0.5 and sr.vel[2] == 0, "held without it: " .. sr.pos[2])
+local wh = MV.snapshot{plane = 1, horizontal = true, bodies = {{3, 0, 1, 0, 0, "player:7", 5, 1.3}}}
+assert(#wh:circle(1.5, 0, 1, 1) == 0 and #wh:circle(1.5, 0, 1, 5.6) == 1 and
+		#wh:circle(1.5, 0, 1, 6.4) == 0, "a body on a deck met at its own height only")
+local DECK = MV.look_poly({shape = "polygon", points = {{-4, -3}, {4, -3}, {4, 3}, {-4, 3}},
+	depth = 0.5, solid = true, surface = "deck"}, false, {0, 4.25, 0}, 0, 90, 0)
+local RAMP = MV.look_poly({shape = "polygon", points = {{-5, 0}, {5, 2}, {5, 0}},
+	depth = 6, solid = true}, false, {20, 0, 0}, 0, 0, 0)
+local rw = MV.world{cell = function() return nil end, polys = {DECK, RAMP}}
+local t, ri, nx, ny, nz = rw:ray(1, 1, 0, 0, 1, 0, 10)
+assert(t and near(t, 3) and ri.surface == "deck" and ny == -1, "a deck from under: " .. tostring(t))
+t, ri, nx, ny = rw:ray(1, 9, 0, 0, -1, 0, 10)
+assert(t and near(t, 4.5) and ny == 1, "a deck from above: " .. tostring(t))
+t, ri, nx = rw:ray(-10, 4.2, 0, 1, 0, 0, 20)
+assert(t and near(t, 6) and nx == -1, "a deck's side: " .. tostring(t))
+assert(rw:ray(-10, 5, 0, 1, 0, 0, 20) == nil and rw:ray(1, 4.25, 0, 0, 1, 0, 3) == nil,
+		"over the deck, and from inside it")
+t, ri, nx, ny = rw:ray(20, 5, 0, 0, -1, 0, 10)
+assert(t and near(t, 4) and ny > 0.9 and nx < 0, "the ramp's slope: " .. tostring(t))
+t, ri, _, _, nz = rw:ray(20, 0.5, -9, 0, 0, 1, 10)
+assert(t and near(t, 6) and nz == -1, "the ramp's side: " .. tostring(t))
+local sw = MV.world{cell = function() return nil end, plane = 4.25, horizontal = true,
+	polys = {DECK, RAMP}}
+local st = sw:segment(-10, 0, 10, 0)
+assert(st and near(st, 0.3), "w:segment against the deck's outline: " .. tostring(st))
+print("ok: own_height (none held), 16 pose slots, a body's heights, w:ray into a deck, a ramp and their sides")
+
 -- What the client's pass costs: 300 zones (cells, boxes, polygons, spheres)
 -- built (module.lua builds one again as it moves or its state turns), and
 -- met by a bike's two wheels, a frame

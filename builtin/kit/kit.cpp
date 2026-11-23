@@ -26433,10 +26433,14 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_PLANE] onto the plane: its depth, no speed across (a rider is
 		// where its seat is)
-		// ([KIT_TOP_DOWN] a level one: its feet at the cell's bottom, no speed up)
+		// ([KIT_TOP_DOWN] a level one: its feet at the cell's bottom, no speed up;
+		// [KIT_STUNTS] a movement.own_height there keeps the put's height)
 		b.plane_z = plane_of(m_peers[peer].scene, &b.plane_h);
-		if(!std::isnan(b.plane_z) && !b.ride && b.state.get("pos").is_array() &&
-				b.state.get("pos").size() == 3){
+		auto ti = m_types.find(b.type);
+		const bool own_height = b.plane_h && ti != m_types.end() &&
+				ti->second.decl.get("movement").get("own_height").is_true();
+		if(!std::isnan(b.plane_z) && !b.ride && !own_height &&
+				b.state.get("pos").is_array() && b.state.get("pos").size() == 3){
 			const unsigned k = b.plane_h ? 1 : 2;
 			b.state["pos"].set_at(k, b.plane_h ? b.plane_z - 0.5 : b.plane_z);
 			if(b.state.get("vel").is_array() && b.state.get("vel").size() == 3)
@@ -26619,9 +26623,9 @@ struct Module: public interface::Module, public Interface
 		queue_run(r);
 	}
 
-	// [KIT_PLANE] stage 4: s.pose (8 numbers at most, set by the steps), what the
-	// others' draw hook poses the body by: on the player's node as "kit_mpose",
-	// set as it changes
+	// [KIT_PLANE] stage 4: s.pose (16 numbers at most, set by the steps; [KIT_STUNTS]
+	// 8 before), what the others' draw hook poses the body by: on the player's node
+	// as "kit_mpose", set as it changes
 	void movement_pose(size_t peer, Body &b)
 	{
 		auto pi = m_peers.find(peer);
@@ -26638,7 +26642,7 @@ struct Module: public interface::Module, public Interface
 	{
 		const json::Value &ps = state.get("pose");
 		ss_ pose;
-		for(unsigned k = 0; ps.is_array() && k < ps.size() && k < 8; k++){
+		for(unsigned k = 0; ps.is_array() && k < ps.size() && k < 16; k++){
 			char buf[32];
 			snprintf(buf, sizeof buf, "%s%.4g", k ? " " : "", ps.at(k).is_number() ?
 					ps.at(k).as_number() : 0.0);
@@ -26783,10 +26787,12 @@ struct Module: public interface::Module, public Interface
 				b.plane_h, others);
 	}
 
-	// [KIT_TOP_DOWN] (8) ",bodies={{x, z, r, vx, vz, by}...}": the other players'
-	// bodies in the scene within reach (+ their r) of pos, in play and not
+	// [KIT_TOP_DOWN] (8) ",bodies={{x, z, r, vx, vz, by, y, h}...}": the other
+	// players' bodies in the scene within reach (+ their r) of pos, in play and not
 	// seated, for a movement that asks (movement.bodies; move.lua's W:circle);
-	// not pe's nor the bot own's. [KIT_BOT_DRIVE] the driving bots' too
+	// not pe's nor the bot own's. [KIT_BOT_DRIVE] the driving bots' too.
+	// [KIT_STUNTS] y, h: their feet's height and their body's (a level plane's
+	// circle meets one only where they span its slice)
 	void bodies_lit(ss_ &o, const ss_ &scene, const Peer *pe, uint64_t own,
 			const double pos[3], double reach)
 	{
@@ -26809,7 +26815,9 @@ struct Module: public interface::Module, public Interface
 					vel(0), vel(2));
 			o += buf;
 			lua_lit(json::Value(by), o);
-			o += "},";
+			snprintf(buf, sizeof buf, ",%.17g,%.17g},", sp.at(1u).as_number(),
+					num(body_decl(type), "h", 1.7, 0.05, 16));
+			o += buf;
 		};
 		for(auto &dp : m_drives)
 			if(dp.second.car && dp.first != own && dp.second.scene == scene)
@@ -35860,12 +35868,16 @@ struct Module: public interface::Module, public Interface
 				"(in play, not seated) as circles of their body's r, info.body "
 				"their by, info.vel {vx, vz}; the step pushes its own body out "
 				"(the server's place is the answer, a client predicting against "
-				"the others' last known places); none without it. Its file's "
+				"the others' last known places), each only where its feet's "
+				"height and body h span the circle's slice; none without it. "
+				"movement.own_height = true there: no height held, the step's "
+				"own (s.pos[2], s.vel[2]: a car's jumps on w:down's floor), its "
+				"w:circle asked at its own y (the last argument). Its file's "
 				"math is w's on both sides (floor, ceil, sqrt, abs, fmod, min, "
 				"max, sin, cos, atan, atan2; no random). s.events = {\"name\" | "
 				"{\"name\", value}...} set in a step: outputs of its component "
 				"on the app root (declare them), as by the player; s.pose = "
-				"{n...} (8): what the other clients draw by (movement.pose = "
+				"{n...} (16): what the other clients draw by (movement.pose = "
 				"{\"a\", \"dir\"...} names the slots: s.pose.a written and "
 				"read by name or index). A put (a teleport, a respawn) starts s "
 				"afresh. s.spheres = {{x, y, "

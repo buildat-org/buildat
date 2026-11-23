@@ -839,8 +839,8 @@ namespace interface
 //   size both need is a parameter, not a constant in two files); s.vars
 //   another body's public vars (c:body_var's {public = true}); s.pose by
 //   name too where the movement declares pose = {"name"...} (its slots in
-//   order, 8 at most: the step writes s.pose by name or by index, kept and
-//   sent as the numbers); node made anew when the draw function changes
+//   order, 16 at most ([KIT_STUNTS]; 8 before): the step writes s.pose by
+//   name or by index, kept and sent as the numbers); node made anew when the draw function changes
 //   (its client part put again). A put (a teleport, a respawn, a seat)
 //   starts the movement's state afresh on the server and the client: a
 //   step keeping a place of its own starts over from s.pos. A hazard that
@@ -1151,9 +1151,18 @@ namespace interface
 //   their velocity's x and z; the step pushes its own body out, each body
 //   by its own step. The server's snapshot sends them (kit.cpp's
 //   bodies_lit()); a client predicts against the others' last known places
-//   (players.lua's others_bodies()). simplified: a correction on contact
-//   (the others' places are a round trip old on the client); no bodies in a
-//   vertical plane or without one, none for the creatures.
+//   (players.lua's others_bodies()). [KIT_STUNTS] Each with its feet's
+//   height and its body's h: met only where they span the circle's slice
+//   (a car on a bridge is no wall to one under it). simplified: a correction
+//   on contact (the others' places are a round trip old on the client); no
+//   bodies in a vertical plane or without one, none for the creatures.
+//   [KIT_STUNTS] movement.own_height = true there: the body keeps the height
+//   and the speed up its step gives it (no holding; a put keeps the put's
+//   height), the plane's 2D queries as ever, asked at the step's own slice
+//   (w:circle's and w:segment's last argument): a car's own floor by w:down
+//   and w:under, its jumps, a bridge's deck over and under (move.lua's
+//   header). w:ray meets the solid polygons' prisms (standing and lying
+//   flat) as it meets boxes: a chase camera stays out of a deck or a wall.
 //   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
 //   points the world's x and z, its depth along y; its edges are upright
 //   walls, met in a level plane where its depth spans the plane's y, in 3D its

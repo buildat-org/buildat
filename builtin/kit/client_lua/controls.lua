@@ -368,7 +368,7 @@ local function world(skip)
 		-- [KIT_TOP_DOWN] (8) the others, for a movement that meets them
 		bodies = C.ctl and C.ctl.horizontal and decl().bodies == true and
 			(tonumber(C.ctl.seat) or 0) == 0 and M.others_bodies and
-			M.others_bodies(tonumber(body_decl().r) or 0.45) or nil}
+			M.others_bodies(tonumber(body_decl().r) or 0.45, tonumber(body_decl().h) or 1.7) or nil}
 end
 
 -- ---- The body
