@@ -79,6 +79,10 @@
 #      in get_log and in kitboss's editor Log, its entity selected (4);
 #      [KIT_API_1] export_template's warning naming the part's .internal
 #      and the zones' kit/parallax (experimental).
+#  11. [KIT_REPORT_1123] (4z37zzd) the server stopped while the agent plays
+#      (its body's entry in pp's got): the body not in the save's players,
+#      after the restart its entry dropped at the load and play_join a new
+#      body.
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -1053,6 +1057,7 @@ elif phase == "client":
         "params": {"movement": "local/pmove", "camera": "chase"}})
     call("place", {"type": "local/pmove", "pos": [0, 0, 0], "on": "scene"})
     EP = placed(call("place", {"type": "local/pp", "pos": [0, 1, 0]}))
+    save(EP=EP)
     EQ = placed(call("place", {"type": "local/pq", "pos": [3, 1, 0]}))
     EF = placed(call("place", {"type": "local/pf", "pos": [4, 1, 0]}))
     EV = placed(call("place", {"type": "local/pv", "pos": [6, 1, 0]}))
@@ -1136,6 +1141,30 @@ elif phase == "client_end":
     assert "Your body is gone" in call("play_leave")
     call("stop")
     call("switch_scene", {"name": s["main"]})
+elif phase == "stop_play":
+    # [KIT_REPORT_1123] (4z37zzd) playing as the server stops: its body's
+    # by and its per_player entry (pp's got) before
+    rpc("initialize", init)
+    call("switch_scene", {"name": "cparts"})
+    if not state(ids=[])["running"]:
+        assert call("start") == "Running"
+    said, body = join()
+    me = body["by"]
+    call("try_input", {"id": s["EP"], "input": "set", "as": "me"})
+    until(lambda: entity(s["EP"])["components"][0].get("state", {}).get(
+        "got", {}).get(me) == "set " + me, "the body's entry in pp's got")
+    save(AB=me)
+    print("   playing as %s, pp's got %s, at the stop" % (me, entity(s["EP"])))
+elif phase == "rejoin":
+    # (after the restart) a new body; the old one's entry gone at the load
+    rpc("initialize", init)
+    call("switch_scene", {"name": "cparts"})
+    said, body = join()
+    assert body["by"] != s["AB"], ("the body of before the stop again", body)
+    got = entity(s["EP"])["components"][0].get("state", {}).get("got", {})
+    assert s["AB"] not in got, ("its entry kept over the stop", got)
+    assert "Your body is gone" in call("play_leave")
+    print("   after the restart %s, not %s; pp's got %s" % (body["by"], s["AB"], got))
 elif phase == "heightmap":
     rpc("initialize", init)
     to_start()
@@ -1171,7 +1200,7 @@ mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 	# agent's scene is its token's: heightmap's switch_scene after goals')
 	local k=$tok
 	case $1 in play|state|goals|history|top_down|heightmap|checkpoint) k=$tok2 ;;
-		types|links) k=$tok3 ;;
+		types|links|stop_play|rejoin) k=$tok3 ;;
 		zones) k=$adm ;; esac
 	python3 -I "$t/mcp.py" "$1" "$url" "$k" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
@@ -1221,7 +1250,32 @@ cmd "sync 2000" quit
 exec 3>&-
 wait $CLIENT 2>/dev/null
 CLIENT=$SERVER_PID
+
+# [KIT_REPORT_1123] (4z37zzd) The server stopped while the agent plays: its
+# body (a guest's) is not in the save, its per_player entry dropped at the
+# load, and the next play_join plays a new one
+mcp stop_play
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" <<'PY' || fail "the save at the stop ($t)"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1], timeout=10)
+v = db.execute("select value from store where store = 'kit' and key = 'runtime'").fetchone()[0]
+rt = json.loads(v if isinstance(v, str) else v.decode())
+assert "kitboss's agent" not in rt["players"], rt["players"]
+print("ok: the save's players at the stop: %s, next_player %s" % (sorted(rt["players"]), rt.get("next_player")))
+PY
+SL=$t/srv2.log
+start_server "$SL" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+	--sim-rate "$CHECK_RATE" || fail "the server did not come up again ($SL)"
+CHECK_PIDS+=($SERVER_PID)
+CLIENT=$SERVER_PID
+url=http://localhost:$SERVER_PORT/api/v1/mcp
+await "$SL" 0 30 "per_player state: [0-9]+ entries of bodies not here dropped"
+mcp rejoin
+echo "ok: the agent's body at a stop not saved, its entry dropped at the load, the next play_join a new body"
 for k in "${tok#bat_}" "${tok2#bat_}" "${tok3#bat_}" "${adm#bat_}"; do
 	grep -rqaF "$k" "$t"/*.log && fail "a token in a log"
 done
-echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_join held while the camera starts or moves, the screen's texts, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
+echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_join held while the camera starts or moves, the screen's texts, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored, a body played at a stop not saved and a new one after it"

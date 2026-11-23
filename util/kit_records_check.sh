@@ -31,8 +31,9 @@
 #      Workbench body that goes is an agent's play body, a guest's too):
 #      a stopwatch, a guest's started (Try as them) beside kitboss's, the
 #      guest leaves: their entry gone from the save's runs, kitboss's kept;
-#   7. the save given a gone guest's, a bot's and a non-body key's entry
-#      (as before 6), the server restarts: the two bodies' dropped at the
+#   7. (4z37zzd) the save's next_player past the gone guest's id (taken
+#      out: a save from before it); the save given a gone guest's, a bot's
+#      and a non-body key's entry (as before 6), the server restarts: the two bodies' dropped at the
 #      load, "note" and kitboss's kept; a new guest gets the gone guest's
 #      id again and inherits no run (a reset by nobody resets kitboss's
 #      alone).
@@ -397,12 +398,26 @@ echo "ok: guest $gn (entity $gid) ran stopwatch $SW and left: their entry gone w
 
 # 7. A gone body's entries in the save (as before 6): dropped at the load;
 # the id handed out again (the next player's: one past the bodies kept)
-# inherits nothing
+# inherits nothing. (4z37zzd) The save's next_player past the gone guest's
+# id, so none is handed out again; taken out here, a save from before it
 cmd quit
 exec 3>&-
 wait $BOSS 2>/dev/null
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
+python3 -I - "$db" "$gid" <<'PY' || fail "the save's next_player ($db)"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1], timeout=10)
+v = db.execute("select value from store where store = 'kit' and key = 'runtime'").fetchone()[0]
+rt = json.loads(v if isinstance(v, str) else v.decode())
+assert rt.get("next_player", 0) > int(sys.argv[2]), (rt.get("next_player"), sys.argv[2])
+print("ok: the save's next_player %d, past the gone guest's %s" % (rt["next_player"], sys.argv[2]))
+del rt["next_player"]
+s = json.dumps(rt)
+db.execute("update store set value = ? where store = 'kit' and key = 'runtime'",
+    (s if isinstance(v, str) else s.encode(),))
+db.commit()
+PY
 k=$(runs "{\"player:$gid\": {\"from\": 0, \"lap\": 0}, \"bot:99999\": {\"from\": 0, \"lap\": 0}, \"note\": {\"at\": 1}}")
 [ "$k" = "bot:99999 note player:$bid player:$gid" ] || fail "the save's runs not as written: \"$k\""
 sk "$t/sk2.log"

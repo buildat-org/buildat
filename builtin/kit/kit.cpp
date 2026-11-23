@@ -343,6 +343,10 @@ struct Entity
 	ss_ made_by;
 	uint64_t maker = 0;
 	size_t maker_comp = 0;
+	// runtime: a guest's player entity (an agent's play body too), left
+	// out of the runtime row ([KIT_REPORT_1123]: one there at a stop came
+	// back to the next of that name, its per_player entries with it)
+	bool guest = false;
 	// authored ([KIT_API_1]): the keys a newer Kit wrote that this one does
 	// not read, written back as they were; undefined if none
 	json::Value rest;
@@ -5792,7 +5796,8 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = now_us();
 		json::Value made = json::array();
 		for(auto &p : m_entities){
-			if(p.second.comps.empty() || (for_start && !authored(p.second)))
+			if(p.second.comps.empty() || (for_start && !authored(p.second)) ||
+					p.second.guest)
 				continue;
 			json::Value a = json::array();
 			for(const Instance &in : p.second.comps){
@@ -5856,6 +5861,9 @@ struct Module: public interface::Module, public Interface
 		}
 		json::Value players = json::object();
 		for(auto &p : m_players){
+			auto e = m_entities.find(p.second);
+			if(e != m_entities.end() && e->second.guest)
+				continue;
 			json::Value j = json::object();
 			j.set("id", (int64_t)p.second);
 			if(m_aside.get(p.first).is_object())
@@ -5868,6 +5876,9 @@ struct Module: public interface::Module, public Interface
 		r.set("removed", removed);
 		r.set("players", players);
 		r.set("next_id", (int64_t)m_next_id);
+		// (a body's id is never handed out again: per_player state is keyed
+		// by it)
+		r.set("next_player", (int64_t)m_next_player);
 		return r;
 	}
 
@@ -6246,6 +6257,10 @@ struct Module: public interface::Module, public Interface
 		// The players' entities ([KIT] stage 4d), and the round's own:
 		// entities play made and removed
 		load_players(rt, old_aside);
+		const json::Value &np = rt.get("next_player");
+		if(np.is_number() && np.as_number() > m_next_player &&
+				np.as_number() < 9e15)
+			m_next_player = (uint64_t)np.as_number();
 		if(m_session.running)
 			load_round(rt);
 		// A round host's removed entities are gone in a persistent world
@@ -34924,6 +34939,8 @@ struct Module: public interface::Module, public Interface
 		// Their entity follows them ([KIT] stage 4d)
 		const uint64_t was = p.player;
 		p.player = name.empty() || p.still ? 0 : ensure_player(name);
+		if(p.player)
+			m_entities[p.player].guest = p.guest;
 		if(was && was != p.player)
 			unplace_player(was);
 		if(renamed && was_guest)
