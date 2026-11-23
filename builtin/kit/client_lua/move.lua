@@ -127,7 +127,9 @@
 --   w.sin, w.cos, w.atan2, w.sqrt, w.PI
 -- info = {solid = true, friction = n (1), surface = "<tag>"}: a voxel's
 -- (its type's `friction` and `surface` where it has them, else 1 and its
--- name without the author), an object's ("object"), the heightmap's
+-- name without the author), an object's ("object"; [KIT_3D_GAINS_1] (4z38) a solid
+-- look's own surface and friction where it has them: kit/part's, a boost pad or a
+-- hazard part), the heightmap's
 -- ("ground") or a cell not loaded ("unknown", solid; air over a
 -- heightmap, [KIT_HM_FREE]) or a heightmap's edge ("edge").
 -- [KIT_WALKER_FRAME] A walker on a free voxel object steps in the object's
@@ -165,7 +167,11 @@
 -- neighbour is no surface: nothing catches on a floor's seams), the shapes' and the
 -- solid looks' boxes through z, the heightmap's profile along z and the polygons'
 -- outlines (W:plane_edges); the segment the free objects too (W:ray's).
--- simplified: the circle meets no free voxel object
+-- [KIT_3D_GAINS_1] (4z38) In a level plane the circle meets the free voxel objects
+-- too, as they are at the step's time (a kit/wave's swinging hammer): each box of
+-- an object's cells sliced at the circle's y, a convex outline (its info the
+-- object's, M.OBJECT's surface). simplified: in a vertical plane it meets none;
+-- the object's own motion is not given to what it hits (a push out, no throw)
 -- [KIT_TOP_DOWN] (1) w.horizontal (kit/controls' plane "horizontal"): w.plane is then a
 -- whole y, the middle of the spawn's cell; the body's feet are held at w.plane - 0.5
 -- (that cell's bottom, standing on the cell under it), its speed up none, and W:move
@@ -213,8 +219,9 @@
 -- level plane it is met where its depth spans the plane's y. A floor (kit/polygon's
 -- `floor` on, `collision` off; lying flat only) is no wall: w:under(x, y, z) gives
 -- its info over its area, the point no lower than its bottom and at most 0.6 over
--- its top (W:floor_at, before what is under it), and a walker's s.surface and
--- s.friction are its own.
+-- its top (W:floor_at, before what is under it; [KIT_3D_GAINS_1] (4z38) a solid
+-- higher than its top within the 0.6, a boost pad part on a road, before it), and a
+-- walker's s.surface and s.friction are its own.
 -- simplified: one turned otherwise (neither standing nor flat, a pitch off 0 and
 -- +-90) or on a moving object is not met; a circle's middle deeper in one than its
 -- radius meets nothing of it
@@ -532,7 +539,8 @@ end
 -- its middle off the entity, `when` over it while its state is on, a
 -- swing a quarter turn round its -x edge) turned by its look's rotation
 -- and the entity's turn (yaw, pitch, roll), as the box round it {x0, y0, z0,
--- x1, y1, z1}; nil when it is not solid
+-- x1, y1, z1, info = its own surface and friction (box_info; nil: M.OBJECT's)};
+-- nil when it is not solid
 local function m3(a, b)
 	local r = {}
 	for i = 0, 2 do
@@ -600,6 +608,20 @@ local function flat_turn(yaw, pitch, roll)
 	return deg360(round_to(deg360(y), 1e3)), p > 0 and 90 or -90, 0
 end
 M.flat_turn = flat_turn
+
+-- [KIT_3D_GAINS_1] (4z38) a box look's own surface and friction (kit/part's), as a
+-- polygon's (poly_info); none, or "object" and 1: nil (M.OBJECT where it is met)
+local function box_info(look)
+	local f, s = tonumber(look.friction), look.surface
+	if type(s) ~= "string" or s == "" then
+		s = "object"
+	end
+	if (f == nil or f == 1) and s == "object" then
+		return nil
+	end
+	f = f or 1
+	return {solid = true, friction = f < 0 and 0 or f > 10 and 10 or f, surface = s}
+end
 
 function M.look_box(look, on, pos, yaw, pitch, roll)
 	-- ([KIT_MOVING_OBJECTS] or yaw the entity's turn as a matrix)
@@ -681,6 +703,7 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 			if c > b[i + 4] then b[i + 4] = c end
 		end
 	end end end
+	b.info = box_info(look)
 	return b
 end
 
@@ -1271,7 +1294,7 @@ function W:ground_max(x0, z0, x1, z1)
 	return best
 end
 
-local ray_turned
+local ray_turned, slice_box, convex
 
 local function lo_cell(a)
 	return floor(a + EPS - 0.5) + 1
@@ -2202,17 +2225,18 @@ function W:down(x, y, z, len)
 	return best, info
 end
 
--- ([KIT_TOP_DOWN] (2) a floor polygon there first: W:floor_at)
+-- ([KIT_TOP_DOWN] (2) a floor polygon there first: W:floor_at; [KIT_3D_GAINS_1]
+-- (4z38) unless a solid's top is over the floor's)
 function W:under(x, y, z)
-	local f = self:floor_at(x, y, z)
-	if f then
+	local f, top = self:floor_at(x, y, z)
+	local d, info = self:down(x, y, z, 0.6)
+	if f and not (info and y - d > top + EPS) then
 		return f
 	end
-	local _, info = self:down(x, y, z, 0.6)
 	return info
 end
 
--- [KIT_TOP_DOWN] (2) The info of the floor polygon under the point: over its area,
+-- [KIT_TOP_DOWN] (2) The info of the floor polygon under the point (and its top): over its area,
 -- the point no lower than its bottom and at most 0.6 over its top (the highest top
 -- of those); nil: none
 function W:floor_at(x, y, z)
@@ -2224,7 +2248,7 @@ function W:floor_at(x, y, z)
 			top, info = p.z1, p.info
 		end
 	end
-	return info
+	return info, top
 end
 
 -- What touches the body (b = {x, y, z, r, h}): each side's within 0.05
@@ -2305,6 +2329,114 @@ function W:plane_edges(z, x0, y0, x1, y1)
 		end
 	end
 	return out
+end
+
+-- [KIT_3D_GAINS_1] (4z38) A free object's box f (its frame's x0, y0, z0, x1, y1, z1)
+-- sliced at the world's y: its outline's points in x and z, {x1, z1, x2, z2...} going
+-- round (a convex polygon of 3 to 6), nil where it does not reach y
+local EDGES = {1, 2, 3, 4, 5, 6, 7, 8, 1, 3, 2, 4, 5, 7, 6, 8, 1, 5, 2, 6, 3, 7, 4, 8}
+function slice_box(o, f, y)
+	local cx, cy, cz = {}, {}, {}
+	local below, above = false, false
+	for i = 0, 7 do
+		local lx = i % 2 == 0 and f[1] or f[4]
+		local ly = floor(i / 2) % 2 == 0 and f[2] or f[5]
+		local lz = i < 4 and f[3] or f[6]
+		local wx, wy, wz = outof(o, lx, ly, lz)
+		cx[i + 1], cy[i + 1], cz[i + 1] = o.x + wx, o.y + wy, o.z + wz
+		below = below or cy[i + 1] < y
+		above = above or cy[i + 1] >= y
+	end
+	if not (below and above) then
+		return nil
+	end
+	local px, pz, n, mx, mz = {}, {}, 0, 0, 0
+	for e = 1, 23, 2 do
+		local a, b = EDGES[e], EDGES[e + 1]
+		if (cy[a] < y) ~= (cy[b] < y) then
+			local t = (y - cy[a]) / (cy[b] - cy[a])
+			n = n + 1
+			px[n], pz[n] = cx[a] + (cx[b] - cx[a]) * t, cz[a] + (cz[b] - cz[a]) * t
+			mx, mz = mx + px[n], mz + pz[n]
+		end
+	end
+	if n < 3 then
+		return nil
+	end
+	mx, mz = mx / n, mz / n
+	-- Round the middle by a pseudo-angle (0...4), an insertion sort (the box has no
+	-- table.sort)
+	local key = {}
+	for i = 1, n do
+		local ix, iz = px[i], pz[i]
+		local dx, dz = ix - mx, iz - mz
+		local d = abs(dx) + abs(dz)
+		local k = d < 1e-12 and 0 or dz / d
+		k = dx >= 0 and 1 - k or 3 + k
+		local j = i - 1
+		while j >= 1 and key[j] > k do
+			key[j + 1], px[j + 1], pz[j + 1] = key[j], px[j], pz[j]
+			j = j - 1
+		end
+		key[j + 1], px[j + 1], pz[j + 1] = k, ix, iz
+	end
+	local q = {}
+	for i = 1, n do
+		q[2 * i - 1], q[2 * i] = px[i], pz[i]
+	end
+	return q
+end
+-- A convex outline q (slice_box's, going round either way) against the circle at x,
+-- y of radius r: add(depth, nx, ny, info) as W:circle's box() (the middle in it: out
+-- by its nearest edge)
+function convex(q, x, y, r, add, info)
+	local n = #q / 2
+	local a2 = 0
+	for i = 1, n do
+		local j = i % n + 1
+		a2 = a2 + q[2 * i - 1] * q[2 * j] - q[2 * j - 1] * q[2 * i]
+	end
+	if abs(a2) < 1e-12 then
+		return
+	end
+	local sg = a2 > 0 and 1 or -1
+	local inside, best, bnx, bny = true, nil, 0, 0
+	local near, qx, qy = nil, 0, 0
+	for i = 1, n do
+		local j = i % n + 1
+		local ax, ay = q[2 * i - 1], q[2 * i]
+		local ex, ey = q[2 * j - 1] - ax, q[2 * j] - ay
+		local l = sqrt(ex * ex + ey * ey)
+		if l > 1e-12 then
+			-- (out of it: the edge's right going counter-clockwise)
+			local nx, ny = sg * ey / l, -sg * ex / l
+			local sd = (x - ax) * nx + (y - ay) * ny
+			if sd > 0 then
+				inside = false
+			end
+			if not best or sd > best then
+				best, bnx, bny = sd, nx, ny
+			end
+			local u = ((x - ax) * ex + (y - ay) * ey) / (l * l)
+			u = u < 0 and 0 or u > 1 and 1 or u
+			local cx, cy = ax + ex * u, ay + ey * u
+			local d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy)
+			if not near or d2 < near then
+				near, qx, qy = d2, cx, cy
+			end
+		end
+	end
+	if not best then
+		return
+	end
+	if inside then
+		add(r - best, bnx, bny, info)
+	elseif near < r * r then
+		local d = sqrt(near)
+		if d > 1e-9 then
+			add(r - d, (x - qx) / d, (y - qy) / d, info)
+		end
+	end
 end
 
 -- The circle's contacts, the deepest first (the same one twice once)
@@ -2394,6 +2526,20 @@ function W:circle(x, y, r, z)
 		if b[N] < z and b[N + 3] > z and b[1] < x + r and b[4] > x - r and b[V] < y + r and
 				b[V + 3] > y - r then
 			box(b[1], b[V], b[4], b[V + 3], ALL, b.info or M.OBJECT)
+		end
+	end
+	-- [KIT_3D_GAINS_1] (4z38) a level plane's free objects: their boxes sliced at y
+	if hz then
+		for _, o in ipairs(self.turned) do
+			local dx, dy, rr = x - o.x, y - o.z, o.rad + r
+			if dx * dx + dy * dy < rr * rr and abs(o.y - z) < o.rad then
+				for _, f in ipairs(o.b) do
+					local q = slice_box(o, f, z)
+					if q then
+						convex(q, x, y, r, add, o.info)
+					end
+				end
+			end
 		end
 	end
 	-- [KIT_TOP_DOWN] (8) the other bodies: circles (one on the middle: out along +x)

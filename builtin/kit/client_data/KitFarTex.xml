@@ -1,0 +1,6 @@
+<!-- [KIT_3D_GAINS_1] (4z38) KitFar.xml's for a look wearing a voxel material:
+     KitVoxelLook's tint masked by the texture's alpha, unlit, unfogged, at the far
+     plane. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITFAR" psdefines="DIFFMAP KITLOOKTINT KITTINTMASK KITUNLIT KITFAR">
+    <pass name="postopaque" depthwrite="false" />
+</technique>

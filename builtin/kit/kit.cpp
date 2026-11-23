@@ -27346,9 +27346,11 @@ struct Module: public interface::Module, public Interface
 				level = pi->second.second;
 			}
 			// [KIT_BOT_DRIVE] ([KIT_TOP_DOWN] (8)) a driving bot meets the others'
-			// bodies as a player's does
+			// bodies as a player's does ([KIT_3D_GAINS_1] (4z38) a steered creature's
+			// movement asking too: a barrel the cars knock about; they meet it not)
 			ss_ others;
-			if(bb && level && m_types[d.type].decl.get("movement").get("bodies").is_true())
+			if((bb || d.creature) && level &&
+					m_types[d.type].decl.get("movement").get("bodies").is_true())
 				bodies_lit(others, d.scene, 0, e.id, pos, r + reach);
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);

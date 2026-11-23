@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-23)
-# covers: apps/workbench/templates/brimstone_stunts/** builtin/kit/types/controls.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/types/path.lua util/kit_racer_drive.py
+# cost: ~2.5 min (2026-11-23)
+# covers: apps/workbench/templates/brimstone_stunts/** builtin/kit/types/controls.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/types/path.lua util/kit_racer_drive.py builtin/kit/types/parallax.lua builtin/kit/types/part.lua
 # [KIT_STUNTS] (kit_plan 4z37zzd (1)) The Brimstone Stunts template (Brimstone
 # Speedway's fork in kit/controls' chase camera) on Workbench; one server,
 # kitboss on a headless weston's Xwayland of the check's own:
@@ -23,9 +23,20 @@
 #      between, not slowed there (no wall of the other level met); the
 #      camera never inside a height's prism (w:ray meets them: under the deck
 #      it comes in under the roof).
+#   4. [KIT_3D_GAINS_1] (4z37zzd (2), 4z38) The scenery on that lap: a boost
+#      pad's surface felt (the car's draw sees its floor), a flock of birds
+#      scattered by the car (their client part), the fans cheering, the
+#      mountains a far parallax layer (drawn far, their colours above the
+#      horizon only in lap_1_start.png: behind the world), the looks culled
+#      at the far clip; the lap's frame time (event kit_looks) and Kit's tick
+#      (BUILDAT_KIT_METER=1) printed; then a hammer met: the car put where
+#      the first hammer's head swings low (walk_here), pushed out of its reach
+#      (kit/wave on the free kit/hammer: w:circle's sliced boxes), its
+#      samples there (hammer.png).
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lap_*.png (the start,
 # the bridge's ramp, its deck, the east, a jump in the air and landed, under
-# the bridge, the second jump, the last straight), $t/trial.png
+# the bridge, the second jump, the last straight), $t/trial.png,
+# $t/hammer.png
 #   util/kit_stunts_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -87,10 +98,12 @@ step() # <seconds> <regex in the client's log> <command>...
 	cmd "$@"
 	await "$CL" "$m" "$s" "$re"
 }
+export BUILDAT_KIT_METER=1
 start_server "$SL" "Listening at" 300 auto \
 	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
 	--sim-rate 1 || fail "the server did not come up ($SL)"
 CHECK_PIDS+=($SERVER_PID)
+unset BUILDAT_KIT_METER
 wait_for_log "$SL" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
 [ -n "$code" ] || fail "no setup code ($SL)"
@@ -132,6 +145,8 @@ echo "ok: a game from Brimstone Stunts: its local/stunt_* types, the chase camer
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/stunt_race $TRIAL: kitboss starts a time trial"
+# (the lap's frames counted from here: kit_looks starts them over)
+step 10 "kit: looks: " "event kit_looks"
 mc=$(mark "$CL")
 SHOTS_IN_ORDER=1 SHOTS="-100,-10,$t/lap_1_start.png -30,10,$t/lap_2_ramp.png -3,10,$t/lap_3_deck.png 100,39,$t/lap_4_east.png 53,68,$t/lap_5_jump.png 30,68,$t/lap_6_landed.png 0,10,$t/lap_7_under.png -42,-68,$t/lap_8_jump2.png -100,-40,$t/lap_9_last.png" \
 	python3 -I "$here/util/kit_racer_drive.py" "$CL" "$t/boss.cmd" 150 \
@@ -273,6 +288,75 @@ PY
 for f in lap_1_start lap_2_ramp lap_3_deck lap_4_east lap_5_jump lap_6_landed lap_7_under lap_8_jump2 lap_9_last; do
 	[ -f "$t/$f.png" ] || fail "no screenshot $t/$f.png ($t/drive.log)"
 done
+
+# 4. The scenery on the lap; the frames' time; a hammer met
+step 10 "kit: looks: " "event kit_looks"
+python3 -I - "$CL" "$mc" "$SL" "$t/lap_1_start.png" <<'PY' || fail "the scenery on the lap ($CL)"
+import re, sys
+from PIL import Image
+s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
+for what in ("stunt_car: effect boost_pad at", "stunt_birds: [0-9]+ birds scatter from the car",
+             "stunt_fans: [0-9]+ fans cheer"):
+    assert re.search(what, s), what
+# (the scene's looks are made, the far ones placed and the cull set, before the lap)
+whole = open(sys.argv[1], "rb").read().decode(errors="replace")
+for what in ("under parallax layer [0-9]+ drawn far", "kit: looks drawn to 165 m"):
+    assert re.search(what, whole), what
+# The mountains' colours (the far layer's two ridges): above the horizon, next
+# to none in the lower 45% (the road, the walls, the ground in front of them:
+# a few of the gravel's and stone's pixels come near the darker ridge's)
+im = Image.open(sys.argv[4]).convert("RGB")
+w, h = im.size
+far = [(0xa5, 0x9b, 0xb4), (0x85, 0x70, 0x78)]
+px = im.load()
+def near(p):
+    return any(sum(abs(a - b) for a, b in zip(p, c)) < 18 for c in far)
+up = sum(1 for y in range(0, int(h * 0.55), 2) for x in range(0, w, 2) if near(px[x, y]))
+low = sum(1 for y in range(int(h * 0.55), h, 2) for x in range(0, w, 2) if near(px[x, y]))
+assert up > w * h / 4 * 0.02 and low < up / 15, (up, low)
+looks = re.findall(r"kit: looks: (\d+) frames, .*; frames ([0-9.]+) ms, the worst ([0-9.]+)", s)
+f, mean, worst = looks[-1]
+assert int(f) > 100 and float(mean) < 250, looks[-1]
+srv = open(sys.argv[3], "rb").read().decode(errors="replace")
+meter = re.findall(r"meter: .*Kit's tick ([0-9.]+)/([0-9.]+) ms.*?(\d+) bodies, (\d+) drives", srv)
+assert meter, "no meter lines"
+print("ok: on the lap a boost pad felt, birds scattered, fans cheering, the far mountains "
+      "behind the world (%d px of theirs above the horizon, %d below), looks culled at 165 m; "
+      "%s frames of %s ms (the worst %s); Kit's tick %.2f ms (mean) at most over %d meter "
+      "lines, %s drives" % (up, low, f, mean, worst, max(float(m[0]) for m in meter),
+                            len(meter), meter[-1][3]))
+PY
+# The trial's first hammer: the car put where its head swings low, then
+# sampled while it swings by
+HAM=$(python3 -I - "$here/apps/workbench/templates/brimstone_stunts/composition.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+scene = {e["name"]: e["id"] for e in d["entities"] if e.get("kind") == "scene"}
+h = [e for e in d["entities"] if e.get("name") == "hammer" and e.get("parent") == scene["trial"]][0]
+print("%g %g" % (h["pos"][0] * 0.8, h["pos"][2]))  # (the head 3 wide, its inside a metre in)
+PY
+) || fail "no hammer in the trial"
+read -r HX HZ <<< "$HAM"
+mh=$(mark "$SL")
+cmd 'event kit_edit {"op": "mode", "on": true}' "event kit_edit {\"op\": \"walk_here\", \"pos\": [$HX, 0.555, $HZ]}"
+await "$SL" "$mh" 10 "kitboss walks here"
+step 10 "kit editor: edit mode off" "frames 3" 'event kit_edit {"op": "mode", "on": false}'
+mb=$(mark "$CL")
+for i in $(seq 20); do cmd "event kit_body" "delay 200"; done
+step 10 "Wrote screenshot $t/hammer.png" "event kit_body" "screenshot $t/hammer.png"
+python3 -I - "$CL" "$mb" "$HX" "$HZ" <<'PY' || fail "the hammer met ($CL)"
+import math, re, sys
+s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
+hx, hz = float(sys.argv[3]), float(sys.argv[4])
+at = [tuple(map(float, m)) for m in re.findall(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),", s)]
+assert len(at) > 10, at
+# (the shove comes in the frames before the first sample: the car, keys up, is
+# put there and found near, but over 1.5 m off it, out of the head's reach)
+off = [math.hypot(x - hx, z - hz) for x, _, z in at]
+assert max(off) < 8 and off[-1] > 1.5, (off, at)
+print("ok: a hammer met: the car put under its head's low point, found %.1f m off it "
+      "(%.2f,%.2f) over %d samples" % (off[-1], at[-1][0], at[-1][2], len(at)))
+PY
 cmd "quit"
-echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading, over two jumps and the bridge and under it; screenshots $t/lobby.png $t/lap_*.png $t/trial.png"
+echo "PASS: Brimstone Stunts from its template: its types, a time trial's lap in the chase camera behind the car, following its heading, over two jumps and the bridge and under it, its scenery on the way; a hammer met; screenshots $t/lobby.png $t/lap_*.png $t/trial.png $t/hammer.png"
 # vim: set noet ts=4 sw=4:

@@ -960,6 +960,9 @@ function M.define(dst, util)
 			-- Where the thing ended up, in the scene: the one way to ask
 			-- a mesher what it built without reading its offsets
 			worldBoundingBox = util.simple_property(dst.BoundingBox),
+			-- Past this far from the camera (its box's middle) it is not
+			-- drawn; 0: at any distance (Kit's looks past the fog)
+			drawDistance = util.simple_property("number"),
 		},
 	})
 
@@ -1270,6 +1273,9 @@ function M.define(dst, util)
 			-- FILL_WIREFRAME draws a selection box the way every voxel
 			-- game draws one, without twelve thin boxes to move about
 			fillMode = util.simple_property("number"),
+			-- 0...255, 128 by default: lower is drawn first within a pass
+			-- (Kit's far layers after the sky, which is 128)
+			renderOrder = util.simple_property("number"),
 		},
 	})
 
