@@ -7,7 +7,8 @@
 -- the draw's p), the front ones steered. Wrecked (pose flag 2) it is
 -- charred black. Facing +z, turned by the pose's heading, [KIT_STUNTS]
 -- pitched and rolled by its pitch and roll (eased toward them: they come
--- with each step, the frames between). Its effects from
+-- with each step, the frames between; (4z37zzd (3)) turned by the heading,
+-- then the roll, then the pitch, a loop's pitch a whole turn). Its effects from
 -- the pose (stunt_car.lua's head, its slots by name): exhaust smoke
 -- (more on the throttle), road dust by the floor and the speed, sparks
 -- where it scrapes a wall, flames out of the back boosted (or on a boost pad), tyre marks
@@ -159,7 +160,8 @@ end
 -- [KIT_STUNTS] Their floor FLOOR_Y over the car's feet (the Bone Yard's
 -- floors' tops are 0.055 (the road) to 0.0875 (mud, the line) over the
 -- ground the feet stand on); none in the air (pose flag 256), no marks on a
--- slope.
+-- slope. (4z37zzd (3)) On a loop (pose flag 512) no dust nor marks; the
+-- smoke, flames and sparks where the car's turn has them.
 -- simplified: marks lie level (on a ramp one would cut into it)
 local FLOOR_Y = 0.07
 local said_fx = {}
@@ -250,10 +252,21 @@ local function effects(s, node, q, h, flags, p)
 	e.run = run or e.run
 	local at = node.position
 	local x, y, z = at.x, at.y + FLOOR_Y, at.z
-	local air, level = bit(flags, 256), math.abs(tonumber(q.pitch) or 0) < 0.02
+	local looped = bit(flags, 512)
+	local air, level = bit(flags, 256) or looped, math.abs(tonumber(q.pitch) or 0) < 0.02 and
+		not looped
 	local sh, ch = math.sin(h), math.cos(h)
 	local function world(lx, lz)
 		return x + lx * ch + lz * sh, z - lx * sh + lz * ch
+	end
+	-- (a point on the car, x right, y up, z ahead from its feet, turned as the
+	-- draw turns it: the heading, the roll, the pitch)
+	local pt, rl = tonumber(q.pitch) or 0, tonumber(q.roll) or 0
+	local cp, sp, cr, sr = math.cos(pt), math.sin(pt), math.cos(rl), math.sin(rl)
+	local function on_car(lx, ly, lz)
+		ly, lz = ly * cp + lz * sp, lz * cp - ly * sp
+		lx, ly = lx * cr + ly * sr, ly * cr - lx * sr
+		return x + lx * ch + lz * sh, at.y + ly, z - lx * sh + lz * ch
 	end
 	local speed = tonumber(q.speed) or 0
 	local surf = math.floor(tonumber(q.floor) or 1)
@@ -263,16 +276,16 @@ local function effects(s, node, q, h, flags, p)
 	e.smoke = e.smoke + dt * (bit(flags, 32) and 10 or 3)
 	if e.smoke >= 1 then
 		e.smoke = 0
-		local px, pz = world(0.55, -2.45)
-		puff("smoke", LOOKS.smoke, px, y + 0.4, pz, -sh, -ch)
+		local px, py, pz = on_car(0.55, 0.4 + FLOOR_Y, -2.45)
+		puff("smoke", LOOKS.smoke, px, py, pz, -sh, -ch)
 	end
 	-- (4z38: a boost pad's floor, SURF's 5, flames too)
 	if surf == 5 then
 		said_once("boost_pad", x, y, z)
 	end
 	if bit(flags, 1) or surf == 5 then
-		local px, pz = world(0, -2.6)
-		puff("flame", LOOKS.flame, px, y + 0.5, pz, -sh, -ch)
+		local px, py, pz = on_car(0, 0.5 + FLOOR_Y, -2.6)
+		puff("flame", LOOKS.flame, px, py, pz, -sh, -ch)
 	end
 	-- Dust off the rear tyres by the speed (none off oil), more sliding
 	if DUST[surf] and speed > 3 and not air then
@@ -286,8 +299,8 @@ local function effects(s, node, q, h, flags, p)
 	-- Sparks where it scrapes
 	for b, lz in pairs({[64] = 2.3, [128] = -2.3}) do
 		if bit(flags, b) then
-			local px, pz = world(0, lz)
-			puff("spark", LOOKS.spark, px, y + 0.5, pz, -sh, -ch)
+			local px, py, pz = on_car(0, 0.5 + FLOOR_Y, lz)
+			puff("spark", LOOKS.spark, px, py, pz, -sh, -ch)
 		end
 	end
 	-- Marks: each slipping tyre's from where its last ended, 0.7 m on or
@@ -347,16 +360,19 @@ return {
 		end
 		local body = b:GetChild("body", false)
 		-- ([KIT_STUNTS] eased toward the pose's: nose up and right side down
-		-- are Urho's negative x and z turns)
+		-- are Urho's negative x and z turns; (4z37zzd (3)) the pitch the short
+		-- way round, a loop's top at +-pi)
 		local now = buildat.get_time_us() / 1e6
 		local t = tilt[node] or {now, 0, 0}
 		local k = math.min(1, (now - t[1]) * 15)
 		t[1] = now
-		t[2] = t[2] + ((tonumber(q.pitch) or 0) - t[2]) * k
+		local dp = ((tonumber(q.pitch) or 0) - t[2] + math.pi) % (2 * math.pi) - math.pi
+		t[2] = t[2] + dp * k
 		t[3] = t[3] + ((tonumber(q.roll) or 0) - t[3]) * k
 		tilt[node] = t
-		body.rotation = magic.Quaternion(-t[2] * 180 / math.pi, h * 180 / math.pi,
-			-t[3] * 180 / math.pi)
+		local d = 180 / math.pi
+		body.rotation = magic.Quaternion(0, h * d, 0) * magic.Quaternion(0, 0, -t[3] * d) *
+			magic.Quaternion(-t[2] * d, 0, 0)
 		-- (placed each frame: a set_param in play shows at once)
 		for k, wh in ipairs(wheels(p)) do
 			local n = body:GetChild("wheel" .. k, false)
