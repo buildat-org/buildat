@@ -53,8 +53,9 @@
 --   the tools (Stopped, the components do not run: none shown, Kit's
 --   notice of it instead, [KIT_STOPPED_NOTICE] below); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
---   screen; while a panel with a button is up the pointer is free
---   (ui_utils.wants_clicks) for a player in mouse look; a button out of
+--   screen; while a panel with a button is up (both drawn:
+--   [KIT_PANEL_HIDDEN_INPUT]) the pointer is free (ui_utils.wants_clicks)
+--   and the walk held for a player in mouse look; a button out of
 --   a panel is not drawn in mouse look on a desktop
 --   ([KIT_HUD_BUTTONS_MOUSE_LOOK]). [KIT_TEXT_INPUT]
 --   An input (kit/ui_input) is a label and a LineEdit named
@@ -2258,11 +2259,14 @@ local function update()
 							math.max(1, math.floor(bars[i][4])))
 				end
 			end
-			if play and r.on and r.kind == "panel" then
+			-- [KIT_PANEL_HIDDEN_INPUT] only a panel drawn, for a button in it
+			-- that is shown: one with its buttons hidden (to be shown later)
+			-- held the walk still and the pointer free for nothing to click
+			if play and r.vis and r.kind == "panel" then
 				for _, o in pairs(U) do
 					if (o.kind == "button" or o.kind == "input" or
 							o.kind == "chat" or o.kind == "list") and
-							panel_of(o) == id then
+							o.on and panel_of(o) == id then
 						wants = true
 					end
 				end
