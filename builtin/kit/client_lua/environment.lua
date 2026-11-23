@@ -105,6 +105,13 @@ end
 function M.physical()
 	return LIT.mode ~= "cartoon" and LIT.views.play ~= nil
 end
+
+-- [KIT_STUNTS_PERF] The play view's path (nil: none of Kit's): ui.lua's
+-- kit/ui_view draws by it where the app gives no O.viewport (Workbench)
+function M.play_path()
+	local v = LIT.views.play
+	return v and v.vp.renderPath or nil
+end
 -- [KIT_HOVER_BOX_NIGHT] The light of the hour on a white face turned to the
 -- sun, over noon's (cartoon: as drawn, 1 at most), for what is drawn unlit
 -- (the hover frames): 1 with no environment. Floored so a frame still shows

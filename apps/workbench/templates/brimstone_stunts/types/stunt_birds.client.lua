@@ -3,13 +3,16 @@
 -- Sitting, nothing is done but the car's distance each 4th frame; within `scare`
 -- of the flock's middle each bird takes off on a loop of its own (out away
 -- from the car and round back, up and down: FLY seconds), wings flapping,
--- and lands where it sat; a car still near scatters them again.
+-- and lands where it sat; a car still near scatters them again. Aloft
+-- they are moved DRAW_RATE times a second at most, and not while the car is
+-- past FAR (a flock in the air was 4 writes a bird each frame).
 -- simplified: a loop of a circle through its seat, not a flight that keeps
 -- clear of the walls (they fly over them)
 local magic = require("buildat/extension/urho3d")
 local kit = require("buildat/module/kit")
 
 local FLY, UP = 7, 7 -- seconds aloft, metres up at the loop's top
+local DRAW_RATE, FAR = 30, 90 -- (a bird's drawDistance 70 from the car's camera)
 local flocks = {}
 
 local function rng(seed)
@@ -39,7 +42,7 @@ return {
 		local p = e.params
 		local rand = rng(e.id * 7919 + 13)
 		local mat = kit.material(type(p.color) == "string" and p.color or "#26262c")
-		local f = {birds = {}, t = 0, flying = false, scare = tonumber(p.scare) or 14}
+		local f = {birds = {}, t = 0, flying = false, scare = tonumber(p.scare) or 14, late = 0}
 		local spread = tonumber(p.spread) or 5
 		for k = 1, math.max(1, math.min(64, tonumber(p.count) or 28)) do
 			local a, r = rand() * 2 * math.pi, spread * math.sqrt(rand())
@@ -59,6 +62,7 @@ return {
 			f.birds[k] = {node = node, wl = wl, wr = wr, hx = hx, hz = hz, yaw = yaw,
 				size = 0.6 + rand() * 0.6, phase = rand() * 6.28, rate = 16 + rand() * 8,
 				delay = rand() * 0.6, up = UP * (0.6 + rand() * 0.8)}
+			f.late = math.max(f.late, f.birds[k].delay)
 		end
 		flocks[e.id] = f
 	end,
@@ -92,13 +96,22 @@ return {
 			return
 		end
 		f.t = f.t + dt
-		local landed = true
-		for _, b in ipairs(f.birds) do
-			local u = (f.t - b.delay) / FLY
-			if u < 1 then
-				landed = false
+		local landed = f.t >= FLY + f.late
+		f.wait = (f.wait or 0) - dt
+		if f.wait > 0 and not landed then
+			return
+		end
+		f.wait = 1 / DRAW_RATE
+		local car = not landed and kit.body_pos()
+		if car then
+			local at = e.node.worldPosition
+			local dx, dz = car.x - at.x, car.z - at.z
+			if dx * dx + dz * dz > FAR * FAR then
+				return
 			end
-			u = math.max(0, math.min(1, u))
+		end
+		for _, b in ipairs(f.birds) do
+			local u = math.max(0, math.min(1, (f.t - b.delay) / FLY))
 			-- A loop of a circle through the seat: out along (dx, dz), round
 			-- by `side`, back; up and down along it
 			local D = 9 * b.size + 6
