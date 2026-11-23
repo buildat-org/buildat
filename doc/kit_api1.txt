@@ -708,7 +708,7 @@ type kit/controls handlers | on_input
 type kit/controls param angle | {"default": 60, "kind": "number", "max": 90, "min": 10}
 type kit/controls param blur | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/controls param camera | {"choices": ["first_person", "chase", "top_down", "side"], "default": "first_person", "kind": "string"}
-type kit/controls param camera_frame | {"choices": ["world", "object"], "default": "world", "kind": "string"}
+type kit/controls param camera_frame | {"choices": ["world", "object", "body"], "default": "world", "kind": "string"}
 type kit/controls param chase_follow | {"default": 0, "kind": "number", "max": 5, "min": 0}
 type kit/controls param chase_pitch | {"default": 15, "kind": "number", "max": 80, "min": -10}
 type kit/controls param dead_zone | {"default": 0, "kind": "number", "max": 20, "min": 0}

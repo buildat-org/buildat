@@ -36,6 +36,8 @@
 --   [KIT_RECORDS] {value:time1} (12.3, 1:02.3; none yet: 0.0); a
 --   kit/stopwatch's running value counts on here (shown_text()), and a
 --   text's clear_after clears each value set after that many seconds.
+--   [KIT_STUNTS] A text showing nothing with no width or height is not
+--   drawn (no empty plate), and leaves no gap in a stack.
 --   **Stacking**: a panel's `layout` "column" or "row" stacks its shown
 --   children by order (then id) with its `gap`, a hidden one leaving no
 --   gap, their x and y unused; a width or height of 0 fits it to them and
@@ -1803,6 +1805,12 @@ local function update()
 			local W, H = num(u.width, 0, 0, 400) * V, num(u.height, 0, 0, 400) * V
 			if drag and drag.id == id and drag.size then
 				W, H = drag.size[1], drag.size[2]
+			end
+			-- [KIT_STUNTS] (4z37zzd (3)) a text with nothing to say (its value
+			-- none yet or cleared after clear_after) and no size of its own: not
+			-- drawn in play, no empty plate (a thin dark bar); framed in edit mode
+			if u.kind == "text" and text == "" and W <= 0 and H <= 0 then
+				r.on, r.empty = false, true
 			end
 			local px = math.max(min_text(),
 					math.floor(num(u.size, 2, 0, 30) * V + 0.5))

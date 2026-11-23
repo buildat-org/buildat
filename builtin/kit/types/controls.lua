@@ -27,7 +27,9 @@
 -- button; auto: a cursor for top_down, side and a chase following the
 -- heading), camera_frame (a walker
 -- standing on a free voxel object: world keeps the horizon level, object
--- tilts the first person and chase views with the deck), the movement (a type
+-- tilts the first person and chase views with the deck; [KIT_STUNTS] (G12)
+-- body: with the body's own up, its state's s.up a movement's step sets, a car
+-- round a loop upside down, the heading the body's in that frame), the movement (a type
 -- stepping the players' bodies: kit/walker, kit/click_to_move, any other
 -- with a step but a creature's or a course's; "none"), [KIT_PLANE] plane
 -- (vertical: the players' bodies held at one z, the depth of the spawn a
@@ -107,7 +109,7 @@ return {
 		pointer = {type = "string", default = "auto",
 			choices = {"auto", "crosshair", "cursor"}},
 		camera_frame = {type = "string", default = "world",
-			choices = {"world", "object"}},
+			choices = {"world", "object", "body"}},
 		movement = {type = "string", default = "kit/walker",
 			choices_from = "movements"},
 		plane = {type = "string", default = "none",
@@ -185,7 +187,7 @@ return {
 		params = {
 			camera = "first_person (the eye), chase (behind the player), top_down (from above) or side (across a plane).",
 			pointer = "crosshair (mouse look), cursor (a free pointer, the right button turns) or auto (by the camera).",
-			camera_frame = "On a moving voxel object: world keeps the horizon level, object tilts the view with the deck.",
+			camera_frame = "On a moving voxel object: world keeps the horizon level, object tilts the view with the deck; body tilts it with the body's own up (its state's up, as a stunt car sets it in a loop).",
 			movement = "The type that moves the players' bodies (kit/walker, kit/click_to_move, a custom one) or none.",
 			plane = "vertical holds the bodies at one z (a side game), horizontal at one height (top-down), or none.",
 			fov = "The view's angle in degrees.",

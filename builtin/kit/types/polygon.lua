@@ -29,6 +29,9 @@
 -- and edited in the editor's plan (2D) view. `floor` (with collision off): a floor
 -- patch, no wall: a body over its area meets its surface and friction under the
 -- feet (w:under, kit/walker's ground), ice, mud or a boost pad
+-- [KIT_STUNTS] (G6) Turned otherwise (neither standing nor flat) its prism is met
+-- tilted, kept with its turn: a ramp's slab at any angle, a loop's facets
+-- (move.lua's tilted_poly); a face's normal in the hit's info (info.n)
 return {
 	version = 1,
 	about = {

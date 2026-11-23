@@ -1141,7 +1141,7 @@ namespace interface
 //   "points" value in the entity's x and y), depth (along its z, centred on
 //   its position): a prism, its mesh built on the clients; solid, it is met by
 //   the movements (move.lua) where it stands (turned by yaw 0 or 180 and any
-//   roll), not by the clients' physics; with kit/controls' plane vertical only
+//   roll; [KIT_STUNTS] (G6) at any turn, below), not by the clients' physics; with kit/controls' plane vertical only
 //   where its depth spans the plane's z (others background or foreground).
 //   [KIT_TOP_DOWN] (1) kit/controls' plane horizontal holds the bodies at one
 //   height (the feet on the bottom of the spawn's cell, kit.cpp's plane_of()),
@@ -1168,8 +1168,9 @@ namespace interface
 //   height), the plane's 2D queries as ever, asked at the step's own slice
 //   (w:circle's and w:segment's last argument): a car's own floor by w:down
 //   and w:under, its jumps, a bridge's deck over and under (move.lua's
-//   header). w:ray meets the solid polygons' prisms (standing and lying
-//   flat) as it meets boxes: a chase camera stays out of a deck or a wall.
+//   header). w:ray meets the solid polygons' prisms (standing, lying flat,
+//   [KIT_STUNTS] (G6) tilted) as it meets boxes: a chase camera stays out of a
+//   deck, a wall or a loop.
 //   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
 //   points the world's x and z, its depth along y; its edges are upright
 //   walls, met in a level plane where its depth spans the plane's y, in 3D its
@@ -1196,6 +1197,18 @@ namespace interface
 //   of their boxes as turned now sliced at the plane's y (a convex outline).
 //   simplified: a box's slice, no speed of its own (a swing pushes a body out,
 //   it hands it no speed).
+//   [KIT_STUNTS] (G6) A polygon turned otherwise (neither standing nor lying
+//   flat: a tilted prism) is met too, kept with its turn (on Kit's grid, a
+//   16th of a degree, the same bits on both sides): w:down, w:under and w:floor_at
+//   (`floor` too), w:sweep and w:blocked, w:ray, w:segment and w:circle's
+//   slice (its outline at the slice's height; a hit's info its +z face's,
+//   with its normal: a slab lying near level told from a wall); a concave
+//   one as its triangles. Before, it was met by nothing: a fix as (G4)'s, only such turns
+//   act otherwise. A face met hands its normal: info.n {x, y, z} out of it
+//   (info.nx its horizontal length, info.ny its up: w:move climbs it as far
+//   as the body's slope lets, else steps up it), and w:down returns d, info,
+//   nx, ny, nz (the normal of what it met for every kind; up for a voxel's, a
+//   box's top and the ground): a stunt car on a loop of them.
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
 //   ("param:<name>" as a look's; kit/parallax; experimental, [KIT_API_1]:
 //   the field and the type may change in any release): the looks under the entity

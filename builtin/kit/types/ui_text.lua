@@ -16,7 +16,8 @@
 -- `shown`: at the start. [KIT_RECORDS] `clear_after` (seconds, 0 never):
 -- each value shown for that long, then as none, on the client (a note,
 -- an announcer's line; the same value again shows it again: `sets`
--- counts them). Edit mode draws every UI component where it
+-- counts them). [KIT_STUNTS] Its text empty (no value, cleared) and no width
+-- nor height: not drawn in play (no empty plate). Edit mode draws every UI component where it
 -- would be, to click on. [KIT_UI_EMPHASIS] `appear` (fade, slide, pop) as
 -- it is shown, `on_change` pop as its text changes (pop_words: not as its
 -- numbers alone do), on the client (client_lua/ui.lua)
