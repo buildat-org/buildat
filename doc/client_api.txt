@@ -2656,7 +2656,7 @@ magic.DRAWABLE_GEOMETRY2D:
 magic.DRAWABLE_LIGHT: 
 magic.DRAWABLE_ZONE: 
 magic.DebugRenderer: AddBoundingBox, AddCircle, AddCross, AddLine, AddNode, AddSphere, AddTriangle, SetLineAntiAlias, SetView
-magic.Drawable: castShadows, worldBoundingBox
+magic.Drawable: castShadows, drawDistance, worldBoundingBox
 magic.Drawable2D: layer, orderInLayer
 magic.DropDownList: AddItem, GetItem, InsertItem, RemoveAllItems, RemoveItem, SetSelection, listView, numItems, placeholder, placeholderText, resizePopup, selectedItem, selection
 magic.ELEMENT_BLENDINDICES: 
@@ -2931,7 +2931,7 @@ magic.M_MIN_NEARCLIP:
 magic.M_MIN_UNSIGNED: 
 magic.M_PI: 
 magic.M_RADTODEG: 
-magic.Material: Clone, SetShaderParameter, SetTechnique, SetTexture, cullMode, fillMode, new, shadowCullMode
+magic.Material: Clone, SetShaderParameter, SetTechnique, SetTexture, cullMode, fillMode, new, renderOrder, shadowCullMode
 magic.Matrix3: Equals, Inverse, Scale, Scaled, SetScale, ToString, Transpose, m00, m01, m02, m10, m11, m12, m20, m21, m22
 magic.Matrix3x4: Inverse, Rotation, Scale, SetScale, SetTranslation, ToString, Translation, m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23
 magic.Matrix4: Equals, Inverse, Rotation, RotationMatrix, Scale, SetRotation, SetScale, SetTranslation, ToMatrix3, ToString, Translation, Transpose, m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33
