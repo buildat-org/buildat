@@ -374,6 +374,15 @@ local function world(skip)
 		kl = {boxes = boxes, polys = polys, index = {}}
 		C.kept[kept_as] = kl
 	end
+	-- ([KIT_STUNTS_PERF] and the cells read kept while the voxels, their
+	-- classes and the ground's presence are: a read through voxelworld
+	-- some 20 us)
+	local vg = voxelworld.static_gen and voxelworld.static_gen()
+	local ck = C.cells_key
+	if not (vg and ck and ck[1] == vg and ck[2] == reg and ck[3] == C.classes and
+			ck[4] == C.ctl and ck[5] == (ground ~= nil)) then
+		C.cells, C.cells_key = {}, vg and {vg, reg, C.classes, C.ctl, ground ~= nil}
+	end
 	local w = MV.world{cell = function(i, j, k)
 		local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
 		local id = reg:id_of(v)
@@ -383,6 +392,7 @@ local function world(skip)
 		end
 		return voxel_info(id, v)
 	end, boxes = kl.boxes, turned = turned, ground = ground, index = kl.index,
+		cache = C.cells,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
 		moving_looks = moving_looks, t = C.draw_t, polys = kl.polys,

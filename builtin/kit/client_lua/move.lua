@@ -1620,7 +1620,9 @@ function M.world(t)
 	w.ground_fn = t.ground
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
-	w.cache = {}
+	-- ([KIT_STUNTS_PERF] t.cache: the caller's, kept while the cells are
+	-- the same)
+	w.cache = type(t.cache) == "table" and t.cache or {}
 	-- ([KIT_STUNTS_PERF] t.index: the caller's, kept with the same t.boxes
 	-- and t.polys; false: none, every list scanned (a check's); near() below)
 	local ix = type(t.index) == "table" and t.index or {}

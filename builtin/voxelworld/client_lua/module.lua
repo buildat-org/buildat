@@ -272,6 +272,9 @@ local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
 -- cache, and a chunk with none there has no node -- no octree query, which
 -- was 30 ms for undrawn_around's 125 chunks in a browser ([WEB_MAIN_THREAD])
 local static_seen, static_untracked = false, false
+-- [KIT_STUNTS_PERF] A count of the changes get_static_voxel() can see: a
+-- chunk's data, a chunk come or gone, a write here, the init, the registry
+local static_count = 0
 -- Chunk node id -> its geometry has been built at least once; see
 -- M.is_chunk_drawn()
 local geometry_done = {}
@@ -309,6 +312,7 @@ buildat.sub_packet("voxelworld:init", function(data)
 	-- Clear caches
 	node_volume_cache = {}
 	static_node_cache = {}
+	static_count = static_count + 1
 	-- [KIT_PLAYTEST_WARNINGS] and the old scene's queued updates and drawn
 	-- chunks: by node id, which the new scene's nodes reuse (a non-chunk
 	-- node "meshed": "A voxel volume not meshed: Failed to read 1 bytes")
@@ -684,6 +688,7 @@ function sub_events()
 		})
 		log:debug("voxelworld:node_volume_updated: "..values.node_id)
 		node_volume_cache[values.node_id] = nil -- Clear cache
+		static_count = static_count + 1
 		local node = replicate.main_scene:GetNode(values.node_id)
 		-- The server's answer to a predicted write ([PREDICTION]): a
 		-- chunk it changed comes replicated with its new data, and one it
@@ -1226,6 +1231,7 @@ function sub_events()
 		end
 		if node:GetVar("buildat_static"):GetBool() == true then
 			static_seen = true
+			static_count = static_count + 1
 			static_untracked = static_untracked or not M.chunk_size_voxels
 		end
 		if node:GetVar("buildat_static"):GetBool() == true and
@@ -1241,6 +1247,7 @@ function sub_events()
 
 	replicate.sub_sync_node_removed(function(node, node_id)
 		node_volume_cache[node_id] = nil
+		static_count = static_count + 1
 		horizon_meshed_us[node_id] = nil
 		modified_drawn_us[node_id] = nil
 		modified_held[node_id] = nil
@@ -1360,6 +1367,15 @@ end
 -- not.
 function M.set_voxel_registry(reg)
 	voxel_reg = reg
+	static_count = static_count + 1
+end
+
+-- [KIT_STUNTS_PERF] static_gen() -> a number that changes whenever what
+-- get_static_voxel() returns can, for a caller keeping what it read; nil
+-- while chunk nodes are looked for in the octree (static_untracked: their
+-- finding counts nothing)
+function M.static_gen()
+	return not static_untracked and static_count or nil
 end
 
 function M.get_voxel_registry_used()
@@ -1656,6 +1672,7 @@ function M.set_static_voxel(x, y, z, v)
 		return false
 	end
 	volume:set_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z, v)
+	static_count = static_count + 1
 	local id = node:GetID()
 	local pred = predicted[id] or
 			{before = buildat.get_voxel_data(node), writes = {}}
