@@ -22,7 +22,8 @@
 #    and places one back, a creature of the night's spawn rule chases and bites him; he
 #    leaves and rejoins where he was (v_*.png). [KIT_SURVIVAL_TUNING] Before,
 #    kitboss falls 14 m and is hurt; Stop and Play leave him where he is.
-# 3. Packed by util/pack_templates.sh with a key made here, the licence file in
+# 3. Packed by util/pack_templates.sh with a key made here (Brimstone Stunts'
+#    too: its local types), the licence file in
 #    the archive and no .wasm, published to a local Aitta, `buildat aitta
 #    install`ed: New lists it after ours, and it opens in edit mode (i_*.png).
 # Screenshots kept with KEEP_TMP=1: $t/*.png
@@ -52,7 +53,7 @@ import json, re, sys
 here = sys.argv[1]
 known = set(json.load(open(here + "/builtin/kit/materials.json"))["voxels"])
 for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships", "S"),
-		("survival", "V")):
+		("survival", "V"), ("brimstone_stunts", "T")):
 	d = "%s/apps/workbench/templates/%s" % (here, name)
 	m = json.load(open(d + "/meta.json"))
 	assert m["kind"] == "template" and m["name"] == name and m["title"], name
@@ -678,9 +679,9 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind ($t/bind.log)"
 if "$here/util/pack_templates.sh" "$here/util/check_lib.sh" "$t/refused" 2>/dev/null; then
 	fail "pack_templates.sh took a key inside the repo"
 fi
-"$here/util/pack_templates.sh" "$t/key" "$t/out" puzzle_room arena ctf > "$t/zips.txt" 2> "$t/pack.err" ||
+"$here/util/pack_templates.sh" "$t/key" "$t/out" puzzle_room arena ctf brimstone_stunts > "$t/zips.txt" 2> "$t/pack.err" ||
 	fail "pack_templates.sh ($t/pack.err)"
-for name in puzzle_room arena ctf; do
+for name in puzzle_room arena ctf brimstone_stunts; do
 	zip=$(grep -a "$name" "$t/zips.txt" | head -1)
 	[ -f "$zip" ] || fail "no archive of $name ($t/zips.txt)"
 	python3 -I - "$zip" <<'PY' || fail "$name's archive"
@@ -731,7 +732,7 @@ assert m, "no choices"
 got = m[1].strip()
 # ([KIT_PROJECT_EXPORT] From a file... last)
 assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed), From a file..."), got
-assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship", "Survival"} <= set(got[7:].split(", ")[:-2]), got
+assert {"Airships", "Arena", "Brimstone Stunts", "Capture the flag", "Puzzle room", "Ship", "Survival"} <= set(got[7:].split(", ")[:-2]), got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY
