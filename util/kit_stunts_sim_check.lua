@@ -270,3 +270,89 @@ do
 	print(string.format("ok: into the loop at %.0f m/s it falls off it at %.1f m and lands at %.2f%s",
 		v, fell, landed, crash and " (a crash)" or ""))
 end
+
+-- Into the loop off its line, the gas held: v m/s, its heading dy degrees
+-- left of the loop's way, lo m left of its lane's middle at its foot, from
+-- back m before it. Round it upside down, off it level, never under 2 m/s
+-- on it for 0.3 s, no crash, no smash. (kit_stunts_check's failed run: in at
+-- 18 m/s 15 degrees left from 1.3 m right, the tyres turned its speed back
+-- into the left rail each step, the scrape slowed it and it fell off near
+-- the top; a rail's end at a joint between facets, met as a wall, stopped
+-- a car dead)
+local function off_line(v, dy, lo, back)
+	local p = defaults()
+	local h = math.atan2(loop_d[1], loop_d[2]) - dy * math.pi / 180
+	local fx, fz, b = math.sin(h), math.cos(h), back / math.cos(dy * math.pi / 180)
+	local s = {pos = {loop_e[1] - loop_d[2] * lo - b * fx, 0.555, loop_e[2] + loop_d[1] * lo - b * fz},
+		yaw = math.deg(h)}
+	local inp = {{f = 1, r = 0, jump = 0}}
+	MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+	s.c[3], s.c[4] = v * fx, v * fz
+	local what = string.format("into the loop at %d m/s, %d degrees left, %.1f m left", v, dy, lo)
+	local on, low, slow, stalled, since, level = 0, 1, 0, 0, nil, false
+	for _ = 1, 8 * p.rate do
+		MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+		for _, e in ipairs(s.events or {}) do
+			local name = type(e) == "table" and e[1] or e
+			assert(name ~= "crash" and name ~= "smash", string.format("%s: %s (%s) at %.1f,%.1f,%.1f",
+				what, name, tostring(e[2]), s.pos[1], s.pos[2], s.pos[3]))
+		end
+		if s.lp then
+			assert(not since, what .. ": on the loop again after it")
+			local V = s.lp.v
+			on, low = on + 1, math.min(low, s.up and s.up[2] or 1)
+			slow = math.sqrt(V[1] ^ 2 + V[2] ^ 2 + V[3] ^ 2) < 2 and slow + 1 or 0
+			stalled = math.max(stalled, slow)
+		elseif on > 0 then
+			since = (since or 0) + 1
+			if since == p.rate then
+				level = not s.air and math.abs(tonumber(s.pt) or 0) < 0.05 and
+					math.abs(tonumber(s.rl) or 0) < 0.05 and math.abs(s.pos[2] - 0.555) < 0.05
+				break
+			end
+		end
+	end
+	assert(on > 0 and low < -0.95 and level and stalled < 0.3 * p.rate, string.format("%s: %.2f s " ..
+		"on it, its up's y %.2f at the lowest, %s a second after it, under 2 m/s on it %.2f s at most",
+		what, on / p.rate, low, level and "level" or "not level", stalled / p.rate))
+	return on / p.rate
+end
+local offs = {{18, 15, -1.3, 3}, {18, 15, -1, 3}, {18, -10, 0, 3}, {17, 10, 1, 3}, {20, 5, 0.5, 3},
+	{20, 10, 0, 3}, {22, 10, 1, 6.3}, {22, -15, -1, 6.3}}
+for _, o in ipairs(offs) do
+	off_line(o[1], o[2], o[3], o[4])
+end
+print(string.format("ok: into the loop off its line (%d ways: 17-22 m/s, up to 15 degrees off its way, " ..
+	"up to 1.3 m off its lane's middle) round it and off it level, never stalled on it, never " ..
+	"crashed or smashed", #offs))
+
+-- After a wreck: the race puts the car back at its last checkpoint (kit/
+-- checkpoint's respawn: its middle, its yaw) in a new state (Kit's put: the
+-- place 0.45 under it, the yaw). The gas held, it drives off it on its floor
+-- (on the bridge's deck for the first), no crash, no smash
+local cp_t = load_env("builtin/kit/types/checkpoint.lua", env())
+local middle = assert(upvalue(cp_t.on_input, "middle", 0), "checkpoint.lua's middle not found")
+for k, cp in ipairs(cps) do
+	local p = defaults()
+	local m = middle({params = cp.params, pos = cp.pos, yaw = cp.yaw})
+	local s = {pos = {m[1], m[2] - 0.45, m[3]}, yaw = cp.yaw or 0}
+	local floor = cp.pos[2] > 1 and 5.055 or 0.555
+	local inp = {{f = 1, r = 0, jump = 0}}
+	for n = 1, 2 * p.rate do
+		MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+		for _, e in ipairs(s.events or {}) do
+			local name = type(e) == "table" and e[1] or e
+			assert(name ~= "crash" and name ~= "smash", string.format("back at checkpoint %d: %s", k,
+				name))
+		end
+		if n == math.floor(p.rate / 2) then
+			assert(not s.air and math.abs(s.pos[2] - floor) < 0.05, string.format("back at " ..
+				"checkpoint %d: at y %.2f, not on its floor (%.3f)", k, s.pos[2], floor))
+		end
+	end
+	local moved = math.sqrt((s.pos[1] - m[1]) ^ 2 + (s.pos[3] - m[3]) ^ 2)
+	assert(moved > 8, string.format("back at checkpoint %d (%.1f,%.1f,%.1f): %.1f m in 2 s", k,
+		m[1], m[2], m[3], moved))
+end
+print(string.format("ok: put back at each of the %d checkpoints after a wreck, it drives off its " ..
+	"floor there", #cps))

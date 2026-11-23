@@ -68,7 +68,8 @@
 -- while the face holds it (the speed into it, gravity's and the curve's,
 -- not leaving it); too slow it leaves it (a flight under gravity, the
 -- landing rules as off a lip). The rails beside the facets (surface "rail")
--- are walls either side. The gas is held, the keys not read; off the loop
+-- are walls either side (their sides only), one met heading into it turning
+-- the car along it. The gas is held, the keys not read; off the loop
 -- level it steps as before. s.up the frame's up (kit/controls' camera_frame
 -- "body"), the pitch a whole turn there, 512 in flags on a loop.
 -- simplified: no steering, no brakes on a loop (its rails hold it on the
@@ -447,7 +448,10 @@ local function loop_step(s, k, dt, w, p)
 				local n3 = {nx or -Rt[1] * sg, ny or -Rt[2] * sg, nz or -Rt[3] * sg}
 				local nr, nf = dot(n3, Rt), dot(n3, F)
 				local l = math.sqrt(nr * nr + nf * nf)
-				if l > 1e-6 then
+				-- (its sides only: a face mostly along the way is a rail's end at a
+				-- joint between facets, one mostly up its top under a tyre, neither
+				-- a wall: the end stopped the car dead there)
+				if l > 0.7 and math.abs(nr) > 0.5 * l then
 					nr, nf = nr / l, nf / l
 					P = add(add(P, Rt, nr * (R - d)), F, nf * (R - d))
 					local q = {dot(V, Rt), dot(V, F), s.w or 0}
@@ -474,6 +478,18 @@ local function loop_step(s, k, dt, w, p)
 					end
 					if math.abs(pr * -nf + pf * nr) > 2 then
 						flags = flags + (lz > 0 and 64 or 128)
+					end
+					-- (heading into it: turned along it, its speed turned with it, its
+					-- turn stopped. A car met a rail at an angle and the tyres turned
+					-- its speed back into it each step: the scrape's friction slowed
+					-- it short of the top. simplified: a guide rail's turn, not the
+					-- body's swing round its corner)
+					if nf < 0 then
+						local vr2, vf2, vn2 = dot(V, Rt), dot(V, F), dot(V, U)
+						F = unit(add(F, add(add({0, 0, 0}, Rt, nr), F, nf), -nf))
+						Rt = cross(U, F)
+						V = add(add(add({0, 0, 0}, Rt, vr2), F, vf2), U, vn2)
+						s.w = 0
 					end
 				end
 			end

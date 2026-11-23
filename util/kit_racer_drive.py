@@ -119,7 +119,12 @@ while time.time() - t0 < secs:
     vx, vz, yaw = float(m[1]), float(m[2]), float(m[3])
     v = math.hypot(vx, vz)
     if u is None:
-        u = min(range(N), key=lambda q: (P[q][0] - x) ** 2 + (P[q][1] - z) ** 2)
+        # ([KIT_STUNTS] the line's way against the car's yaw too: put back
+        # where the line crosses itself, on the bridge, the nearest point
+        # was the line under it, and it drove into the deck's rail)
+        sy, cy = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
+        u = min(range(N), key=lambda q: (P[q][0] - x) ** 2 + (P[q][1] - z) ** 2 + 25 * (1 -
+                (P[(q + 1) % N][0] - P[q][0]) * sy - (P[(q + 1) % N][1] - P[q][1]) * cy))
     u = min(range(u - 10, u + 40),
             key=lambda q: (P[q % N][0] - x) ** 2 + (P[q % N][1] - z) ** 2) % N
     tx, tz = target or P[(u + int(5 + 0.35 * v)) % N]
