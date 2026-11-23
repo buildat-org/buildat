@@ -232,7 +232,7 @@ if phase == "main":
     assert names == ["get_state", "list_types", "get_type", "get_guide",
         "analyze_music", "get_links", "get_log", "get_view", "show", "play_join", "play_input",
         "play_leave", "get_events", "get_goal_warnings", "get_history",
-        "list_prefabs", "list_items", "list_voxel_types", "list_sounds",
+        "get_session", "list_prefabs", "list_items", "list_voxel_types", "list_sounds",
         "get_voxels", "get_ground", "place", "set_param", "run_generator", "link", "delete",
         "unlink", "move", "rename", "set_comments", "add_component",
         "remove_component", "set_parent", "duplicate", "place_prefab",

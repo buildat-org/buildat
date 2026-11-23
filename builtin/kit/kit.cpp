@@ -1791,6 +1791,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT_CLIENT_REACT] (4)
 		sub(m_server, "network:packet_received/kit:part_failed",
 				&Module::on_part_failed);
+		// [KIT_PLAYTEST_REC] a recorded client's perf and its marks
+		sub(m_server, "network:packet_received/kit:rec", &Module::on_rec);
+		sub(m_server, "network:packet_received/kit:mark", &Module::on_mark);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
@@ -5934,6 +5937,10 @@ struct Module: public interface::Module, public Interface
 		m_pub_save = nullptr;
 		if(!m_hosted)
 			return;
+		// [KIT_PLAYTEST_REC] the recordings so far (a stop leaves them
+		// without an end row)
+		for(auto &r : m_recs)
+			rec_flush(r.second);
 		size_t n = 0;
 		// [KIT_PLAYER_PERSIST] where the players still here are
 		for(auto &p : m_peers)
@@ -18352,6 +18359,10 @@ struct Module: public interface::Module, public Interface
 						cs(type), cs(r.handler), cs(error));
 				add_log(r.entity, r.handler+": "+error);
 			}
+			// [KIT_PLAYTEST_REC] to the round's recordings
+			if(!m_recs.empty())
+				rec_error(0, runaway ? "budget" : "type", r.entity, type,
+						r.handler, runaway ? "ran past its budget" : error);
 			return spent;
 		}
 		const json::Value fx = json::load_string(answer.c_str());
@@ -18421,6 +18432,8 @@ struct Module: public interface::Module, public Interface
 				play_fired(e, output, value, eby);
 			if(m_test.on && m_active == m_test.session)
 				playtest_fired(e, in, output, value, eby);
+			if(!m_recs.empty())
+				rec_emit(eby, e, output, value); // [KIT_PLAYTEST_REC]
 			if(r.tried){
 				json::Value o = json::array();
 				o.append(output);
@@ -22687,6 +22700,7 @@ struct Module: public interface::Module, public Interface
 				"camera") : pi->second.name+"'s client")+": "+err;
 		log_i(MODULE, "Entity %s: %s", cs(itos(e->first)), cs(line));
 		add_log(e->first, line);
+		rec_error(peer, "client_part", e->first, type, handler, err);
 	}
 
 	// The log of the entity a builder has selected, to them: whole as they
@@ -25290,6 +25304,7 @@ struct Module: public interface::Module, public Interface
 			drop_scenes();
 		builds_tick(); // [KIT_BUILD_SLICED]
 		meter_tick(tick_us);
+		rec_tick(tick_us);
 	}
 
 	// [KIT_CROWD_CHECK] BUILDAT_KIT_METER=1: a line every 5 s of the ticks'
@@ -25339,6 +25354,717 @@ struct Module: public interface::Module, public Interface
 		m.last = t0;
 	}
 
+	// ---- [KIT_PLAYTEST_REC] **Playtest recording for agents**: the play of
+	// a player with edit rights (not an agent's, the server's camera's or a
+	// bot's) recorded as one timeline a connection, typed rows {t (seconds
+	// from its start), kind, ...}:
+	//   session  start (player, scene), client (platform, screen, input:
+	//            the client's word), end
+	//   pos      the body's position, speed and scene, 1 Hz (a body that
+	//            stays: every 10 s)
+	//   event    emit (an output emitted by them), ui and menu (a kit/ui
+	//            button's or a pause menu action's press), scene (a switch),
+	//            edit (into the tools or out: no pos rows while in them)
+	//   perf     the client's every 5 s: median and 5th-percentile fps, the
+	//            worst frame (ms, where), with the server's tick gaps over the
+	//            last 5 s
+	//   error    client_part (theirs), type (a handler of their session's
+	//            failing), budget (one past the box's), movement (their body's)
+	//   mark     their note, where, and the picture their client drew then
+	// A later kind is another row. Kept in the game's save, store "playtest":
+	// "h/<id>" a session's head (its summary's fields), "r/<id>/<n>" its rows
+	// as JSON lines a flush (every 10 s and at its end), "p/<id>/<k>" a mark's
+	// PNG. REC_CAP bytes a game (BUILDAT_KIT_REC_CAP), the oldest sessions
+	// dropped first; none past 7 days. get_session reads them.
+	// simplified: rights are looked at as the recording starts (one that
+	// loses them is recorded to the end); an emit or error again within its
+	// window adds to its row's n; the server's stalls are its tick gaps (a
+	// span of its own, not the client's exact 5 s)
+	static constexpr int64_t REC_CAP = 1 << 20, REC_DAYS_S = 7 * 24 * 3600;
+	static constexpr size_t REC_PICTURE_MAX = 256 * 1024;
+	struct Rec {
+		int64_t id = 0, t0 = 0, sampled = 0, written = 0, flushed = 0;
+		int64_t perf_at = 0, mark_at = 0;
+		ss_ player, by, scene;
+		uint64_t session = 0;
+		double pos[3] = {0, 0, 0};
+		bool has_pos = false, full = false, editing = false;
+		sv_<json::Value> rows; // not stored yet
+		std::map<ss_, std::pair<size_t, int64_t>> merge; // key: row, time_us
+		int64_t chunks = 0, pictures = 0;
+		json::Value head = json::object();
+		std::set<ss_> scenes;
+		sv_<double> fps;
+	};
+	std::map<size_t, Rec> m_recs; // by peer
+	std::map<size_t, int64_t> m_rec_later; // not recorded: looked at again then
+	std::map<int64_t, int64_t> m_rec_bytes; // stored sessions' bytes, by id
+	bool m_rec_loaded = false;
+	int64_t m_rec_next = 1, m_rec_flush_at = 0;
+	// The tick gaps: this span's and the last span's (ms)
+	int64_t m_rec_gap_last = 0, m_rec_gap_since = 0, m_rec_gap_n = 0;
+	double m_rec_gap_sum = 0, m_rec_gap_max = 0, m_rec_gap_mean_was = 0,
+			m_rec_gap_max_was = 0;
+
+	storage::Store* rec_store()
+	{
+		return m_hosted && m_host.save ? m_host.save->store("playtest") : nullptr;
+	}
+	static int64_t rec_cap()
+	{
+		const char *e = getenv("BUILDAT_KIT_REC_CAP");
+		const int64_t c = e ? atoll(e) : 0;
+		return c > 0 ? c : (int64_t)REC_CAP;
+	}
+	static ss_ rec_key(const char *what, int64_t id)
+	{
+		char b[32];
+		snprintf(b, sizeof b, "%s/%08lld", what, (long long)id);
+		return b;
+	}
+
+	// The stored sessions' sizes and the next id, read once
+	void rec_load()
+	{
+		storage::Store *st = rec_store();
+		if(m_rec_loaded || !st)
+			return;
+		m_rec_loaded = true;
+		ss_ v;
+		if(st->get("next", v))
+			m_rec_next = std::max<int64_t>(1, atoll(v.c_str()));
+		for(const ss_ &k : st->list("")){
+			if(k.size() < 10 || k[1] != '/')
+				continue;
+			ss_ d;
+			st->get(k, d);
+			m_rec_bytes[atoll(k.substr(2, 8).c_str())] += d.size() + k.size();
+		}
+	}
+
+	// A session's rows gone from the store
+	void rec_drop(int64_t id, const char *why)
+	{
+		storage::Store *st = rec_store();
+		if(!st)
+			return;
+		st->batch([&](){
+			for(const char *p : {"h", "r", "p"})
+				for(const ss_ &k : st->list(rec_key(p, id)))
+					st->remove(k);
+		});
+		log_i(MODULE, "Playtest session %lld dropped: %s", (long long)id, why);
+		m_rec_bytes.erase(id);
+	}
+
+	bool rec_live(int64_t id)
+	{
+		for(auto &r : m_recs)
+			if(r.second.id == id)
+				return true;
+		return false;
+	}
+
+	// The game's store within its cap and its days: the oldest sessions
+	// dropped (never a live one nor the newest); live ones over it alone
+	// stop recording
+	void rec_trim()
+	{
+		storage::Store *st = rec_store();
+		if(!st)
+			return;
+		const int64_t now_s = interface::os::time_us() / 1000000;
+		sv_<int64_t> old;
+		for(auto &b : m_rec_bytes){
+			ss_ h;
+			if(!rec_live(b.first) && st->get(rec_key("h", b.first), h) &&
+					json::jint(json::load_string(h.c_str()), "start") <
+					now_s - REC_DAYS_S)
+				old.push_back(b.first);
+		}
+		for(int64_t id : old)
+			rec_drop(id, "older than 7 days");
+		const int64_t cap = rec_cap();
+		auto total = [&](){
+			int64_t n = 0;
+			for(auto &b : m_rec_bytes)
+				n += b.second;
+			return n;
+		};
+		// (the newest kept: a session alone past the cap stopped growing
+		// as it went past it, and is not lost whole at its end)
+		const int64_t newest = m_rec_bytes.empty() ? 0 :
+				m_rec_bytes.rbegin()->first;
+		for(auto it = m_rec_bytes.begin(); it != m_rec_bytes.end() &&
+				total() > cap;){
+			const int64_t id = (it++)->first;
+			if(!rec_live(id) && id != newest)
+				rec_drop(id, ("past the cap of "+itos(cap)+" bytes").c_str());
+		}
+		if(total() > cap)
+			for(auto &r : m_recs)
+				if(!r.second.full){
+					r.second.full = true;
+					log_i(MODULE, "Playtest session %lld (%s) stops: past the cap "
+							"of %lld bytes", (long long)r.second.id,
+							cs(r.second.player), (long long)cap);
+				}
+	}
+
+	double rec_t(const Rec &r)
+	{
+		return round1((interface::os::time_us() - r.t0) / 1e6);
+	}
+
+	// A row; one of the same key within window_us of its first adds to its n
+	void rec_add(Rec &r, json::Value row, const ss_ &key = "",
+			int64_t window_us = 0)
+	{
+		const int64_t now = interface::os::time_us();
+		if(!key.empty()){
+			auto m = r.merge.find(key);
+			if(m != r.merge.end() && m->second.first < r.rows.size() &&
+					now - m->second.second < window_us){
+				json::Value &was = r.rows[m->second.first];
+				was.set("n", json::jint(was, "n", 1) + 1);
+				return;
+			}
+		}
+		if(r.full && jstr(row, "kind") != "session")
+			return;
+		const ss_ kind = jstr(row, "kind");
+		json::Value o = json::object();
+		o.set("t", rec_t(r));
+		o.set("kind", kind);
+		for(json::Iterator it(row); it; ++it)
+			if(it.key() != "kind")
+				o.set(it.key(), *it);
+		if(kind == "mark")
+			r.head.set("marks", json::jint(r.head, "marks") + 1);
+		if(kind == "error")
+			r.head.set("errors", json::jint(r.head, "errors") + 1);
+		if(!key.empty())
+			r.merge[key] = std::make_pair(r.rows.size(), now);
+		r.rows.push_back(o);
+	}
+
+	// Its rows since the last flush stored, and its head
+	void rec_flush(Rec &r)
+	{
+		storage::Store *st = rec_store();
+		if(!st)
+			return;
+		rec_load();
+		r.flushed = interface::os::time_us();
+		ss_ chunk;
+		for(const json::Value &row : r.rows)
+			chunk += row.stringify()+"\n";
+		r.rows.clear();
+		r.merge.clear();
+		json::Value h = r.head.deepcopy();
+		h.set("id", r.id);
+		h.set("player", r.player);
+		h.set("start", r.t0 / 1000000);
+		h.set("length", rec_t(r));
+		json::Value sc = json::array();
+		for(const ss_ &s : r.scenes)
+			sc.append(s);
+		h.set("scenes", sc);
+		if(!r.fps.empty()){
+			sv_<double> f = r.fps;
+			std::sort(f.begin(), f.end());
+			h.set("fps", f[f.size() / 2]);
+		}
+		const ss_ hk = rec_key("h", r.id), hs = h.stringify();
+		ss_ was;
+		st->get(hk, was);
+		char ck[48];
+		snprintf(ck, sizeof ck, "%s/%06lld", rec_key("r", r.id).c_str(),
+				(long long)r.chunks);
+		st->batch([&](){
+			if(!chunk.empty())
+				st->set(ck, chunk);
+			st->set(hk, hs);
+			st->set("next", itos(m_rec_next));
+		});
+		int64_t &b = m_rec_bytes[r.id];
+		if(!chunk.empty()){
+			r.chunks++;
+			b += chunk.size() + strlen(ck);
+		}
+		b += (int64_t)hs.size() - (int64_t)was.size() + (was.empty() ? hk.size() : 0);
+		rec_trim();
+	}
+
+	// The body's place and scene (in its session's scope)
+	bool rec_body(size_t peer, double pos[3], ss_ &scene)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return false;
+		scene = pi->second.scene;
+		auto bi = m_bodies.find(peer);
+		const json::Value &bp = bi != m_bodies.end() ?
+				bi->second.state.get("pos") : json::Value();
+		for(int k = 0; k < 3; k++)
+			pos[k] = bp.is_array() && bp.size() == 3 && bp.at(k).is_number() ?
+					bp.at(k).as_number() : pi->second.pos[k];
+		return true;
+	}
+
+	// Each round's tick: its builders' recordings started, their places
+	void rec_round()
+	{
+		const int64_t now = interface::os::time_us();
+		for(auto &pp : m_peers){
+			const size_t peer = pp.first;
+			const Peer &p = pp.second;
+			auto ri = m_recs.find(peer);
+			if(ri == m_recs.end()){
+				if(p.name.empty() || !p.player || p.still || peer == m_cam.peer ||
+						agent_of(peer) || now < m_rec_later[peer] || !rec_store())
+					continue;
+				if(!can_edit_u(peer)){
+					m_rec_later[peer] = now + 5000000;
+					continue;
+				}
+				rec_load();
+				Rec &r = m_recs[peer];
+				r.id = m_rec_next++;
+				r.t0 = r.flushed = now;
+				r.player = p.name;
+				json::Value row = json::object();
+				row.set("kind", "session");
+				row.set("what", "start");
+				row.set("player", p.name);
+				row.set("scene", p.scene);
+				rec_add(r, row);
+				log_i(MODULE, "Playtest session %lld: %s's play recorded",
+						(long long)r.id, cs(p.name));
+				network::access(m_server, [&](network::Interface *i){
+					i->send(peer, "kit:rec", "1");
+				});
+				ri = m_recs.find(peer);
+			}
+			Rec &r = ri->second;
+			r.session = m_active;
+			r.by = "player:"+itos(p.player);
+			// In the tools: no places (an event at each change)
+			if(p.editing != r.editing){
+				r.editing = p.editing;
+				json::Value e = json::object();
+				e.set("kind", "event");
+				e.set("what", "edit");
+				e.set("on", p.editing);
+				rec_add(r, e);
+			}
+			if(p.editing || now - r.sampled < 1000000)
+				continue;
+			const double dt = r.sampled ? (now - r.sampled) / 1e6 : 1;
+			r.sampled = now;
+			double pos[3];
+			ss_ scene;
+			if(!rec_body(peer, pos, scene))
+				continue;
+			double d2 = 0;
+			for(int k = 0; k < 3; k++)
+				d2 += (pos[k] - r.pos[k]) * (pos[k] - r.pos[k]);
+			const bool moved = !r.has_pos || d2 > 0.0025 || scene != r.scene;
+			if(r.has_pos && scene != r.scene){
+				json::Value e = json::object();
+				e.set("kind", "event");
+				e.set("what", "scene");
+				e.set("from", r.scene);
+				e.set("to", scene);
+				rec_add(r, e);
+			}
+			const double speed = r.has_pos ? std::sqrt(d2) / dt : 0;
+			for(int k = 0; k < 3; k++)
+				r.pos[k] = pos[k];
+			r.has_pos = true;
+			r.scene = scene;
+			r.scenes.insert(scene);
+			if(!moved && now - r.written < 10000000)
+				continue;
+			r.written = now;
+			json::Value row = json::object();
+			row.set("kind", "pos");
+			row.set("pos", vec1(pos));
+			row.set("speed", round1(speed));
+			row.set("scene", scene);
+			rec_add(r, row);
+		}
+	}
+
+	// The server's tick: its gaps measured, the recordings flushed
+	void rec_tick(int64_t t0)
+	{
+		if(m_rec_gap_last){
+			const double g = (t0 - m_rec_gap_last) / 1e3;
+			m_rec_gap_sum += g;
+			m_rec_gap_max = std::max(m_rec_gap_max, g);
+			m_rec_gap_n++;
+		}
+		m_rec_gap_last = t0;
+		if(t0 - m_rec_gap_since >= 5000000){
+			m_rec_gap_mean_was = m_rec_gap_n ? m_rec_gap_sum / m_rec_gap_n : 0;
+			m_rec_gap_max_was = m_rec_gap_max;
+			m_rec_gap_sum = m_rec_gap_max = 0;
+			m_rec_gap_n = 0;
+			m_rec_gap_since = t0;
+		}
+		for(auto &r : m_recs)
+			if(t0 - r.second.flushed >= 10000000)
+				rec_flush(r.second);
+	}
+
+	// Their connection's end: the session's
+	void rec_end(size_t peer)
+	{
+		m_rec_later.erase(peer);
+		auto ri = m_recs.find(peer);
+		if(ri == m_recs.end())
+			return;
+		json::Value row = json::object();
+		row.set("kind", "session");
+		row.set("what", "end");
+		rec_add(ri->second, row);
+		const Rec r = ri->second;
+		m_recs.erase(ri);
+		Rec last = r;
+		rec_flush(last);
+		log_i(MODULE, "Playtest session %lld (%s) ended, %s s", (long long)r.id,
+				cs(r.player), cs(ftos1(rec_t(r))));
+	}
+
+	Rec* rec_of(size_t peer)
+	{
+		auto ri = m_recs.find(peer);
+		return ri == m_recs.end() ? nullptr : &ri->second;
+	}
+
+	// An output emitted by `by` in this round
+	void rec_emit(const ss_ &by, const Entity &e, const ss_ &output,
+			const json::Value &value)
+	{
+		for(auto &rp : m_recs){
+			Rec &r = rp.second;
+			if(r.by != by || r.session != m_active)
+				continue;
+			json::Value row = json::object();
+			row.set("kind", "event");
+			row.set("what", "emit");
+			row.set("entity", (int64_t)e.id);
+			if(!e.name.empty())
+				row.set("name", e.name);
+			row.set("output", output);
+			const ss_ v = value.stringify();
+			if(!value.is_null())
+				row.set("value", v.size() <= 200 ? value : json::Value(v.substr(0,
+						200)));
+			rec_add(r, row, "emit:"+itos(e.id)+":"+output, 1000000);
+		}
+	}
+
+	// An error: to peer's recording, or (peer 0) every one in this round
+	void rec_error(size_t peer, const ss_ &what, uint64_t entity,
+			const ss_ &type, const ss_ &handler, const ss_ &error)
+	{
+		json::Value row = json::object();
+		row.set("kind", "error");
+		row.set("what", what);
+		if(entity)
+			row.set("entity", (int64_t)entity);
+		row.set("type", type);
+		if(!handler.empty())
+			row.set("handler", handler);
+		row.set("error", cut_utf8(error, 300));
+		const ss_ key = "err:"+what+":"+itos(entity)+":"+handler;
+		for(auto &rp : m_recs)
+			if(peer ? rp.first == peer : rp.second.session == m_active)
+				rec_add(rp.second, row, key, 10000000);
+	}
+
+	// "kit:rec" from a recorded client: {kind: "client", platform, screen,
+	// input} once, {kind: "perf", fps, fps5, worst_ms, worst_at, frames}
+	// every 5 s
+	void on_rec(const network::Packet &packet)
+	{
+		Rec *r = rec_of(packet.sender);
+		const json::Value j = packet.data.size() <= 1024 ?
+				json::load_string(packet.data.c_str()) : json::null();
+		if(!r || !j.is_object())
+			return;
+		auto num = [&](const char *k, double lo, double hi){
+			const json::Value &v = j.get(k);
+			return v.is_number() && v.as_number() >= lo && v.as_number() <= hi ?
+					round1(v.as_number()) : NAN;
+		};
+		const ss_ kind = jstr(j, "kind");
+		const int64_t now = interface::os::time_us();
+		if(kind == "client"){
+			const ss_ pl = jstr(j, "platform"), in = jstr(j, "input");
+			const json::Value &s = j.get("screen");
+			if((pl != "native" && pl != "web") || (in != "touch" &&
+					in != "keyboard/mouse") || !s.is_array() || s.size() != 2 ||
+					!s.at(0u).is_number() || !s.at(1u).is_number())
+				return;
+			json::Value scr = json::array();
+			for(unsigned k = 0; k < 2; k++)
+				scr.append((int64_t)std::max(0.0, std::min(65535.0,
+						s.at(k).as_number())));
+			for(const char *k : {"platform", "input"})
+				r->head.set(k, jstr(j, k));
+			r->head.set("screen", scr);
+			// (the start's row while it is not stored yet)
+			json::Value *at = !r->rows.empty() && jstr(r->rows[0], "what") ==
+					"start" ? &r->rows[0] : nullptr;
+			json::Value row = json::object();
+			row.set("kind", "session");
+			row.set("what", "client");
+			json::Value &o = at ? *at : row;
+			o.set("platform", pl);
+			o.set("screen", scr);
+			o.set("input", in);
+			if(!at)
+				rec_add(*r, row);
+			log_i(MODULE, "Playtest session %lld: %s's client: %s, %lldx%lld, %s",
+					(long long)r->id, cs(r->player), cs(pl),
+					(long long)scr.at(0u).as_number(), (long long)scr.at(1u).as_number(),
+					cs(in));
+		} else if(kind == "perf" && now - r->perf_at > 2000000){
+			const double fps = num("fps", 0, 10000), fps5 = num("fps5", 0, 10000),
+					worst = num("worst_ms", 0, 600000);
+			if(std::isnan(fps) || std::isnan(fps5) || std::isnan(worst))
+				return;
+			r->perf_at = now;
+			json::Value row = json::object();
+			row.set("kind", "perf");
+			row.set("fps", fps);
+			row.set("fps5", fps5);
+			row.set("worst_ms", worst);
+			const json::Value &wa = j.get("worst_at");
+			if(wa.is_array() && wa.size() == 3 && wa.at(0u).is_number() &&
+					wa.at(1u).is_number() && wa.at(2u).is_number()){
+				double p[3];
+				for(unsigned k = 0; k < 3; k++)
+					p[k] = std::max(-MAX_COORD, std::min(MAX_COORD,
+							wa.at(k).as_number()));
+				row.set("worst_at", vec1(p));
+			}
+			row.set("frames", (int64_t)std::max(0.0, num("frames", 0, 1e6)));
+			row.set("tick_ms", round1(m_rec_gap_mean_was));
+			row.set("tick_max_ms", round1(m_rec_gap_max_was));
+			r->fps.push_back(fps);
+			rec_add(*r, row);
+		}
+	}
+
+	// "kit:mark" from a recorded client: "<{note}>\n<PNG>" (or no PNG): the
+	// note, where its body is and the picture (REC_PICTURE_MAX bytes, 1024x768
+	// at most, decoded and made anew)
+	void on_mark(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		Rec *r = rec_of(peer);
+		const int64_t now = interface::os::time_us();
+		if(!r || now - r->mark_at < 2000000 || r->pictures >= 50 || r->full){
+			log_i(MODULE, "A mark from peer %zu refused: not recorded, too soon, "
+					"50 already or past the cap", peer);
+			return;
+		}
+		r->mark_at = now;
+		const ss_ &d = packet.data;
+		const size_t nl = d.find('\n');
+		const json::Value j = nl != ss_::npos && nl <= 4096 ?
+				json::load_string(d.substr(0, nl).c_str()) : json::null();
+		ss_ note;
+		for(char c : cut_utf8(jstr(j, "note"), 500))
+			note += (unsigned char)c < 32 ? ' ' : c;
+		json::Value row = json::object();
+		row.set("kind", "mark");
+		row.set("note", note);
+		{
+			SessionScope sc(*this, session_of_peer(peer));
+			double pos[3];
+			ss_ scene;
+			if(rec_body(peer, pos, scene)){
+				row.set("pos", vec1(pos));
+				row.set("scene", scene);
+			}
+		}
+		const ss_ body = nl == ss_::npos ? ss_() : d.substr(nl + 1);
+		ss_ png, why;
+		int w = 0, h = 0;
+		if(body.empty())
+			why = "none sent";
+		else if(body.size() > REC_PICTURE_MAX || body.size() < 33 ||
+				body.compare(0, 8, "\x89PNG\r\n\x1a\n", 8) != 0)
+			why = "not a PNG within "+itos(REC_PICTURE_MAX >> 10)+" KiB";
+		else
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				magic::Image img(imc->get_context());
+				magic::MemoryBuffer in(body.data(), (unsigned)body.size());
+				if(!img.Load(in) || img.IsCompressed() || img.GetWidth() > 1024 ||
+						img.GetHeight() > 768)
+					return;
+				magic::VectorBuffer buf;
+				if(img.Save(buf))
+					png.assign((const char*)buf.GetData(), buf.GetSize());
+				w = img.GetWidth();
+				h = img.GetHeight();
+			});
+		if(png.empty() && why.empty())
+			why = "did not decode (1024x768 at most)";
+		storage::Store *st = rec_store();
+		if(!png.empty() && st){
+			const ss_ k = rec_key("p", r->id)+"/"+itos(r->pictures);
+			st->set(k, png);
+			m_rec_bytes[r->id] += png.size() + k.size();
+			json::Value sz = json::array();
+			sz.append(w);
+			sz.append(h);
+			row.set("picture", r->pictures++);
+			row.set("size", sz);
+		} else {
+			row.set("picture", json::null());
+			row.set("picture_why", why);
+		}
+		rec_add(*r, row);
+		log_i(MODULE, "Playtest session %lld: %s marked a moment (%zu bytes of "
+				"note, %s)", (long long)r->id, cs(r->player), note.size(),
+				png.empty() ? cs("no picture: "+why) : cs("a picture "+itos(w)+"x"+
+				itos(h)+", "+itos(png.size())+" bytes"));
+		rec_flush(*r);
+	}
+
+	// get_session {player, session, kinds, since}
+	sv_<ss_> m_mcp_pngs; // a synchronous answer's pictures
+	ss_ agent_session(const json::Value &a, bool &failed)
+	{
+		failed = true;
+		storage::Store *st = rec_store();
+		if(!st)
+			return "No playtests: this game has no save";
+		// (the live ones stored first: what is read is up to now)
+		for(auto &r : m_recs)
+			rec_flush(r.second);
+		rec_load();
+		const json::Value &sv = a.get("session"), &kv = a.get("kinds"),
+				&tv = a.get("since");
+		const ss_ player = jstr(a, "player");
+		if(!sv.is_undefined() && !(sv.is_number() && sv.as_number() >= 1 &&
+				sv.as_number() < 1e12))
+			return "session: a session's number (get_session with none lists them)";
+		if(!tv.is_undefined() && !(tv.is_number() && tv.as_number() >= 0))
+			return "since: seconds from the session's start";
+		static const std::set<ss_> KINDS = {"session", "pos", "event", "perf",
+				"error", "mark"};
+		std::set<ss_> kinds;
+		for(unsigned i = 0; kv.is_array() && i < kv.size(); i++){
+			if(!kv.at(i).is_string() || !KINDS.count(kv.at(i).as_string()))
+				return "kinds: of session, pos, event, perf, error, mark";
+			kinds.insert(kv.at(i).as_string());
+		}
+		if(!kv.is_undefined() && !kv.is_array())
+			return "kinds: an array (of session, pos, event, perf, error, mark)";
+		failed = false;
+		if(sv.is_undefined()){
+			// The recent ones, the newest first
+			json::Value out = json::array();
+			for(auto it = m_rec_bytes.rbegin(); it != m_rec_bytes.rend() &&
+					out.size() < 30; ++it){
+				ss_ hs;
+				if(!st->get(rec_key("h", it->first), hs))
+					continue;
+				const json::Value h = json::load_string(hs.c_str());
+				if(!player.empty() && jstr(h, "player") != player)
+					continue;
+				const int64_t len = json::jint(h, "length");
+				ss_ sc;
+				const json::Value &sl = h.get("scenes");
+				for(unsigned i = 0; i < sl.size(); i++)
+					sc += (i ? ", " : "")+(sl.at(i).as_string().empty() ? ss_("(main)") :
+							sl.at(i).as_string());
+				const int64_t marks = json::jint(h, "marks"),
+						errors = json::jint(h, "errors");
+				json::Value o = json::object();
+				o.set("session", it->first);
+				o.set("summary", jstr(h, "player")+", "+utc_text(json::jint(h,
+						"start"))+", "+itos(len / 60)+" min "+itos(len % 60)+" s, "+
+						(sc.empty() ? ss_("no scene") : "scenes "+sc)+", "+
+						(h.get("fps").is_number() ? "median "+ftos1(h.get("fps").
+						as_number())+" fps" : ss_("no fps"))+", "+itos(marks)+
+						(marks == 1 ? " mark, " : " marks, ")+itos(errors)+
+						(errors == 1 ? " error" : " errors")+(rec_live(it->first) ?
+						" (live)" : ""));
+				for(const char *k : {"platform", "input"})
+					if(!jstr(h, k).empty())
+						o.set(k, jstr(h, k));
+				o.set("bytes", it->second);
+				out.append(o);
+			}
+			json::Value r = json::object();
+			r.set("sessions", out);
+			r.set("store", "a game keeps "+itos(rec_cap() >> 10)+" KiB of these "
+					"at most, the oldest dropped first, 7 days at most");
+			return r.stringify();
+		}
+		const int64_t id = (int64_t)sv.as_number();
+		ss_ hs;
+		if(!st->get(rec_key("h", id), hs)){
+			failed = true;
+			return "No session "+itos(id)+" (get_session with none lists them)";
+		}
+		const double since = tv.is_number() ? tv.as_number() : -1;
+		json::Value rows = json::array();
+		static const size_t MAX_ROWS = 300, MAX_PICTURES = 4,
+				MAX_TEXT = 60000;
+		size_t text = 0;
+		double more = -1;
+		for(const ss_ &k : st->list(rec_key("r", id)+"/")){
+			ss_ chunk;
+			st->get(k, chunk);
+			std::istringstream is(chunk);
+			for(ss_ line; more < 0 && std::getline(is, line);){
+				json::Value row = json::load_string(line.c_str());
+				if(!row.is_object() || (!kinds.empty() &&
+						!kinds.count(jstr(row, "kind"))) ||
+						(since >= 0 && row.get("t").as_number() < since))
+					continue;
+				if(rows.size() >= MAX_ROWS || text + line.size() > MAX_TEXT){
+					more = row.get("t").as_number();
+					break;
+				}
+				const json::Value &pk = row.get("picture");
+				if(jstr(row, "kind") == "mark" && pk.is_number()){
+					ss_ png;
+					if(m_mcp_pngs.size() < MAX_PICTURES && st->get(rec_key("p",
+							id)+"/"+itos((int64_t)pk.as_number()), png)){
+						m_mcp_pngs.push_back(png);
+						row.set("image", (int64_t)m_mcp_pngs.size());
+					} else {
+						row.set("image", "not in this answer (4 a call: since "
+								"its t for it)");
+					}
+				}
+				text += line.size();
+				rows.append(row);
+			}
+		}
+		json::Value r = json::object();
+		r.set("session", id);
+		r.set("head", json::load_string(hs.c_str()));
+		r.set("rows", rows);
+		if(more >= 0)
+			r.set("more", "rows from t "+ftos1(more)+" on: call again with that "
+					"since");
+		if(!m_mcp_pngs.empty())
+			r.set("images", "a mark's image n is the answer's n-th picture after "
+					"this text");
+		return r.stringify();
+	}
+
 	// One round's tick (the default's or a session's, entered); a
 	// session's has no copies or start of its own to write
 	// simplified: each session runs its round with a tick's whole budget
@@ -25384,6 +26110,7 @@ struct Module: public interface::Module, public Interface
 		music_tick();
 		env_tick();
 		lobby_out_tick();
+		rec_round(); // [KIT_PLAYTEST_REC]
 		// simplified: the world's actions looked for once a second, not
 		// as the instances and their parameters change; a change hook is
 		// the upgrade if a world of thousands makes the scan a cost
@@ -29837,6 +30564,8 @@ struct Module: public interface::Module, public Interface
 					if(!b.failed){
 						log_w(MODULE, "%s's body (%s): %s", cs(pi->second.name),
 								cs(b.type), cs(why));
+						rec_error(pi->first, slow ? "budget" : "movement", 0,
+								b.type, "", why); // [KIT_PLAYTEST_REC]
 						uint64_t id = 0;
 						size_t comp = 0;
 						if(slow && movement_root(b.type, pi->second.scene, id, comp))
@@ -34635,6 +35364,19 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "UI button %s %s by %s%s", cs(itos(id)),
 				down ? "pressed" : "released", cs(pe.name),
 				row ? cs(", row "+itos(row)) : "");
+		// [KIT_PLAYTEST_REC] a press, a pause menu action's as "menu"
+		if(Rec *rc = down ? rec_of(peer) : nullptr){
+			const ss_ kind = jstr(m_types[it->second.comps[comp].type].decl.get(
+					"ui"), "kind");
+			json::Value ev = json::object();
+			ev.set("kind", "event");
+			ev.set("what", kind == "menu" ? "menu" : "ui");
+			ev.set("entity", (int64_t)id);
+			ev.set("label", jstr(it->second.comps[comp].params, "label"));
+			if(row)
+				ev.set("row", row);
+			rec_add(*rc, ev);
+		}
 		Run r;
 		r.entity = id;
 		r.comp = comp;
@@ -34754,6 +35496,7 @@ struct Module: public interface::Module, public Interface
 	void on_left(const network::OldClient &old)
 	{
 		view_tick(old.info.id);
+		rec_end(old.info.id); // [KIT_PLAYTEST_REC]
 		if(old.info.id == m_cam.peer){
 			log_i(MODULE, "The server's camera (peer %zu) left", m_cam.peer);
 			m_cam.peer = 0;
@@ -35454,6 +36197,33 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {
 				"since": {"description": "A time as the entries' or seconds since 1970"},
 				"limit": {"type": "integer"}}})J", ""},
+			// [KIT_PLAYTEST_REC] (agent_session())
+			{"get_session", "=session", "Builders' playtests as they were "
+				"played (every player with edit rights is recorded, one session "
+				"a connection; 1 MB a game, the oldest dropped, 7 days at most). "
+				"None: the recent sessions, the newest first, each with a "
+				"summary (player, start, length, scenes, median fps, marks, "
+				"errors); player: only theirs. session: its rows, each {t "
+				"(seconds from its start), kind, ...}: session (start, client: "
+				"platform, screen, input; end), pos (1 Hz: pos, speed, scene), "
+				"event (emit: an output by them; ui, menu: a button's press; "
+				"scene: a switch), perf (every 5 s: the client's median fps, "
+				"fps5 its 5th percentile, the worst frame's ms and place; the "
+				"server's tick_ms and tick_max_ms), error (client_part, type, "
+				"budget, movement), mark (the builder's note at a moment, F8 "
+				"or the pause menu's \"Mark this moment\": pos, scene and the "
+				"picture their client drew then, an image after the text, 4 a "
+				"call); one repeated within a second or so counted in n. kinds: "
+				"only those; since: from that t; 300 rows a call (more: where "
+				"to go on). Read the marks first: they are what the builder "
+				"wants you to see.",
+				R"J({"type": "object", "properties": {
+				"player": {"type": "string", "description": "Only this player's sessions"},
+				"session": {"type": "integer", "description": "A session's number, from the list"},
+				"kinds": {"type": "array", "items": {"type": "string", "enum":
+					["session", "pos", "event", "perf", "error", "mark"]}},
+				"since": {"type": "number", "description": "Seconds from the session's start"}}})J",
+				""},
 			{"list_prefabs", "=prefabs", "The prefabs to place: each one's "
 				"version, number of copies placed, voxel box and whether it is "
 				"yours (save_prefab makes a new version). With prefab: its "
@@ -36499,6 +37269,7 @@ struct Module: public interface::Module, public Interface
 			bool failed = !calls_ok;
 			m_mcp_defer = 0;
 			m_mcp_late.clear();
+			m_mcp_pngs.clear();
 			const ss_ text = failed ? "Over "+itos(AGENT_CALLS)+" calls a "
 					"minute: wait" : agent_tool(at, *t, args, failed);
 			// [KIT_SERVER_PUBLISH] its answer from a thread (mcp_answer())
@@ -36517,6 +37288,15 @@ struct Module: public interface::Module, public Interface
 			c.set("type", "text");
 			c.set("text", text);
 			content.append(c);
+			// [KIT_PLAYTEST_REC] get_session's marks' pictures
+			for(const ss_ &png : m_mcp_pngs){
+				json::Value i = json::object();
+				i.set("type", "image");
+				i.set("data", base64(png));
+				i.set("mimeType", "image/png");
+				content.append(i);
+			}
+			m_mcp_pngs.clear();
 			res.set("content", content);
 			res.set("isError", failed);
 			return reply(id, "result", res, 200, "");
@@ -40209,6 +40989,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "=history")
 			return agent_history(a, failed);
+		if(op == "=session")
+			return agent_session(a, failed);
 		if(op == "=voxels")
 			return agent_get_voxels(p, a, failed);
 		if(op == "=ground")
@@ -42728,7 +43510,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_NEXT_1] 2, 3b
 			"- Make big changes in a draft (your own copy; publish or "
 			"leave_draft), after a checkpoint of the start; playtest runs "
-			"bots through it.\n"
+			"bots through it. get_session: how the builders played it "
+			"(their marks first).\n"
 			// [KIT_AGENT_VISUALS]
 			"- The look: get_guide topic \"visuals\" first. "+ss_(has_view() ?
 			"Look with get_view before and after a change; " :
