@@ -755,7 +755,9 @@ namespace interface
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
 //   512 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
 //   nor touching, its area not 0; any winding), edited in a side game's 2D
-//   view, not the inspector (kit/polygon's).
+//   view, not the inspector (kit/polygon's). [KIT_STUNTS] With `crossing` =
+//   true its edges may cross and its area be 0, no point twice in a row
+//   still (a loop round a figure eight: kit/path's points).
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in
 //   the world and sounds), "physics" or "advanced" (technical: poll, rate,
@@ -886,7 +888,7 @@ namespace interface
 //   twice a second at most.
 //   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
 //   c:child, c:link, c:voxel_box, c.entities, c.move_lib, c:generate and the
-//   "points" keys `values` and `level` may change in any release; publishing
+//   "points" keys `values`, `level` and `crossing` may change in any release; publishing
 //   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an

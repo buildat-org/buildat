@@ -5007,7 +5007,7 @@ struct Module: public interface::Module, public Interface
 		if(t == "position")
 			return pos_ok(v) ? "" : "a position, three numbers";
 		if(t == "points")
-			return points_ok(v, decl.get("values"));
+			return points_ok(v, decl.get("values"), decl.get("crossing").is_true());
 		return "a type of parameter Kit has (\""+t.substr(0, 32)+"\" is none)";
 	}
 
@@ -5017,9 +5017,11 @@ struct Module: public interface::Module, public Interface
 	// be. Every pair of edges is checked (512 points: 130816 pairs, about 1 ms).
 	// [KIT_GENERATORS] (4z37f) a parameter's `values` = {{name, min, max,
 	// default}...}: a point's further numbers after its x and y, in that
-	// order (a track's corner's radius), each within its min and max
+	// order (a track's corner's radius), each within its min and max.
+	// [KIT_STUNTS] crossing (the parameter's `crossing` = true): its edges may
+	// cross and its area be 0 (a loop round a figure eight)
 	static ss_ points_ok(const json::Value &v, const json::Value &values =
-			json::Value())
+			json::Value(), bool crossing = false)
 	{
 		const unsigned nv = values.is_array() ? values.size() : 0;
 		ss_ names;
@@ -5069,6 +5071,8 @@ struct Module: public interface::Module, public Interface
 				return "a polygon with no point twice in a row";
 			area += x[i] * y[j] - x[j] * y[i];
 		}
+		if(crossing)
+			return "";
 		if(area == 0)
 			return "a polygon with an area";
 		for(size_t i = 0; i < n; i++){
