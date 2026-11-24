@@ -150,6 +150,43 @@ as /api/v1/discussed, the same base url. A launcher's click on a thread
 joins the Hearth and opens it, as BUILDAT_OPEN does (the client's
 hearth_open()).
 
+/api/v1/topics is JSON {topics: [{id, name, parent}]}, every topic (a
+parent 0 is a top-level one): where a script finds a topic's id by its
+name. Cache-Control max-age=60, no CORS.
+
+POST /api/v1/post is for a script, such as release notes posted by one
+([HEARTH_POST_API]). JSON {token, topic, title, body, kind (optional)}
+starts a thread; {token, thread, body} replies. It runs the client's
+new_thread or reply as the token's account: its rights (a topic marked
+topic_mod_threads needs a moderator), its limits, holds and markup, and
+the notifications, the feed and "hr:activity" as for any message. The
+answer is {ok: true, id, url} (the thread's id, or the reply's) or {ok:
+false, error}: 403 a bad or revoked token, or its account banned or
+deleted; 400 what Hearth refused, its reason as the client would show
+it; 405 not a POST; 429 past 10 bad tokens a minute from an address
+(then every request from it waits the minute). Cache-Control no-store,
+no CORS, and a request with an Origin header (a page in a browser) is
+refused. A message posted so shows "(via API)" after its author, on the
+page and in the client.
+
+    curl -X POST -H 'Content-Type: application/json' -d \
+      '{"token":"hrt_...","topic":3,"title":"0.7.110","body":"..."}' \
+      https://forum.example.org/api/v1/post
+
+A token is made by the admin, in the client's Settings, "API tokens": a
+name, a level (as it is, or a member, a helper or a moderator) and Make.
+An account that does not exist is made with a random password no one is
+shown, at that level (a member if none is picked); one that exists
+keeps its level unless one is picked. The token -- "hrt_" and 64 hex
+digits, 256 random bits -- is shown once, with Copy; Hearth keeps its
+sha256, when it was made and when last used. One an account: New token
+replaces it, Revoke ends it; the list shows each with its account's
+level, made and last use. The commands: api_tokens, api_token {name,
+level (0 as it is, 10, 20, 30)} -> {name, token, created_account},
+api_token_revoke {name}, the admin's only.
+(simplified: Hearth's own token; builtin/accounts' agent tokens are the
+upgrade once they reach this line.)
+
 Taking part: the client
 -----------------------
 The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
@@ -274,7 +311,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            helpers, the admin moderators
     staff                  a helper and up: name and level of each
                            helper and up
-    public_url, file_settings, delete_file, release_sources
+    public_url, file_settings, delete_file, release_sources, api_tokens,
+    api_token, api_token_revoke
                            the admin's; described where they belong
     account                name: its level, its messages; to its owner
                            its trust counts; to a helper and up who
