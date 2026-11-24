@@ -2992,6 +2992,27 @@ struct Module: public interface::Module, public Interface
 			over(vi->second);
 	}
 
+	// [KIT_ENT_PERF] A drive's key (its time a whole ms) kept as kit:track sends it:
+	// a mm, a hundredth of a degree (the clients' keys the server's, a deck's pose
+	// the same at both ends), and TRACK_SPACING ms after the last at least (both
+	// ends interpolate between them; 30 keys a second at %.17g were 2 kB/s a unit
+	// a client). The first is kept, a later one not after the last ignored; those
+	// past TRACK_KEEP go (two stay)
+	static constexpr double TRACK_SPACING = 100;
+	static void add_key(Drive &d, std::array<double, 7> key, double now)
+	{
+		for(int k = 1; k < 7; k++){
+			const double f = k < 4 ? 1000 : 100;
+			key[k] = std::round(key[k] * f) / f + 0.0;
+		}
+		if(!d.keys.empty() && key[0] < d.keys.back()[0] + (d.keys.size() > 1 ?
+				TRACK_SPACING : 1))
+			return;
+		d.keys.push_back(key);
+		while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
+			d.keys.pop_front();
+	}
+
 	// A track's pose at t (s); false: no key yet
 	static bool track_at(const std::deque<std::array<double, 7>> &k, double t, double v[6])
 	{
@@ -3104,8 +3125,8 @@ struct Module: public interface::Module, public Interface
 				pos.append(w[2]);
 				d.state.set("pos", pos);
 				d.state.set("yaw", d.creature ? wq.yaw() : e.yaw);
-				d.keys.push_back({{std::floor(d.t * 1000), e.pos[0], e.pos[1], e.pos[2],
-						e.yaw, e.pitch, e.roll}});
+				add_key(d, {{std::floor(d.t * 1000), e.pos[0], e.pos[1], e.pos[2],
+						e.yaw, e.pitch, e.roll}}, d.t);
 				log_i(MODULE, "Entity %s's %s steps in play", cs(itos(e.id)),
 						cs(mv->type));
 			}
@@ -28506,9 +28527,7 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "[KIT_AIRSHIPS] entity %s flies at %.2f m/s",
 						cs(itos(e.id)), flat);
 			}
-			d.keys.push_back(key);
-			while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
-				d.keys.pop_front();
+			add_key(d, key, now);
 		}
 		for(uint64_t id : unseat)
 			bot_unseat(id, "the seat is gone");
@@ -30531,10 +30550,7 @@ struct Module: public interface::Module, public Interface
 		pq.angles(py, pp, pr);
 		const std::array<double, 7> key = {{std::floor(d.t * 1000), l[0], l[1], l[2],
 				q.yaw() - py, 0, 0}};
-		if(d.keys.empty() || key[0] > d.keys.back()[0])
-			d.keys.push_back(key);
-		while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
-			d.keys.pop_front();
+		add_key(d, key, now);
 		d.speed = d.turn = 0;
 		bot_pose(e, d, q.yaw());
 		return true;
@@ -30835,7 +30851,7 @@ struct Module: public interface::Module, public Interface
 				continue;
 			auto &sent = m_track_sent[p.first];
 			ss_ out;
-			char buf[48];
+			char buf[128];
 			for(auto &dp : m_drives){
 				const Drive &d = dp.second;
 				if(d.scene != p.second.scene || d.keys.empty())
@@ -30850,10 +30866,11 @@ struct Module: public interface::Module, public Interface
 				for(const auto &k : d.keys){
 					if(!fresh && k[0] <= s.second)
 						continue;
-					for(int n = 0; n < 7; n++){
-						snprintf(buf, sizeof buf, " %.17g", k[n]);
-						out += buf;
-					}
+					// ([KIT_ENT_PERF] as add_key() keeps them)
+					snprintf(buf, sizeof buf, " %.0f %.3f %.3f %.3f", k[0], k[1], k[2], k[3]);
+					out += buf;
+					snprintf(buf, sizeof buf, " %.2f %.2f %.2f", k[4], k[5], k[6]);
+					out += buf;
 				}
 				s = std::make_pair(d.gen, d.keys.back()[0]);
 			}
