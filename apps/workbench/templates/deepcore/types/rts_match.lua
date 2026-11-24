@@ -19,7 +19,7 @@
 --   The end: a side with no building left loses ("Blue wins"), the `result`
 --   panel on each player's screen ("again": the same match once more; "lobby":
 --   back). The `money` text (to its team) shows the team's money, `status`
---   (to the player) what a buy did.
+--   (to the player) what a buy did, and at a start what to do first.
 -- simplified: dug tunnels stay dug from one match to the next (Stop puts the
 -- World back); a building is made at once, no construction time; a player
 -- leaving a 1v1 does not end it
@@ -262,6 +262,9 @@ local function start(c)
 	c:send(p.ai, s.vs == "computer" and "start" or "stop")
 	for team, by in pairs(s.players) do
 		panels(c, by, "playing")
+		-- (what to do first: a playtest's player found nothing to do)
+		say(c, by, "Click a unit to select it, right click where it goes. " ..
+			"Diggers dig, harvesters bring ore home; the bar below buys.")
 	end
 	c:log("match started: " .. s.vs)
 end

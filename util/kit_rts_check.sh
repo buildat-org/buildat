@@ -13,8 +13,11 @@
 #      (in their base, far off) among the client's nodes (kit_rts_nodes),
 #      Blue's there;
 #   2. the camera: a turn, a pan, the cut;
-#   3. select and order: Blue's digger clicked (selected 1), ordered by a
-#      right click: it goes there (a digger's way: an open one it drives);
+#   3. select and order by the mouse (mouse_pos and its buttons through
+#      rts.lua's handlers, the build bar up; the client at render scale
+#      0.5): a box round Blue's digger, a click on it (selected 1), a right
+#      click on the ground: it goes there (a digger's way: an open one it
+#      drives);
 #   4. a factory bought on the build bar, a tank bought: made in its bay, it
 #      drives out of the door (stops 2.5 m or more in front of the bay);
 #   5. the digger ordered into the vault digs the dirt plug (the vault's plug
@@ -28,8 +31,9 @@
 #   8. the recorder's perf with 60 units in view (a check type's 60 of
 #      Blue's tanks in the middle cavern, the cut on, made with the tools on
 #      in the round: try); with Firefox and web/, a short web run on the
-#      same save: its lobby, a match, the units in view (the frame about as
-#      bright as the native's), its perf.
+#      same save at devicePixelRatio 2: its lobby, a match, a unit clicked,
+#      a box, a right click's order (the page's mouse), the units in view
+#      (the frame about as bright as the native's), its perf.
 # Screenshots (KEEP_TMP=1): $t/lobby.png, $t/start.png, $t/cut.png,
 # $t/factory.png, $t/vault.png, $t/ai.png, $t/many.png, $t/web/*.png
 #   util/kit_rts_check.sh
@@ -170,6 +174,37 @@ step() # <seconds> <regex in the client's log> <command>...
 say() { step 60 "kit: rts: camera at" "$@" "frames 3" "event kit_rts"; }
 last_rts() { grep -a "kit: rts: camera at" "$CL" | tail -1; }
 try() { step 10 "kit editor: tried|kit editor: .*refused" "event kit_edit {\"op\": \"try\", \"id\": $1, \"input\": \"$2\"}"; }
+# where <id | x,y,z>: where that unit or point is on the screen, "x y" (the
+# mouse's pixels), empty if not on it
+where()
+{
+	step 10 "kit: rts: (unit|point) .*(on the screen at|not on the screen)" \
+		"event kit_rts_where $1"
+	grep -aF "kit: rts: " "$CL" | grep -aF " $1 " | tail -1 |
+		grep -aoP "on the screen at \K[0-9]+, [0-9]+" | tr -d ,
+}
+# [KIT_RTS] The mouse's own clicks (rts.lua's handlers, as a player's: a
+# panel with a button up, Deepcore's build bar, made every one nothing and
+# "event kit_click_at" went round them)
+# mclick <id | x,y,z> <left|right> <regex in the client's log>
+mclick()
+{
+	local p
+	p=$(where "$1")
+	[ -n "$p" ] || fail "$1 not on the screen to click ($CL)"
+	step 10 "$3" "mouse_pos $p" "frames 2" "mouse_down $2" "frames 2" "mouse_up $2"
+}
+# mbox <id> <regex>: a left drag from 40 px up and left of it to as far
+# down and right
+mbox()
+{
+	local p
+	p=($(where "$1"))
+	[ -n "${p[*]}" ] || fail "$1 not on the screen to box ($CL)"
+	step 10 "$2" "mouse_pos $((p[0] - 40)) $((p[1] - 40))" "frames 2" \
+		"mouse_down left" "frames 2" "mouse_pos $((p[0] + 40)) $((p[1] + 40))" \
+		"frames 2" "mouse_up left"
+}
 # made <Team> <what>: the id of the last one the match made
 made() { grep -aoP "made $1 $2 \K[0-9]+" "$SL" | tail -1; }
 # stop <id> <offset>: where it last stopped after the offset, "x y z"
@@ -189,7 +224,7 @@ CHECK_PIDS+=($!)
 DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kitboss \
 	BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 BUILDAT_JOIN_ADMIN="setting open_registration on" \
 	timeout 1400 bin/buildat -C "$t/client_cache" -D "$t/cu" \
-	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 -c - \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1,render_scale=0.5 -c - \
 	< "$t/boss.cmd" > "$CL" 2>&1 &
 CLIENT=$!
 CHECK_PIDS+=($CLIENT)
@@ -271,10 +306,14 @@ PY
 # (back over the base, from the north, the cut where it was)
 say "event kit_rts_focus -36 6.5 -6" "keypress PageUp"
 
-# ---- 3. Select and order: the digger (made at the base's -3, +4)
-step 10 "kit: rts: selected 1 \(click" "event kit_click_at -38 7 -1"
+# ---- 3. Select and order by the mouse: a box round the digger (made at
+# the base's -3, +4), a click on it, a right click on the ground
+mbox $DIG "kit: rts: selected [0-9]+ \(box"
+say
+last_rts | sed 's/.*selected [0-9]*://' | grep -qw "$DIG" || fail "the digger not in the box's selection: $(last_rts)"
+mclick $DIG left "kit: rts: selected 1 \(click on $DIG\)"
 m=$(mark "$SL")
-step 10 "kit: rts: 1 ordered to" "event kit_click_at -37 6.5 -12 right"
+mclick -37,6.5,-12 right "kit: rts: 1 ordered to"
 await "$SL" "$m" 10 "Order by kitboss: 1 units to"
 await "$SL" "$m" 60 "local/rts_digger $DIG: dug to -37,7,-12"
 echo "ok: the digger selected by a click and ordered by a right click: $(stop $DIG $m)"
@@ -304,22 +343,24 @@ say "event kit_rts_focus ${fpos//,/ }" "frames 20" "screenshot $t/factory.png"
 # ---- 5. The digger into the vault, through its plug, not its west wall
 grep -aq "vault: plug dirt 4/4, west hard rock 4/4" "$SL" || fail "the vault was not whole ($SL)"
 say "event kit_rts_focus -40 6.5 -10"
-step 10 "kit: rts: selected 1 \(click" "event kit_click_at -37 7 -12.5"
+mclick $DIG left "kit: rts: selected 1 \(click on $DIG\)"
 m=$(mark "$SL")
-step 10 "kit: rts: 1 ordered to" "event kit_click_at -42 6.5 -12 right"
+mclick -42,6.5,-12 right "kit: rts: 1 ordered to"
 await "$SL" "$m" 60 "local/rts_digger $DIG: dug to -42,7,-12"
 await "$SL" "$m" 5 "vault: plug dirt 0/4, west hard rock 4/4"
 m=$(mark "$SL")
-step 10 "kit: rts: 1 ordered to" "event kit_click_at -47 6.5 -12 right"
+mclick -47,6.5,-12 right "kit: rts: 1 ordered to"
 await "$SL" "$m" 30 "local/rts_digger $DIG: blocked by hard rock"
 grep -aq "local/rts_digger $DIG: cannot dig kit/hard_rock" "$SL" || fail "no hard rock refused ($SL)"
 tail -c +$((m + 1)) "$SL" | grep -aq "vault: plug" && fail "the vault changed ($SL)"
 echo "ok: the digger dug the vault's dirt plug, not its hard rock wall"
 # The tank into the vault: its way in the dug plug
 tp=($tpos)
-step 10 "kit: rts: selected 1 \(click" "event kit_click_at ${tp[0]} 7 ${tp[2]}"
+say "event kit_rts_focus ${tp[0]} 6.5 ${tp[2]}"
+mclick $TANK left "kit: rts: selected 1 \(click on $TANK\)"
+say "event kit_rts_focus -40 6.5 -10"
 m=$(mark "$SL")
-step 10 "kit: rts: 1 ordered to" "event kit_click_at -41 6.5 -12 right"
+mclick -41,6.5,-12 right "kit: rts: 1 ordered to"
 await "$SL" "$m" 60 "Entity $TANK stopped at .*: arrived"
 vpos=$(stop $TANK $m)
 python3 -I - "$vpos" <<'PY' || fail "the tank is not in the vault: $vpos"
@@ -444,6 +485,15 @@ if command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm"
  ["shot", "\${OUT}/lobby.png"],
  ["click", "Button", "Play against the computer"],
  ["waitlog_any", "kit: rts: the camera on", 60], ["frames", 30],
+ ["event", "kit_rts_where"], ["waitlog", "kit: rts: own units: [1-9]", 10], ["frames", 3],
+ ["at_log", "kit: rts: unit [0-9]+ on the screen at ([0-9]+), ([0-9]+)", "click"],
+ ["waitlog", "kit: rts: selected 1 [(]click on", 10],
+ ["at_log", "kit: rts: unit [0-9]+ on the screen at ([0-9]+), ([0-9]+)", "box", -160, -160, 80, 80],
+ ["waitlog", "kit: rts: selected [1-9][0-9]* [(]box", 10],
+ ["event", "kit_rts_where -35,6.5,3"], ["waitlog", "kit: rts: point .* on the screen at", 10],
+ ["at_log", "kit: rts: point [^ ]+ on the screen at ([0-9]+), ([0-9]+)", "rclick"],
+ ["waitlog", "kit: rts: [1-9][0-9]* ordered", 10],
+ ["shot", "\${OUT}/ordered.png"],
  ["key", "F6"], ["waitlog_any", "kit editor: edit mode on", 10], ["frames", 3],
  ["event", "kit_edit {\\"op\\": \\"try\\", \\"id\\": $MANY, \\"input\\": \\"go\\"}"], ["frames", 60],
  ["key", "F6"], ["waitlog_any", "kit editor: edit mode off", 10], ["frames", 30],
@@ -452,7 +502,8 @@ if command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm"
  ["shot", "\${OUT}/many.png"]
 ]
 J
-	"$here/util/web_drive.sh" firefox workbench "$t/steps.json" "$w" ||
+	# (a high-DPI page: the mouse's clicks above at twice the CSS pixels)
+	WEB_DRIVE_VIEWPORT=1200x800@2 "$here/util/web_drive.sh" firefox workbench "$t/steps.json" "$w" ||
 		fail "the web drive ($w)"
 	grep -aq "match started: computer" "$w/server.log" || fail "no web match ($w/server.log)"
 	# The web's 60 tanks as bright as the native's (the views differ: the

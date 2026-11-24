@@ -72,6 +72,13 @@
 //   ["at_log", regex, "drag", dx, dy, ox, oy]
 //                           a finger's drag from there (plus ox, oy if
 //                           given: x, y a rect's corner) by dx, dy (Chrome)
+//   ["at_log", regex, "click" | "rclick"]
+//                           the mouse's left (right) button there, the
+//                           line's pixels the canvas's (a high-DPI page's
+//                           device pixels): to CSS pixels as find() does
+//   ["at_log", regex, "box", dx, dy, ox, oy]
+//                           the mouse's left drag from there (plus ox, oy)
+//                           by dx, dy (the canvas's pixels too)
 //   ["event", "name param"] the native sequence's event line
 //                           (doc/client_commands.txt): sent in the next frame
 //   ["shot", path]          a PNG of the page
@@ -932,6 +939,23 @@ async function find(b, type, label, hx, hy) {
 				const m = l && l.match(re);
 				if (!m || m.length < 3)
 					throw new Error("no console line with a place: /" + a + "/");
+				if (c === "click" || c === "rclick" || c === "box") {
+					const [l, t, k] = JSON.parse(await b.ops.value("JSON.stringify(" +
+							"(function(){ var c = document.getElementById('canvas')," +
+							" r = c.getBoundingClientRect();" +
+							" return [r.left, r.top, c.width / r.width]; })())"));
+					const x = l + (Number(m[1]) + (args[4] || 0)) / k,
+							y = t + (Number(m[2]) + (args[5] || 0)) / k;
+					console.log(c + " at " + x.toFixed(1) + ", " + y.toFixed(1) +
+							" CSS (the page's line, canvas/CSS " + k.toFixed(2) + ")");
+					if (c === "box")
+						await b.ops.drag(Math.round(x), Math.round(y),
+								Math.round(x + args[2] / k), Math.round(y + args[3] / k));
+					else
+						await b.ops.click(Math.round(x), Math.round(y), 50,
+								c === "click" ? 0 : 2);
+					continue;
+				}
 				const x = Number(m[1]) + (args[4] || 0),
 						y = Number(m[2]) + (args[5] || 0);
 				console.log(c + " at " + x + ", " + y + " (the page's line)");
