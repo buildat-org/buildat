@@ -138,6 +138,9 @@ static const int MAX_POLYGON_EXTENT = 256;
 static const int MAX_REGION_EXTENT = 2048;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
+// [KIT_RTS] c:voxels_at's cells a call at most, and a world cell's farthest
+// coordinate (c:set_voxels_at's; past it no cell)
+static const int MAX_READ_CELLS = 4096, MAX_WORLD_CELL = 1 << 20;
 // [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
 // at most), the reach of its kill and hurt radii, the entities told
 // (on_blast), and Kit's blasts a second (a server's, every round's
@@ -459,6 +462,9 @@ struct Type
 	// box's voxels (reads_voxels = true)
 	ss_ voxel_box;
 	bool reads_voxels = false;
+	// [KIT_RTS] Its runs read and write the World's cells (world_voxels =
+	// true: c:voxel_at, c:voxels_at, c:set_voxels_at)
+	bool world_voxels = false;
 	// [KIT_AIRSHIPS_2] The position parameter that is its kit/terrain_region
 	// box ("" none): the World's voxels Kit generates in it
 	ss_ world_region;
@@ -1873,6 +1879,10 @@ struct Module: public interface::Module, public Interface
 		m_box_n++;
 		if(!m_box)
 			return false;
+		// [KIT_RTS] c:voxel_at, c:voxels_at (box.c's box_voxels)
+		m_box->query = [this](const ss_ &in, ss_ &out){
+			return world_voxels_query(in, out);
+		};
 		// The types again: a new box knows none. One that fails here
 		// leaves no box (no restart inside a restart). [KIT] stage 4h: the
 		// movement library first
@@ -2096,7 +2106,7 @@ struct Module: public interface::Module, public Interface
 				"seat", "senses", "sight", "single", "space", "spawn",
 				"spawn_spots", "state", "takes_text", "team", "ui", "unit", "usable",
 				"use_range", "use_when", "version", "volume", "voxel_box",
-				"world", "world_region", "zone"};
+				"world", "world_region", "world_voxels", "zone"};
 		return F;
 	}
 	// ... and the functions: its handlers
@@ -2508,6 +2518,7 @@ struct Module: public interface::Module, public Interface
 					t.space[b] = "cells";
 		}
 		t.reads_voxels = t.decl.get("reads_voxels").is_true();
+		t.world_voxels = t.decl.get("world_voxels").is_true();
 		if(t.reads_voxels && t.voxel_box.empty()){
 			why = name+": reads_voxels reads its voxel_box, and it has none";
 			return false;
@@ -4970,6 +4981,53 @@ struct Module: public interface::Module, public Interface
 					}
 		});
 		return out;
+	}
+
+	// [KIT_RTS] box.c's box_voxels (WasmBox::query): "<id> <x0> <y0> <z0>
+	// <sx> <sy> <sz>", the box of the World's cells from (x0, y0, z0) as the
+	// entity's scene has them (read_box()), the entity one of whose types
+	// says world_voxels, MAX_READ_CELLS at most; out: the names, each
+	// ending in '\n', a '\0', each cell's index in them (from 1; 0 not
+	// loaded) as 2 bytes little-endian, x fastest, then z, then y
+	bool world_voxels_query(const ss_ &in, ss_ &out)
+	{
+		double q[7];
+		if(sscanf(in.c_str(), "%lf %lf %lf %lf %lf %lf %lf", &q[0], &q[1],
+				&q[2], &q[3], &q[4], &q[5], &q[6]) != 7)
+			return false;
+		for(double v : q)
+			if(!std::isfinite(v) || std::fabs(v) > MAX_WORLD_CELL)
+				return false;
+		auto it = m_entities.find((uint64_t)std::max(0.0, q[0]));
+		if(it == m_entities.end())
+			return false;
+		bool may = false;
+		for(const Instance &c : it->second.comps)
+			may = may || m_types[c.type].world_voxels;
+		const int n[3] = {(int)q[4], (int)q[5], (int)q[6]};
+		if(!may || n[0] < 1 || n[1] < 1 || n[2] < 1 ||
+				(int64_t)n[0] * n[1] * n[2] > MAX_READ_CELLS)
+			return false;
+		const sv_<ss_> cells = read_box(it->second,
+				pv::Vector3DInt32((int)q[1], (int)q[2], (int)q[3]), n);
+		sm_<ss_, size_t> index;
+		ss_ ids;
+		for(const ss_ &c : cells){
+			size_t i = 0;
+			if(!c.empty()){
+				auto ix = index.find(c);
+				if(ix == index.end()){
+					ix = index.insert(std::make_pair(c, index.size() + 1)).first;
+					out += c+"\n";
+				}
+				i = ix->second;
+			}
+			ids += (char)(i & 0xff);
+			ids += (char)(i >> 8);
+		}
+		out += '\0';
+		out += ids;
+		return true;
 	}
 
 	// The cells an entity owns: its own, or its owning instance's volume
@@ -11788,8 +11846,14 @@ struct Module: public interface::Module, public Interface
 		const world::Biome &b = bi->second;
 		// The roles the generator needs, each a voxel by its biome
 		sv_<ss_> need;
-		if(p.generator != "empty")
+		// [KIT_RTS] underground: its soil and rock (hard, ore and
+		// cave_floor stone where the biome has none)
+		if(p.generator == "underground")
+			need = {"filler", "stone"};
+		else if(p.generator != "empty")
 			need = {"top", "filler", "stone", "riverbed"};
+		if(p.generator == "underground" && p.border == "water")
+			need.push_back("riverbed");
 		if(p.generator == "noise" || p.generator == "valleys" ||
 				p.border == "water" || (p.generator == "flat" &&
 				p.sea_level > p.level))
@@ -11945,6 +12009,9 @@ struct Module: public interface::Module, public Interface
 			lo = std::min(lo, t), hi = std::max(hi, t);
 		if(p.generator == "empty")
 			lo = hi = p.level - 1;
+		// [KIT_RTS] the underground's ground down to its floor's top
+		if(p.generator == "underground")
+			lo = p.level - p.height;
 		uint32_t hash = world::hash_ints(tops);
 		if(!p.heightmap())
 			find_spawn(*h, ids);
@@ -11956,7 +12023,7 @@ struct Module: public interface::Module, public Interface
 		// And its caves, sampled every fourth column each way: a check sees
 		// that they are there and the same by the seed
 		ss_ caves;
-		if(p.with_caves() && !p.heightmap()){
+		if(p.with_caves() && !p.heightmap() && p.generator != "underground"){
 			size_t n = 0, of = 0;
 			for(int z = 0; z < fd; z += 4)
 				for(int x = 0; x < fw; x += 4){
@@ -12053,7 +12120,8 @@ struct Module: public interface::Module, public Interface
 				"voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
-				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
+				world::generator_version(p.generator),
+				p.with_caves() && !p.heightmap() ? ", caves" : "",
 				cs(caves), dn, dh, dwet, cs(ms.name));
 		// [KIT_SYMMETRY] a heightmap generated again: its authored slice
 		// copied over the others (a voxel World's in on_gen_queue)
@@ -14869,7 +14937,7 @@ struct Module: public interface::Module, public Interface
 			world::resolve_biome(m_w->materials, b.second, id, br.structs, bi);
 			br.biomes.push_back(std::make_pair(b.first, bi));
 			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.stone,
-					bi.riverbed, bi.cave_floor, bi.cave_wall})
+					bi.riverbed, bi.cave_floor, bi.cave_wall, bi.hard, bi.ore})
 				if(v)
 					br.ground.insert(v);
 			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.riverbed})
@@ -16653,7 +16721,8 @@ struct Module: public interface::Module, public Interface
 					p.border == "wall" ? 1 : 0;
 			const int ylo = std::min(m_w->world_min, p.border == "water" ?
 					p.sea_level - world::SEA_BED : INT_MAX) -
-					(p.with_caves() ? world::CAVE_DEEP : 8);
+					(p.with_caves() && p.generator != "underground" ?
+					world::CAVE_DEEP : 8);
 			const int yhi = std::max(m_w->world_max + (p.border == "wall" ? 4 : 0),
 					p.sea_level);
 			for(int sx = sec(p.x0() - m); sx <= sec(p.x0() + p.width - 1 + m); sx++)
@@ -18342,6 +18411,9 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		// [KIT_RTS] c:voxel_at, c:voxels_at, c:set_voxels_at
+		if(m_types[in.type].world_voxels)
+			o += ",world_voxels=true";
 		// [KIT_MINIGAMES_FIX] its own name (c:name(c.id)), and whether the
 		// player who set it off is elsewhere than its scene
 		if(!e.name.empty())
@@ -18726,6 +18798,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &vx = fx.get("voxels");
 		if(vx.is_array() && vx.size())
 			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
+		// [KIT_RTS] c:set_voxels_at
+		const json::Value &vw = fx.get("voxels_at");
+		if(vw.is_array() && vw.size() && t.world_voxels)
+			set_voxels(e, in, vw, r.by, t.builds && pid ? 'b' : 'g', true);
 		// c:after(seconds, name, {player = id}): {{name, seconds, player}}
 		const json::Value &after = fx.get("after");
 		for(unsigned i = 0; i < after.size(); i++){
@@ -24668,15 +24744,17 @@ struct Module: public interface::Module, public Interface
 	// [KIT_VOXEL_STATES] c:set_voxels(cells): {{x, y, z, name}...} in the
 	// instance's voxel box (x, y, z from its first cell), MAX_SET_CELLS at
 	// most, each a registered voxel's name; all written or, one refused,
-	// none (logged)
+	// none (logged). [KIT_RTS] world: c:set_voxels_at's, the World's whole
+	// cells (of the entity's scene, as ever), no box
 	void set_voxels(const Entity &e, const Instance &in, const json::Value &vx,
-			const ss_ &by, char origin)
+			const ss_ &by, char origin, bool world = false)
 	{
-		pv::Vector3DInt32 o;
-		int n[3];
+		pv::Vector3DInt32 o(0, 0, 0);
+		int n[3] = {0, 0, 0};
 		ss_ why;
 		sv_<Write> ws;
-		if(!voxel_box(e, in, o, n, &why)){
+		const char *call = world ? "set_voxels_at" : "set_voxels";
+		if(!world && !voxel_box(e, in, o, n, &why)){
 		} else if(vx.size() > (unsigned)MAX_SET_CELLS){
 			why = itos(vx.size())+" cells, past "+itos(MAX_SET_CELLS);
 		} else {
@@ -24686,9 +24764,12 @@ struct Module: public interface::Module, public Interface
 				int q[3];
 				for(unsigned k = 0; k < 3 && why.empty(); k++){
 					const json::Value &v = c.at(k);
-					if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
-							v.as_number() < 0 || v.as_number() >= n[k])
-						why = "cell "+itos(i + 1)+" is not in its box";
+					const bool whole = v.is_number() &&
+							v.as_number() == std::floor(v.as_number());
+					if(world ? !whole || std::fabs(v.as_number()) > MAX_WORLD_CELL :
+							!whole || v.as_number() < 0 || v.as_number() >= n[k])
+						why = "cell "+itos(i + 1)+(world ? " is not a cell" :
+								" is not in its box");
 					else
 						q[k] = (int)v.as_number();
 				}
@@ -24720,16 +24801,16 @@ struct Module: public interface::Module, public Interface
 				});
 		}
 		if(!why.empty()){
-			log_w(MODULE, "Entity %s's %s: set_voxels refused: %s",
-					cs(itos(e.id)), cs(in.type), cs(why));
-			add_log(e.id, "set_voxels refused: "+why);
+			log_w(MODULE, "Entity %s's %s: %s refused: %s",
+					cs(itos(e.id)), cs(in.type), call, cs(why));
+			add_log(e.id, ss_(call)+" refused: "+why);
 			return;
 		}
 		for(const Write &w : ws)
 			if(!set_voxel(w))
 				m_pending_voxels.push_back(w);
-		log_i(MODULE, "Entity %s's %s set %zu cells", cs(itos(e.id)),
-				cs(in.type), ws.size());
+		log_i(MODULE, "Entity %s's %s set %zu cells%s", cs(itos(e.id)),
+				cs(in.type), ws.size(), world ? " of the World" : "");
 	}
 
 	// A voxel an instance sets: false if its section is not loaded yet

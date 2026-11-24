@@ -5,8 +5,24 @@
 -- its defaults are one instead, Host::world_default).
 --   generator  empty, flat (a ground at level), noise (hills: level +-
 --              height, a feature every spread cells), valleys (Luanti's
---              valleys mapgen's surface, without rivers; native servers)
---   seed       noise and valleys
+--              valleys mapgen's surface, without rivers; native servers),
+--              ([KIT_RTS]) underground: solid from the top, for a game
+--              played inside the ground. Every cell from level down
+--              `height` cells is ground (height is that depth here, not
+--              hills), the biome's filler as soil, stone as rock, hard
+--              (hard rock) and ore by 3D noise: soil more common near the
+--              top, hard rock in walls that make a digger go round, rock
+--              the bulk, pockets of ore 2 to 4 cells across (about one a
+--              block of 8x8x8) in soil and rock; under it a floor of hard
+--              (every cell down: a game's dig rule keeps diggers off it);
+--              air over level. With caves, caverns: layers of wide spaces 3
+--              to 6 cells high with flat floors (cave_floor), long winding
+--              tunnels and chambers. Point-symmetric round the map's middle
+--              ((x, z) is (-x - 1, -z - 1)'s; finite maps of even sides):
+--              fair for two sides, kit/symmetry for more. Kit's biome
+--              "underground" (dirt, stone, kit/hard_rock, kit/ore, gravel
+--              floors and top: a kit/terrain_region's flat room floor)
+--   seed       noise, valleys and underground
 --   flatten    ([KIT_TERRAIN_FLATTEN]) noise flat at level round the scene's
 --              parts on the ground (a look's box within 3 of level), the
 --              hills rising 1 to 9 cells past each; off: hills under them too.
@@ -42,7 +58,7 @@
 --              kept in the save)
 --   caves      ([KIT] stage 4f) tunnels and caverns under the ground (not
 --              under a heightmap), their floors and walls the biome's
---              cave roles
+--              cave roles (underground: its own caverns, above)
 --   decorations  the biome's decorations scattered by the seed: trees,
 --              bushes, flowers, grass, a log with mushrooms, mushrooms and
 --              moss in caves (on a heightmap: those bigger than a cell, as
@@ -70,12 +86,12 @@ return {
 		keywords = "world ground mapgen",
 		what = "What the world is generated from: the generator, seed, materials and biome.",
 		params = {
-			generator = "empty, flat (ground at level), noise (hills) or valleys (Luanti's valleys surface).",
-			seed = "The noise and valleys generators' seed.",
+			generator = "empty, flat (ground at level), noise (hills), valleys (Luanti's valleys surface) or underground (solid from level down height cells).",
+			seed = "The noise, valleys and underground generators' seed.",
 			materials = "The material set the world is made of; none: the app's own.",
 			biome = "The material set's biome: which voxels the ground is.",
-			level = "The ground's height in cells.",
-			height = "How far noise's hills rise and fall from level, in cells.",
+			level = "The ground's height in cells (underground: its top).",
+			height = "How far noise's hills rise and fall from level, in cells (underground: how deep the ground is under level).",
 			spread = "Cells between noise's hills.",
 			flatten = "Keeps the ground flat at level round the scene's parts on it.",
 			sea_level = "Water up to this height over lower ground.",
@@ -98,7 +114,7 @@ return {
 	world = true,
 	params = {
 		generator = {type = "string", default = "flat",
-			choices = {"empty", "flat", "noise", "valleys"}},
+			choices = {"empty", "flat", "noise", "valleys", "underground"}},
 		seed = {type = "number", default = 0, min = 0, max = 4294967295},
 		materials = {cat = "look", type = "string", default = "",
 			choices_from = "material_sets"},

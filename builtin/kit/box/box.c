@@ -22,6 +22,8 @@
 **                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
 **                        voxel_box) and voxels {names, ids} (reads_voxels:
 **                        each cell's name's index, 0 not loaded);
+**                        [KIT_RTS] world_voxels (its type's: c:voxel_at
+**                        and c:voxels_at ask the host, box_voxels);
 **                        [KIT_PANEL_PARENT] panel (the panel it is in);
 **                        [KIT_TOOLS_1] is_player (it is on a player's
 **                        entity); [KIT_SCENE_PACKAGES] player_scene,
@@ -29,7 +31,8 @@
 **                        its effects, {set = {{key, value}...} (a table
 **                        changed in place too), emit = {{output,
 **                        value}...}, voxel = name, voxels = {{x, y, z,
-**                        name}...} (c:set_voxels), after = {{name,
+**                        name}...} (c:set_voxels), voxels_at = {{x, y, z,
+**                        name}...} (c:set_voxels_at), after = {{name,
 **                        seconds (-1: taken back), player | null}...},
 **                        teleport = {x, y, z} (or {} with an entity or
 **                        a scene alone: its spawner),
@@ -178,6 +181,65 @@ static int l_mark(lua_State *l)
 	return 0;
 }
 
+/* [KIT_RTS] box_voxels(id, x0, y0, z0, sx, sy, sz): a box of the World's
+** cells as entity id's scene has them, asked of the host (buildat_call,
+** WasmBox::query: "<id> <x0> <y0> <z0> <sx> <sy> <sz>"; its answer the
+** names, each ending in '\n', a '\0', then each cell's index in them as 2
+** bytes, little-endian, 0 not loaded): a table of their names in box order
+** ("" not loaded), or nil when the host refused */
+static int l_voxels(lua_State *l)
+{
+	char q[160];
+	int n = snprintf(q, sizeof q, "%.0f %.0f %.0f %.0f %.0f %.0f %.0f",
+			luaL_checknumber(l, 1), luaL_checknumber(l, 2),
+			luaL_checknumber(l, 3), luaL_checknumber(l, 4),
+			luaL_checknumber(l, 5), luaL_checknumber(l, 6),
+			luaL_checknumber(l, 7));
+	unsigned cap = 16384;
+	char *b = NULL;
+	int got = -1;
+	for(int i = 0; i < 2; i++){
+		free(b);
+		b = (char*)malloc(cap);
+		if(!b)
+			luaL_error(l, "out of memory");
+		got = buildat_call("kit", 3, "voxels", 6, q, (unsigned)n, b, cap);
+		if(got < 0 || (unsigned)got <= cap)
+			break;
+		cap = (unsigned)got;
+	}
+	if(got < 0 || (unsigned)got > cap){
+		free(b);
+		lua_pushnil(l);
+		return 1;
+	}
+	/* The names (from 1) in a table on the stack, then the cells */
+	lua_newtable(l);
+	int names = lua_gettop(l), k = 0, at = 0;
+	while(at < got && b[at] != 0){
+		int e = at;
+		while(e < got && b[e] != '\n')
+			e++;
+		lua_pushlstring(l, b + at, (size_t)(e - at));
+		lua_rawseti(l, names, ++k);
+		at = e + 1;
+	}
+	at++;
+	int cells = (got - at) / 2;
+	lua_createtable(l, cells, 0);
+	for(int i = 0; i < cells; i++){
+		const int ix = (unsigned char)b[at + 2 * i] |
+				(unsigned char)b[at + 2 * i + 1] << 8;
+		if(ix >= 1 && ix <= k)
+			lua_rawgeti(l, names, ix);
+		else
+			lua_pushliteral(l, "");
+		lua_rawseti(l, -2, i + 1);
+	}
+	free(b);
+	return 1;
+}
+
 static int l_floor(lua_State *l)
 {
 	lua_pushnumber(l, floor(luaL_checknumber(l, 1)));
@@ -310,6 +372,7 @@ static const char PRELUDE[] =
 "local NULL = {}\n"
 "local log = box_log\n"
 "local mark = box_mark\n"
+"local voxels_read = box_voxels\n"
 "local smeta = getmetatable('')\n"
 "smeta.__metatable = false\n"
 "local math_lib = box_math\n"
@@ -636,6 +699,57 @@ static const char PRELUDE[] =
 "			out[#out + 1] = {tonumber(q[1]) or -1, tonumber(q[2]) or -1, tonumber(q[3]) or -1, tostring(q[4])}\n"
 "		end\n"
 "		fx.voxels = out\n"
+"	end\n"
+"	-- [KIT_RTS] The World's cells (world_voxels = true): whole coordinates\n"
+"	-- (a cell's middle), read from the host as asked (box_voxels), written\n"
+"	-- as c:set_voxels' are\n"
+"	local wv_cells, wv_boxes = 0, 0\n"
+"	local function wv(what, level)\n"
+"		if not req.world_voxels then error(what .. ': its type reads no world voxels (world_voxels = true)', level + 1) end\n"
+"	end\n"
+"	local function whole(v, what, level)\n"
+"		v = tonumber(v)\n"
+"		if not v or v ~= v or v < -1048576 or v > 1048576 then error(what .. ': coordinates are numbers', level + 1) end\n"
+"		return math_lib.floor(v + 0.5)\n"
+"	end\n"
+"	function c:voxel_at(x, y, z)\n"
+"		wv('voxel_at', 2)\n"
+"		x, y, z = whole(x, 'voxel_at', 2), whole(y, 'voxel_at', 2), whole(z, 'voxel_at', 2)\n"
+"		if wv_cells >= 4096 then error('voxel_at: 4096 a run at most', 2) end\n"
+"		wv_cells = wv_cells + 1\n"
+"		local r = voxels_read(req.id, x, y, z, 1, 1, 1)\n"
+"		if not r or r[1] == '' then return nil end\n"
+"		return r[1]\n"
+"	end\n"
+"	function c:voxels_at(o, s)\n"
+"		wv('voxels_at', 2)\n"
+"		if type(o) ~= 'table' or type(s) ~= 'table' then error('voxels_at: ({x0, y0, z0}, {sx, sy, sz})', 2) end\n"
+"		local q = {}\n"
+"		for k = 1, 3 do\n"
+"			q[k] = whole(o[k], 'voxels_at', 2)\n"
+"			local n = tonumber(s[k])\n"
+"			if not n or n < 1 or n % 1 ~= 0 then error('voxels_at: a size is whole numbers from 1', 2) end\n"
+"			q[k + 3] = n\n"
+"		end\n"
+"		if q[4] * q[5] * q[6] > 4096 then error('voxels_at: 4096 cells a call at most', 2) end\n"
+"		if wv_boxes >= 16 then error('voxels_at: 16 a run at most', 2) end\n"
+"		wv_boxes = wv_boxes + 1\n"
+"		local r = voxels_read(req.id, q[1], q[2], q[3], q[4], q[5], q[6])\n"
+"		if r then return r end\n"
+"		r = {}\n"
+"		for i = 1, q[4] * q[5] * q[6] do r[i] = '' end\n"
+"		return r\n"
+"	end\n"
+"	function c:set_voxels_at(cells)\n"
+"		wv('set_voxels_at', 2)\n"
+"		if type(cells) ~= 'table' then error('set_voxels_at: {{x, y, z, name}...}', 2) end\n"
+"		local out = fx.voxels_at or {}\n"
+"		for _, q in ipairs(cells) do\n"
+"			if type(q) ~= 'table' then error('set_voxels_at: {{x, y, z, name}...}', 2) end\n"
+"			if #out >= 4096 then error('set_voxels_at: 4096 cells a run at most', 2) end\n"
+"			out[#out + 1] = {whole(q[1], 'set_voxels_at', 2), whole(q[2], 'set_voxels_at', 2), whole(q[3], 'set_voxels_at', 2), tostring(q[4])}\n"
+"		end\n"
+"		fx.voxels_at = out\n"
 "	end\n"
 "	-- c:after(seconds, name, {player = id}): many an instance, by name and\n"
 "	-- player; no seconds (or < 0) takes that one back\n"
@@ -1108,6 +1222,8 @@ static int f_open(lua_State *l)
 	lua_setglobal(l, "box_cap");
 	lua_pushcfunction(l, l_slice);
 	lua_setglobal(l, "box_slice");
+	lua_pushcfunction(l, l_voxels);
+	lua_setglobal(l, "box_voxels");
 	lua_newtable(l);
 	luaL_register(l, NULL, MATH);
 	lua_setglobal(l, "box_math");

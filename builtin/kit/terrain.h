@@ -45,7 +45,9 @@
 //    "biomes": {name: {role: voxel, ..., "filler_depth": n,
 //        "decorations": [{"structure", "on", "density"}, ...]}, ...}}
 // The roles: stone, top, filler (its depth the biome's filler_depth),
-// water, riverbed, dust, cave_floor, cave_wall. A role a biome does not
+// water, riverbed, dust, cave_floor, cave_wall, ([KIT_RTS]) hard and ore
+// (the underground generator's hard rock and its mineral pockets; the
+// generator takes stone for either a biome lacks). A role a biome does not
 // bind falls back along "fallbacks" (top to filler to stone); one whose
 // chain ends with nothing is missing, and a generator needing it refuses,
 // naming it. No river water: a river, if any, is the sea's water.
@@ -71,6 +73,12 @@
 // replaced), density the chance a column has it (a cave's: a floor or
 // wall cell). Deterministic by the seed and the position. A cave's
 // decorations are one cell (a structure's first).
+//
+// [KIT_RTS] **underground** (struct Underground below): solid from the
+// World's top, level, down `height` cells (filler as soil, stone as rock,
+// hard, ore, cave_floor under a cavern with caves on), the floor under it
+// hard; columns' tops (Heights) at level as flat's, so a region and the
+// spawn see a flat ground there.
 //
 // **The generators** are native and fill a column from its top cell: the
 // top role there (riverbed under the sea and BEACH over it), filler below
@@ -146,15 +154,16 @@ namespace pv = PolyVox;
 using interface::VoxelTypeId;
 
 static const char *ROLES[] = {"stone", "top", "filler", "water", "riverbed",
-	"dust", "cave_floor", "cave_wall"};
+	"dust", "cave_floor", "cave_wall", "hard", "ore"};
 // The generators' versions: an infinite world pins its generator's in the
 // save, and a build whose version differs refuses it (a finite one is
-// baked and does not care). 2: caves and decorations ([KIT] stage 4f)
-static const int VERSION = 2;
+// baked and does not care). 2: caves and decorations ([KIT] stage 4f).
+// [KIT_RTS] underground its own, from 1
+static const int VERSION = 2, UNDERGROUND_VERSION = 1;
 static int generator_version(const ss_ &g)
 {
 	return g == "empty" || g == "flat" || g == "noise" || g == "valleys" ?
-			VERSION : 0;
+			VERSION : g == "underground" ? UNDERGROUND_VERSION : 0;
 }
 // [KIT_MATERIAL_SETS] A set's voxels and structures, and its biomes and
 // a biome's decorations, at most
@@ -1118,7 +1127,7 @@ struct DecorIds
 struct BiomeIds
 {
 	VoxelTypeId top = 0, filler = 0, stone = 0, water = 0, riverbed = 0,
-			cave_floor = 0, cave_wall = 0;
+			cave_floor = 0, cave_wall = 0, hard = 0, ore = 0;
 	int filler_depth = 3;
 	sv_<DecorIds> decors;
 	// How far its surface decorations reach sideways from their columns
@@ -1148,6 +1157,8 @@ static void resolve_biome(const MaterialSet &ms, const Biome &b,
 	out.riverbed = role("riverbed");
 	out.cave_floor = role("cave_floor");
 	out.cave_wall = role("cave_wall");
+	out.hard = role("hard");
+	out.ore = role("ore");
 	out.filler_depth = b.filler_depth;
 	out.decors.clear();
 	out.reach = 0;
@@ -1270,6 +1281,162 @@ static bool cave_mouth(const Params &p, int x, int z, int top)
 	return cave_opens(p, top) && cave_at(p.seed, x, top, z, top, true);
 }
 
+// ---- [KIT_RTS] The underground generator (kit_plan 4z37zzo): solid from
+// the World's top. Every cell from level down `height` cells is ground,
+// under it the floor (every cell down), over level air. The ground is
+// three hardnesses by 3D noise: soil (more of it near the top), rock (the
+// bulk) and hard rock in walls of limited extent (a digger goes round
+// them), with pockets of ore (2 to 4 cells across, about one a block of
+// GRID^3 cells, in soil and rock only) and, with caves, caverns: layers
+// of wide flat-floored spaces 3 to 6 cells high (long winding tunnels
+// and chambers, by 2D noise per layer, each layer its own) floored with
+// cave_floor. Point-symmetric round the map's middle: the cell (x, y, z)
+// is the cell (-x - 1, y, -z - 1)'s (each feature the union of a field
+// and its mirror), fair for two sides; kit/symmetry for more. A function
+// of its parameters and seed alone, per cell (no seams between sections)
+struct Underground
+{
+	enum: uint8_t {AIR, SOIL, ROCK, HARD, ORE, FLOOR, CAVE_FLOOR};
+	uint32_t seed = 0;
+	int level = 0, height = 12;
+	bool caves = false;
+	// The ore pockets' blocks; a cavern layer's thickness in cells
+	static const int GRID = 8, LAYER = 10;
+	// The lowest ground cell (under it the floor)
+	int bottom() const { return level - height + 1; }
+	int layers() const { return caves ? std::max(1, (height - 4) / LAYER) : 0; }
+
+	// Soil and hard rock before the mirror
+	bool soil_raw(int x, int y, int z) const
+	{
+		const float d = std::min(1.0f, (level - y) / 24.0f);
+		return interface::noise::fbm3(x / 16.0f, y / 10.0f, z / 16.0f,
+				seed + 4401, 3, 0.5f) > 0.08f + 0.22f * d;
+	}
+	bool hard_raw(int x, int y, int z) const
+	{
+		using interface::noise::fbm3;
+		return std::fabs(fbm3(x / 24.0f, y / 40.0f, z / 24.0f, seed + 5501, 2,
+				0.5f)) < 0.045f && fbm3(x / 48.0f, y / 48.0f, z / 48.0f,
+				seed + 5601, 2, 0.5f) > -0.05f;
+	}
+	// A cavern layer k's span in a column before the mirror: its floor's
+	// air cell y0 to y1 (false: none there)
+	bool span_raw(int k, int x, int z, int &y0, int &y1) const
+	{
+		using interface::noise::fbm2;
+		const uint32_t s = seed + 6601 + 97 * (uint32_t)k;
+		const bool tunnel = std::fabs(fbm2(x / 48.0f, z / 48.0f, s, 3, 0.5f)) <
+				0.05f;
+		if(!tunnel && fbm2(x / 20.0f, z / 20.0f, s + 1, 2, 0.5f) < 0.45f)
+			return false;
+		const int t = 3 + std::min(3, (int)(2.0f * (1 + fbm2(x / 30.0f,
+				z / 30.0f, s + 2, 2, 0.5f))));
+		y0 = level - 4 - LAYER * k - t + (int)std::floor(2.5f * fbm2(x / 50.0f,
+				z / 50.0f, s + 3, 2, 0.5f) + 0.5f);
+		y0 = std::max(y0, bottom() + 1);
+		y1 = std::min(y0 + t - 1, level - 2);
+		return y1 >= y0;
+	}
+	// The ore pocket of the block (gx, gy, gz) before the mirror: its
+	// middle and radius squared (false: none)
+	bool pocket_raw(int gx, int gy, int gz, int c[3], float &r2) const
+	{
+		const uint32_t h = hash_at(seed, gx, gy, gz, 7701);
+		if(unit(h) >= 0.5)
+			return false;
+		const uint32_t h2 = mix32(h);
+		c[0] = gx * GRID + (int)(h2 & 7);
+		c[1] = gy * GRID + (int)((h2 >> 3) & 7);
+		c[2] = gz * GRID + (int)((h2 >> 6) & 7);
+		const float r = 0.9f + 0.9f * (float)unit(mix32(h2));
+		r2 = r * r;
+		return true;
+	}
+
+	// The kinds of the cells w x hy x d from (x0, y0, z0), x fastest, then
+	// z, then y
+	void fill(int x0, int y0, int z0, int w, int hy, int d,
+			sv_<uint8_t> &out) const
+	{
+		out.assign((size_t)w * hy * d, AIR);
+		auto at = [&](int x, int y, int z) -> uint8_t& {
+			return out[((size_t)(y - y0) * d + (z - z0)) * w + (x - x0)];
+		};
+		const int b = bottom();
+		for(int y = y0; y < std::min(y0 + hy, b); y++)
+			for(int z = z0; z < z0 + d; z++)
+				for(int x = x0; x < x0 + w; x++)
+					at(x, y, z) = FLOOR;
+		const int ya = std::max(y0, b), yb = std::min(y0 + hy - 1, level);
+		if(ya > yb)
+			return;
+		// The caverns' spans per column (the field's, the mirror's)
+		const int L = layers();
+		sv_<std::array<int16_t, 2>> spans((size_t)w * d * L * 2, {{1, 0}});
+		for(int z = z0; z < z0 + d; z++)
+		for(int x = x0; x < x0 + w; x++)
+			for(int k = 0; k < L; k++)
+				for(int m = 0; m < 2; m++){
+					int s0, s1;
+					if(span_raw(k, m ? -x - 1 : x, m ? -z - 1 : z, s0, s1))
+						spans[(((size_t)(z - z0) * w + (x - x0)) * L + k) * 2 + m] =
+								{{(int16_t)s0, (int16_t)s1}};
+				}
+		auto cave = [&](int x, int y, int z){
+			const size_t i = ((size_t)(z - z0) * w + (x - x0)) * L * 2;
+			for(int j = 0; j < L * 2; j++)
+				if(y >= spans[i + j][0] && y <= spans[i + j][1])
+					return true;
+			return false;
+		};
+		// The ore pockets reaching into the box, the field's and the mirror's
+		sv_<uint8_t> ore((size_t)w * hy * d, 0);
+		auto div = [](int a, int g){ return a >= 0 ? a / g : -((-a + g - 1) / g); };
+		for(int m = 0; m < 2; m++){
+			// The box in the field's cells (the mirror's: x -> -x - 1)
+			const int bx0 = m ? -(x0 + w) : x0, bz0 = m ? -(z0 + d) : z0;
+			for(int gy = div(ya - 2, GRID); gy <= div(yb + 2, GRID); gy++)
+			for(int gz = div(bz0 - 2, GRID); gz <= div(bz0 + d + 1, GRID); gz++)
+			for(int gx = div(bx0 - 2, GRID); gx <= div(bx0 + w + 1, GRID); gx++){
+				int c[3];
+				float r2;
+				if(!pocket_raw(gx, gy, gz, c, r2))
+					continue;
+				if(m)
+					c[0] = -c[0] - 1, c[2] = -c[2] - 1;
+				for(int y = std::max(ya, c[1] - 2); y <= std::min(yb, c[1] + 2); y++)
+				for(int z = std::max(z0, c[2] - 2); z <= std::min(z0 + d - 1, c[2] + 2); z++)
+				for(int x = std::max(x0, c[0] - 2); x <= std::min(x0 + w - 1, c[0] + 2); x++){
+					const float dx = x - c[0], dy = y - c[1], dz = z - c[2];
+					if(dx * dx + dy * dy + dz * dz <= r2)
+						ore[((size_t)(y - y0) * d + (z - z0)) * w + (x - x0)] = 1;
+				}
+			}
+		}
+		for(int y = ya; y <= yb; y++)
+		for(int z = z0; z < z0 + d; z++)
+		for(int x = x0; x < x0 + w; x++){
+			uint8_t &v = at(x, y, z);
+			if(L && cave(x, y, z)){
+				v = AIR;
+				continue;
+			}
+			const int mx = -x - 1, mz = -z - 1;
+			if(hard_raw(x, y, z) || hard_raw(mx, y, mz))
+				v = HARD;
+			else if(ore[((size_t)(y - y0) * d + (z - z0)) * w + (x - x0)])
+				v = ORE;
+			else if(soil_raw(x, y, z) || soil_raw(mx, y, mz))
+				v = SOIL;
+			else
+				v = ROCK;
+			if(L && y < level && cave(x, y + 1, z))
+				v = CAVE_FLOOR;
+		}
+	}
+};
+
 struct Generator: public worldgen::GeneratorInterface
 {
 	Params p;
@@ -1286,7 +1453,23 @@ struct Generator: public worldgen::GeneratorInterface
 		const int w = uc.getX() - lc.getX() + 1, d = uc.getZ() - lc.getZ() + 1,
 				hy = uc.getY() - lc.getY() + 1;
 		const bool decorate = p.with_decorations() && !ids.decors.empty();
-		const bool caves = p.with_caves();
+		// [KIT_RTS] the underground's cells in the map its own (its caverns
+		// too), the border as the others'
+		const bool under = p.generator == "underground";
+		const bool caves = p.with_caves() && !under;
+		sv_<uint8_t> ug;
+		if(under){
+			Underground u;
+			u.seed = p.seed;
+			u.level = p.level;
+			u.height = p.height;
+			u.caves = p.with_caves();
+			u.fill(lc.getX(), lc.getY(), lc.getZ(), w, hy, d, ug);
+		}
+		const VoxelTypeId ug_ids[] = {ids.air, ids.filler, ids.stone,
+			ids.hard ? ids.hard : ids.stone, ids.ore ? ids.ore : ids.stone,
+			ids.hard ? ids.hard : ids.stone,
+			ids.cave_floor ? ids.cave_floor : ids.stone};
 		// The tops round the section too: the decorations reaching in, the
 		// caves' walls
 		const int R = std::max(decorate ? ids.reach : 0, caves ? 1 : 0);
@@ -1347,6 +1530,9 @@ struct Generator: public worldgen::GeneratorInterface
 				VoxelTypeId v = ids.air;
 				if(wall)
 					v = y <= max_top + 4 ? ids.stone : ids.air;
+				else if(under && p.in_map(x, z))
+					v = ug_ids[ug[((size_t)(y - lc.getY()) * d + (z - lc.getZ())) * w +
+							(x - lc.getX())]];
 				else if(y > top)
 					v = sea && y <= p.sea_level ? ids.water : ids.air;
 				else if(is_cave(x, y, z))

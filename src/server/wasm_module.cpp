@@ -1179,6 +1179,29 @@ struct BoxEngine: public Engine
 			}
 			return 0;
 		}
+		case WI_CALL: {
+			// [KIT_RTS] the box's query (WasmBox::query): its input a[4],
+			// a[5], the answer into a[6] (room a[7])
+			if(a[5] > MAX_CALL_BYTES){
+				why = "an input past "+itos(MAX_CALL_BYTES)+" bytes";
+				return 0;
+			}
+			ss_ in(a[5], 0), out;
+			if(a[5] && !copy_in(a[4], a[5], &in[0])){
+				why = "past the module's memory";
+				return 0;
+			}
+			import_cost += 20000;
+			if(!box->query || !box->query(in, out))
+				return (uint32_t)-1;
+			import_cost += 100 * (uint64_t)out.size();
+			if(out.size() <= a[7] && !out.empty() &&
+					!copy_out(a[6], out.data(), out.size())){
+				why = "past the module's memory";
+				return 0;
+			}
+			return (uint32_t)out.size();
+		}
 		}
 		why = "not a box's";
 		return 0;
@@ -1219,7 +1242,8 @@ interface::WasmBox* create_wasm_box(const ss_ &name, const ss_ &bytes,
 	b->e.prebuilt_root = prebuilt_root;
 	b->e.refuse_import = [](size_t which) -> ss_ {
 		return which == WI_LOG || which == WI_TIME_MS ||
-				which == WI_CALL_INPUT || which == WI_CALL_OUTPUT ? "" :
+				which == WI_CALL_INPUT || which == WI_CALL_OUTPUT ||
+				which == WI_CALL ? "" :
 				"not one a module's own .wasm has";
 	};
 	if(!b->e.prepare(bytes, why))
