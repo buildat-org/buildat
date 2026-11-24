@@ -56,10 +56,11 @@ struct Module: public interface::Module, public replicate::Interface
 	sm_<PeerId, PeerState> m_peers;
 
 
-	// Per scene: which nodes a peer gets. Empty means every node, which is
-	// what every scene did before there was a filter.
-	sm_<main_context::SceneReference,
-			std::function<bool(PeerId, uint)>> m_node_filters;
+	// Per scene: which nodes a peer gets, by each filter's name (all of them
+	// must want it; [KIT_RTS]). None means every node, which is what every
+	// scene did before there was a filter.
+	sm_<main_context::SceneReference, sm_<ss_,
+			std::function<bool(PeerId, uint)>>> m_node_filters;
 	// Per scene: which of a peer's dirty nodes go first; see
 	// set_node_priority()
 	sm_<main_context::SceneReference,
@@ -125,6 +126,10 @@ struct Module: public interface::Module, public replicate::Interface
 	// each tick between said "Scene not found" for each of them
 	void on_scene_deleted(const main_context::SceneDeleted &e)
 	{
+		// ([KIT_RTS] a reference is never reused: what was set on it is
+		// nobody's now)
+		m_node_filters.erase(e.scene);
+		m_node_priorities.erase(e.scene);
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			for(auto &pair: m_peers){
 				PeerState &ps = pair.second;
@@ -349,9 +354,12 @@ struct Module: public interface::Module, public replicate::Interface
 		if(peer_it == m_peers.end())
 			return true;
 		auto it = m_node_filters.find(peer_it->second.scene_ref);
-		if(it == m_node_filters.end() || !it->second)
+		if(it == m_node_filters.end())
 			return true;
-		return it->second(peer, node_id);
+		for(auto &f : it->second)
+			if(!f.second(peer, node_id))
+				return false;
+		return true;
 	}
 
 	// The peer had this node and should not any more: the packet a deleted
@@ -809,10 +817,22 @@ struct Module: public interface::Module, public replicate::Interface
 	void set_node_filter(main_context::SceneReference scene_ref,
 			std::function<bool(PeerId, uint)> filter)
 	{
-		if(filter)
-			m_node_filters[scene_ref] = filter;
-		else
-			m_node_filters.erase(scene_ref);
+		set_named_node_filter(scene_ref, "", filter);
+	}
+
+	void set_named_node_filter(main_context::SceneReference scene_ref,
+			const ss_ &name, std::function<bool(PeerId, uint)> filter)
+	{
+		if(filter){
+			m_node_filters[scene_ref][name] = filter;
+			return;
+		}
+		auto it = m_node_filters.find(scene_ref);
+		if(it == m_node_filters.end())
+			return;
+		it->second.erase(name);
+		if(it->second.empty())
+			m_node_filters.erase(it);
 	}
 
 	void set_node_priority(main_context::SceneReference scene_ref,
@@ -847,6 +867,28 @@ struct Module: public interface::Module, public replicate::Interface
 				if(id < magic::FIRST_LOCAL_ID)
 					ps.scene_state.dirtyNodes_.Insert(id);
 			}
+		});
+	}
+
+	// Only these into the peer's dirty set (in main_context: its thread marks
+	// the same set as nodes change)
+	void refresh_peer_node_ids(main_context::SceneReference scene_ref,
+			PeerId peer, const sv_<uint> &node_ids)
+	{
+		auto peer_it = m_peers.find(peer);
+		if(node_ids.empty() || peer_it == m_peers.end() ||
+				peer_it->second.scene_ref != scene_ref)
+			return;
+		PeerState &ps = peer_it->second;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->find_scene(scene_ref);
+			if(!scene){
+				forget_scene(ps);
+				return;
+			}
+			for(uint id : node_ids)
+				if(id && id < magic::FIRST_LOCAL_ID && scene->GetNode(id))
+					ps.scene_state.dirtyNodes_.Insert(id);
 		});
 	}
 

@@ -2,7 +2,7 @@
 	"format": "kit_materials",
 	"author": "kit",
 	"name": "default",
-	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/terrain.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations. Stage 4g: snow. [KIT_DEFAULT_GROUPS] Material groups and levels, used under kit/game_rules' dig_by_tools. [KIT_ENVIRONMENT] seasons: a voxel's textures in a season. [KIT_TINT_NATURE] [KIT_TINT_MATERIALS] The tinted ones' textures are greyscale, their alpha where the tint applies (a grass block's dirt, a log's rings keep their colour), and their palettes VoxeLibre's biome colours (grass, foliage, water) and kinds of wood, sand and stone, entry 0 the old look.",
+	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/terrain.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations. Stage 4g: snow. [KIT_RTS] hard_rock and ore, the biome underground (the underground generator's: soil the filler, rock the stone). [KIT_DEFAULT_GROUPS] Material groups and levels, used under kit/game_rules' dig_by_tools. [KIT_ENVIRONMENT] seasons: a voxel's textures in a season. [KIT_TINT_NATURE] [KIT_TINT_MATERIALS] The tinted ones' textures are greyscale, their alpha where the tint applies (a grass block's dirt, a log's rings keep their colour), and their palettes VoxeLibre's biome colours (grass, foliage, water) and kinds of wood, sand and stone, entry 0 the old look.",
 	"voxels": {
 		"kit/stone": {"sound_dig": "kit/dig", "sound_place": "kit/place",
 			"group": "stone", "level": 1, "drop": "kit/cobble",
@@ -68,7 +68,12 @@
 		"kit/snow": {"sound_dig": "kit/dig", "sound_place": "kit/place",
 			"group": "dirt", "texture": "kit/snow.png"},
 		"kit/core": {"sound_dig": "kit/dig", "sound_place": "kit/place",
-			"group": "stone", "level": 3, "texture": "kit/core.png"}
+			"group": "stone", "level": 3, "texture": "kit/core.png"},
+		"kit/hard_rock": {"sound_dig": "kit/dig", "sound_place": "kit/place",
+			"group": "stone", "level": 4, "blast_resist": 100,
+			"texture": "kit/hard_rock.png"},
+		"kit/ore": {"sound_dig": "kit/dig", "sound_place": "kit/place",
+			"group": "stone", "level": 1, "texture": "kit/ore.png"}
 	},
 	"palettes": {
 		"grass": [
@@ -177,7 +182,8 @@
 	},
 	"fallbacks": {
 		"top": "filler", "filler": "stone", "riverbed": "filler",
-		"cave_floor": "stone", "cave_wall": "stone"
+		"cave_floor": "stone", "cave_wall": "stone", "hard": "stone",
+		"ore": "stone"
 	},
 	"structures": {
 		"tree": {"voxels": {"L": "kit/log", "#": "kit/leaves"},
@@ -234,6 +240,9 @@
 			"decorations": [
 				{"structure": "tree", "on": "top", "density": 0.003},
 				{"structure": "boulder", "on": "top", "density": 0.002}]},
-		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"}
+		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"},
+		"underground": {"top": "kit/gravel", "filler": "kit/dirt",
+			"filler_depth": 2, "stone": "kit/stone", "hard": "kit/hard_rock",
+			"ore": "kit/ore", "cave_floor": "kit/gravel"}
 	}
 }

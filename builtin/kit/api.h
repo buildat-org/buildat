@@ -132,7 +132,8 @@ namespace interface
 // - network protocols (the packets: a client and its server update
 //   together, and nothing persisted is lost);
 // - per-run caps and rates: c:hurt 16 a run, c:explode 4, c:speed and
-//   c:body_var 64, c:set_voxels 4096, sessions 8, c:after 64, c:sound 8,
+//   c:body_var 64, c:set_voxels 4096, c:set_voxels_at 4096, c:voxel_at
+//   4096, c:voxels_at 16 (4096 cells each), sessions 8, c:after 64, c:sound 8,
 //   a generator's 63 children, EXPLODE_RATE, EFFECT_RATE, client parts' 64
 //   bursts and 240 a second, the 0.1 s held period, box.c's STEP_CAP and
 //   string params' lengths. Kit aims to raise them, not lower them; a game
@@ -307,6 +308,9 @@ namespace interface
 //   reads_voxels = true      -- with voxel_box: c:voxels() the box's cells'
 //                               names (x fastest, then z, then y: index
 //                               1 + x + sx*(z + sz*y); "" where not loaded)
+//   world_voxels = true      -- ([KIT_RTS]) its runs read and write the
+//                               World's cells anywhere: c:voxel_at,
+//                               c:voxels_at, c:set_voxels_at (below)
 //   look = {shape = "box"|"sphere", size = n (half its side) or {x, y, z}
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
 //           text_idle = "param:<name>" (drawn while that state is empty:
@@ -512,6 +516,22 @@ namespace interface
 // all refused, logged, if one is outside the box or its name is not a
 // registered voxel; a cell whose section is not loaded is written when
 // it is),
+// [KIT_RTS] with `world_voxels = true`, the World's cells of the entity's
+// scene (a game session's own copy where it runs in one, as c:set_voxels'),
+// in whole world coordinates (a cell's middle; others rounded to it):
+// c:voxel_at(x, y, z) (its voxel's name, "air" for air; nil where not
+// loaded; 4096 a run), c:voxels_at({x0, y0, z0}, {sx, sy, sz}) (the names
+// of that box's cells, x fastest, then z, then y: index 1 + x + sx*(z +
+// sz*y), "" where not loaded; 4096 cells a call, 16 calls a run; for a
+// scan round a unit), c:set_voxels_at({{x, y, z, name}, ...}) (4096 a
+// run; written as c:set_voxels' are: game changes, which Stop puts back,
+// or a build with `builds`; all refused, logged, if a name is not a
+// registered voxel; a cell not loaded written when it is; the World's dig
+// and place rules and regions do not apply: the game's own write). Read
+// each as the run asks (not a snapshot from its start: a run's own
+// c:set_voxels_at lands after it). The pathfinder reads the World at each
+// search and a native unit (movement.native) the cells round it every
+// 0.5 s, so a dug cell is walked through from then on,
 // c:after(seconds, name, {player = id}) (on_timer(c, name, player) then,
 // on the game's clock, as by whoever set it; [KIT] stage 7b's first part:
 // many an instance, 64 at most, each by its name and player, a new one of
@@ -587,10 +607,7 @@ namespace interface
 // refused now, "ext.player is reserved"); kit/goal's pick = "nearest_type"
 // with the parameter pick_type (a type name), when_state (a key of the
 // bot's own entity state: the goal counts while it is true, "!key" while
-// false) and kind = "dig" (the cells of its size box); c:voxel_at(x, y, z)
-// (a voxel's name or nil, world cells of the entity's scene) and
-// c:set_voxels_at({{x, y, z, name}...}) (4096 a run, game changes as
-// c:set_voxels'), both for a type with world_voxels = true; a client
+// false) and kind = "dig" (the cells of its size box); a client
 // part's kit.report(value) and the server handler on_report(c, by, value).
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
@@ -1274,7 +1291,7 @@ namespace interface
 // budget is disabled itself (logged), not the caller, and the players'
 // own kit/inventory is the inventory from then on.
 //
-// Voxel writes (c:set_voxel, c:set_voxels, owns_voxel) are game changes, unless the type
+// Voxel writes (c:set_voxel, c:set_voxels, c:set_voxels_at, owns_voxel) are game changes, unless the type
 // has `builds = true`: then a build of the player who set the run off
 // (Edit and play's origins, below).
 //
@@ -2104,6 +2121,52 @@ namespace interface
 // and shoots it with its weapon (c:fire) while there (its state target, so
 // c.target), until the target is gone or another order comes. kit:controls
 // carries the player's team's name (team) for the client's selection.
+// [KIT_RTS] (4z37zzo) A spot whose cell a body cannot stand in (solid, solid
+// over it, or air for 3 cells under it, by the pathfinder's cells: the
+// voxels and the solid looks) moves to the nearest one it can within 3
+// cells, else to the point clicked (the server's log: "An order's n spots
+// moved"). A type with `reads_units = true` (a game's opponent, its
+// round) reads c.units = {{id, name, pos = {x, y, z}, team (its unit type's
+// param), types = {type...}, health (its kit/health's share, 0...1; nil
+// without one), moving (its drive has a way to walk), target (its senses
+// type's state target, 0 none)}...}, every unit of its scene (fogged or not:
+// the fog of war below is what clients are sent), as the run began; and orders them as a player
+// does: c:order({id...}, {at = {x, y, z}} | {target = id}) (8 a run, 256
+// ids; any team's units of its scene, the others left out), the same
+// on_order runs and spots, by the run's by.
+// [KIT_RTS] Fog of war: kit/game_rules' param fog (bool, false; the scene's
+// nearest kit/game_rules) turns it on in a scene; off, nothing of it runs. A
+// fogged entity is a unit with a team param set ("" never is) and what is
+// under it ([KIT_NESTING]); scenery, UI, players and the World are never
+// hidden. A type field vision = "<param>" names a number param of its own
+// as how far its entity sees (m, 0...64; kit/unit: vision = "sight", sight
+// 12), a sphere round it; simplified: through rock (a voxel walk from each
+// unit at a low rate is the upgrade). A peer's team is their player's
+// kit/team's; a team sees its own units and every unit within one of its
+// units' sight. A peer in no team, a builder in the tools and the server's
+// camera see everything. Worked out 5 times a second, and for
+// a unit made before its node is sent. What a peer does not see is never
+// sent to them: no node, no kit:track, no kit:effect or positional
+// kit:sound at it, no per_player state; it is not in kit:controls' steered
+// list or free objects, and a kit:order at it is refused ("no such target").
+// simplified: kit:shot, kit:projectile and kit:flow go on to all (the
+// upgrade: a shot left out when both its ends are unseen); a free object's
+// own node is not filtered. On the server a hidden entity is as any other:
+// it runs, moves, links, hears and is heard. Its show has unit.sight (its
+// vision, when above 0); kit:controls has fog = true for a peer under it,
+// and the client darkens the world outside its own team's sights (KITFOG,
+// KitVoxel.glsl; at most 16 circles, the near ones merged).
+// Client code under the fog: an entity hidden from a client does not exist
+// there. It goes as if removed (its parts' on_remove, its node gone) and
+// comes back as a new node whose parts start afresh (on_add; part state
+// they kept is lost, kit.shared stays as the parts left it, so keep there
+// what must outlive a hide). Its per_player state (kit:mine) is not sent
+// while hidden; what changed is sent as it comes back. Links, events and
+// signals run on the server and reach a client only through what is sent:
+// nothing of a hidden entity's. A sound or effect at a hidden entity is not
+// heard or seen there; one at a seen entity is, whatever caused it.
+// Selection, the hover and a click's target see only what the client has:
+// a client cannot select or target what it does not see.
 // [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
 // acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
 // <id>"): its own goal state as a player's, a goal's zone entered, and
@@ -2258,7 +2321,9 @@ namespace interface
 //
 // **The World** ([KIT] stage 4e; terrain.h says how it is made): one
 // game-wide kit/terrain on the app root, its parameters the choices -- the
-// generator (empty, flat, noise, valleys), the seed, the biome, the size
+// generator (empty, flat, noise, valleys, [KIT_RTS] underground: solid
+// from level down height cells, soil, rock, hard rock and ore, caverns,
+// point-symmetric; types/terrain.lua), the seed, the biome, the size
 // (finite width x depth round the origin, baked; or infinite, only edited
 // sections saved, the generator's version pinned in the row "world"), a
 // finite map's border (void, wall, water) and the surface (voxels or
@@ -2268,7 +2333,7 @@ namespace interface
 // the load points), and its voxels (register_voxels(): Kit's own
 // material set, materials.json) before the save. Generators work against
 // roles (stone, top, filler, water, riverbed, dust, cave_floor,
-// cave_wall) that a material set's biomes bind to voxels, never voxel
+// cave_wall, [KIT_RTS] hard, ore) that a material set's biomes bind to voxels, never voxel
 // names; a role missing is refused, named. An edit of the World's
 // parameters generates again every section nobody wrote; a builder is
 // sent "kit:warning" (text) for the seams and a refusal. Voxel objects

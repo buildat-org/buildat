@@ -2,6 +2,7 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include <functional>
 
 namespace interface
 {
@@ -12,9 +13,14 @@ namespace interface
 	// It imports log and time_ms, and call_input/call_output, which read
 	// `input` and append to `output`; nothing else, so it reaches nothing
 	// but those bytes. Builtin/kit's Lua box is one.
+	// [KIT_RTS] And `call` (buildat_call(), its module and export names
+	// unread): `query` answers it, on the caller's thread inside call()
+	// (none set, or false: refused, -1); the answer's length, written only
+	// if it fits, as buildat_call()'s
 	struct WasmBox
 	{
 		ss_ input, output;
+		std::function<bool(const ss_ &in, ss_ &out)> query;
 
 		virtual ~WasmBox(){}
 		// An export taking nothing, called: "" or its trap, and its i32

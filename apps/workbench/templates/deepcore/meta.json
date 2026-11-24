@@ -1,0 +1,12 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "deepcore",
+	"title": "Deepcore",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"kit_api": 1,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "An underground real-time strategy game for two, seen from above with the rock cut away. Harvesters mine ore for money, factories build tanks, diggers cut tunnels through soil and rock but not hard rock. Fog of war; against the computer, or two against each other."
+}

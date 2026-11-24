@@ -2360,14 +2360,21 @@ end)
 -- by their node's id, each given the cut's y (CUT.off: none) and, with a
 -- cut, no culling (a cut wall's back shows). simplified: a chunk gone keeps
 -- its entry until its id is used again (a World's chunks are bounded)
-local CUT = {y = nil, off = 1e4, mats = {}}
+-- [KIT_RTS] Fog of war's darkening (KITFOG): with CUT.fog on, the chunks
+-- wear the Fog variants of their techniques (mats.tech their names without
+-- it); rts.lua sets the circles
+local CUT = {y = nil, off = 1e4, mats = {}, fog = false}
 local function cut_material(m)
 	m:SetShaderParameter("KitCut", CUT.y or CUT.off)
 	m.cullMode = CUT.y and magic.CULL_NONE or magic.CULL_CCW
 end
+local function technique(name)
+	return magic.cache:GetResource("Technique", name ..
+			(CUT.fog and "Fog" or "") .. ".xml")
+end
 function M.voxel_look(node)
 	local sky = "Sky" .. (M.physical and M.physical() and "Phys" or "")
-	local mats = {}
+	local mats = {tech = {}}
 	for child, kind in pairs({[""] = "", alpha = "Alpha",
 			masked = "Masked"}) do
 		local n = child == "" and node or node:GetChild(child)
@@ -2375,14 +2382,27 @@ function M.voxel_look(node)
 		local i = 0
 		while cg and cg:GetMaterial(i) do
 			local m = cg:GetMaterial(i)
-			m:SetTechnique(0, magic.cache:GetResource(
-					"Technique", "kit/KitVoxel" .. sky .. kind .. ".xml"))
+			local t = "kit/KitVoxel" .. sky .. kind
+			m:SetTechnique(0, technique(t))
 			cut_material(m)
 			mats[#mats + 1] = m
+			mats.tech[#mats] = t
 			i = i + 1
 		end
 	end
 	CUT.mats[node:GetID()] = mats
+end
+-- Fog of war's darkening on every chunk drawn, or off
+function M.set_fog(on)
+	if on == CUT.fog then
+		return
+	end
+	CUT.fog = on
+	for _, mats in pairs(CUT.mats) do
+		for i, m in ipairs(mats) do
+			m:SetTechnique(0, technique(mats.tech[i]))
+		end
+	end
 end
 -- The cut at world y (nil: none) on every chunk drawn
 function M.set_cut(y)

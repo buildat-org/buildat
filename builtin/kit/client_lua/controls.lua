@@ -519,6 +519,9 @@ buildat.sub_packet("kit:body", function(data)
 	if b.put then
 		C.put = tonumber(b.put) or 0
 		C.s = b.s
+		if M.rts_put then
+			M.rts_put()
+		end
 		C.pending = {}
 		C.out = {}
 		C.seq = math.max(C.seq, tonumber(b.ack) or 0)
@@ -1633,6 +1636,13 @@ local function hint_used(ty, k)
 			(ok and "" or ", not kept: " .. tostring(err)))
 end
 function M.movement_help()
+	-- [KIT_RTS] (4z37zzo) a camera alone: the rts camera's keys, not a walker's
+	if camera_mode() == "rts" then
+		return TOUCH and "Stick: pan  drag: move the ground  tap a unit: select  tap: order" or
+				M.key_text("{key:forward}{key:left}{key:back}{key:right}: pan  " ..
+				"wheel: zoom  right drag: turn  left: select  right: order  " ..
+				"PageUp/PageDown: cut  {key:edit}: edit  Esc: menu")
+	end
 	local m, list = move(), decl()[TOUCH and "touch_help" or "help"]
 	if not m or type(list) ~= "table" then
 		return nil
@@ -1830,6 +1840,10 @@ function M.touch_stick()
 end
 function M.my_team()
 	return C.ctl and type(C.ctl.team) == "string" and C.ctl.team or ""
+end
+-- [KIT_RTS] under fog of war (kit:controls' fog): rts.lua darkens
+function M.fog_on()
+	return C.ctl ~= nil and C.ctl.fog == true
 end
 function M.steps_sent()
 	return C.seq

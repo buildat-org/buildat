@@ -1,0 +1,30 @@
+{
+	"deepcore/cannon": {
+		"version": 1,
+		"tags": [
+			"weapon"
+		],
+		"icon": "",
+		"stack": 1,
+		"use": "ranged",
+		"shot": "projectile",
+		"cooldown": 0.8,
+		"mode": "single",
+		"charge": 1,
+		"damage": 12,
+		"crit": 1,
+		"knockback": 0,
+		"speed": 30,
+		"gravity": 0,
+		"lifetime": 1.5,
+		"recoil": 0,
+		"magazine": 0,
+		"ammo": "",
+		"uses": 0,
+		"wear_shot": 0,
+		"color": "#ffd060",
+		"sound_shot": "",
+		"sound_hit": "",
+		"sound_break": ""
+	}
+}

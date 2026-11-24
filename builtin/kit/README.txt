@@ -81,3 +81,10 @@ by VoxeLibre's LEGAL.md. A team's colour is put on its shirt at run time
 
 core.png ([KIT_AIRSHIPS], the voxel kit/core: a ship's core) was drawn
 for Kit by a script; CC0 1.0 (public domain).
+
+hard_rock.png and ore.png ([KIT_RTS], the voxels kit/hard_rock and
+kit/ore: the underground generator's) were made from stone.png by a
+script, under its licence (CC BY-SA 4.0, a derivative): hard_rock.png
+its brightness compressed and darkened to a cool basalt grey with a few
+darker seams; ore.png its look (the "stone" palette's entry 0 multiplied
+in) with ten small flecks drawn over it, eight teal-green and two copper.

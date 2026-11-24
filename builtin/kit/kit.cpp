@@ -10,6 +10,7 @@
 #include "accounts/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
+#include "replicate/api.h"
 #include "storage/api.h"
 #include "voxelworld/api.h"
 #include "interface/wasm_box.h"
@@ -51,6 +52,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #ifndef _WIN32
 	// [KIT_SERVER_PUBLISH] the server's key file's mode
 	#include <fcntl.h>
@@ -138,6 +140,9 @@ static const int MAX_POLYGON_EXTENT = 256;
 static const int MAX_REGION_EXTENT = 2048;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
+// [KIT_RTS] c:voxels_at's cells a call at most, and a world cell's farthest
+// coordinate (c:set_voxels_at's; past it no cell)
+static const int MAX_READ_CELLS = 4096, MAX_WORLD_CELL = 1 << 20;
 // [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
 // at most), the reach of its kill and hurt radii, the entities told
 // (on_blast), and Kit's blasts a second (a server's, every round's
@@ -416,8 +421,12 @@ struct Type
 	// state members and score); it reads every team (reads_teams = true)
 	bool team = false, teams = false;
 	// [KIT_RTS] A unit a player commands (unit = true: its param team, the
-	// orders' on_order; kit/unit)
-	bool unit = false;
+	// orders' on_order; kit/unit); [KIT_RTS] (4z37zzo) it reads its scene's
+	// units (reads_units = true: c.units, c:order)
+	bool unit = false, units = false;
+	// [KIT_RTS] Its number parameter that is how far a unit sees for its
+	// team under fog of war (vision = "<param>"; "": none)
+	ss_ vision;
 	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
 	// c:region_at)
 	bool regions = false;
@@ -458,6 +467,9 @@ struct Type
 	// box's voxels (reads_voxels = true)
 	ss_ voxel_box;
 	bool reads_voxels = false;
+	// [KIT_RTS] Its runs read and write the World's cells (world_voxels =
+	// true: c:voxel_at, c:voxels_at, c:set_voxels_at)
+	bool world_voxels = false;
 	// [KIT_AIRSHIPS_2] The position parameter that is its kit/terrain_region
 	// box ("" none): the World's voxels Kit generates in it
 	ss_ world_region;
@@ -1714,6 +1726,15 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AGENT_NEXT_1] the camera ends with this instance
 		if(m_cam.running)
 			camera_say("stop");
+		// [KIT_RTS] the fog's filters hold this
+		if(!m_fog_refs.empty()) try {
+			replicate::access(m_server, [&](replicate::Interface *irep){
+				for(main_context::SceneReference ref : m_fog_refs)
+					irep->set_named_node_filter(ref, "kit_fog", nullptr);
+			});
+		} catch(std::exception &e){
+			log_w(MODULE, "The fog's filters not taken back: %s", e.what());
+		}
 		// [KIT_AGENTS]
 		if(!m_agent_peers.empty()) try {
 			network::access(m_server, [&](network::Interface *i){
@@ -1872,6 +1893,10 @@ struct Module: public interface::Module, public Interface
 		m_box_n++;
 		if(!m_box)
 			return false;
+		// [KIT_RTS] c:voxel_at, c:voxels_at (box.c's box_voxels)
+		m_box->query = [this](const ss_ &in, ss_ &out){
+			return world_voxels_query(in, out);
+		};
 		// The types again: a new box knows none. One that fails here
 		// leaves no box (no restart inside a restart). [KIT] stage 4h: the
 		// movement library first
@@ -2100,11 +2125,11 @@ struct Module: public interface::Module, public Interface
 				"linked_in", "listed", "look", "marker", "movement", "nearby",
 				"no_position", "outputs", "owns_voxel", "parallax", "params",
 				"placeable", "player", "reads_players", "reads_regions",
-				"reads_teams", "reads_voxels", "region", "right_use", "root",
+				"reads_teams", "reads_units", "reads_voxels", "region", "right_use", "root",
 				"seat", "senses", "sight", "single", "space", "spawn",
 				"spawn_spots", "state", "takes_text", "team", "ui", "unit", "usable",
-				"use_range", "use_when", "version", "volume", "voxel_box",
-				"world", "world_region", "zone"};
+				"use_range", "use_when", "version", "vision", "volume", "voxel_box",
+				"world", "world_region", "world_voxels", "zone"};
 		return F;
 	}
 	// ... and the functions: its handlers
@@ -2230,6 +2255,15 @@ struct Module: public interface::Module, public Interface
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
 		t.unit = t.decl.get("unit").is_true();
+		t.units = t.decl.get("reads_units").is_true();
+		// [KIT_RTS] its sight's parameter, a number one of its own
+		t.vision = jstr(t.decl, "vision");
+		if(!t.vision.empty() && jstr(t.decl.get("params").get(t.vision.c_str()), "type") !=
+				"number"){
+			log_w(MODULE, "Component type %s: vision \"%s\" is no number parameter "
+					"of its own: it sees nothing", cs(name), cs(t.vision));
+			t.vision.clear();
+		}
 		t.teams = t.decl.get("reads_teams").is_true();
 		t.regions = t.decl.get("reads_regions").is_true();
 		t.events = jstr(t.decl, "events");
@@ -2537,6 +2571,7 @@ struct Module: public interface::Module, public Interface
 					t.space[b] = "cells";
 		}
 		t.reads_voxels = t.decl.get("reads_voxels").is_true();
+		t.world_voxels = t.decl.get("world_voxels").is_true();
 		if(t.reads_voxels && t.voxel_box.empty()){
 			why = name+": reads_voxels reads its voxel_box, and it has none";
 			return false;
@@ -5059,6 +5094,53 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// [KIT_RTS] box.c's box_voxels (WasmBox::query): "<id> <x0> <y0> <z0>
+	// <sx> <sy> <sz>", the box of the World's cells from (x0, y0, z0) as the
+	// entity's scene has them (read_box()), the entity one of whose types
+	// says world_voxels, MAX_READ_CELLS at most; out: the names, each
+	// ending in '\n', a '\0', each cell's index in them (from 1; 0 not
+	// loaded) as 2 bytes little-endian, x fastest, then z, then y
+	bool world_voxels_query(const ss_ &in, ss_ &out)
+	{
+		double q[7];
+		if(sscanf(in.c_str(), "%lf %lf %lf %lf %lf %lf %lf", &q[0], &q[1],
+				&q[2], &q[3], &q[4], &q[5], &q[6]) != 7)
+			return false;
+		for(double v : q)
+			if(!std::isfinite(v) || std::fabs(v) > MAX_WORLD_CELL)
+				return false;
+		auto it = m_entities.find((uint64_t)std::max(0.0, q[0]));
+		if(it == m_entities.end())
+			return false;
+		bool may = false;
+		for(const Instance &c : it->second.comps)
+			may = may || m_types[c.type].world_voxels;
+		const int n[3] = {(int)q[4], (int)q[5], (int)q[6]};
+		if(!may || n[0] < 1 || n[1] < 1 || n[2] < 1 ||
+				(int64_t)n[0] * n[1] * n[2] > MAX_READ_CELLS)
+			return false;
+		const sv_<ss_> cells = read_box(it->second,
+				pv::Vector3DInt32((int)q[1], (int)q[2], (int)q[3]), n);
+		sm_<ss_, size_t> index;
+		ss_ ids;
+		for(const ss_ &c : cells){
+			size_t i = 0;
+			if(!c.empty()){
+				auto ix = index.find(c);
+				if(ix == index.end()){
+					ix = index.insert(std::make_pair(c, index.size() + 1)).first;
+					out += c+"\n";
+				}
+				i = ix->second;
+			}
+			ids += (char)(i & 0xff);
+			ids += (char)(i >> 8);
+		}
+		out += '\0';
+		out += ids;
+		return true;
+	}
+
 	// The cells an entity owns: its own, or its owning instance's volume
 	// (from its cell up and on, the volume's extent; simplified: one past
 	// MAX_VOLUME cells is its own cell alone)
@@ -6284,6 +6366,17 @@ struct Module: public interface::Module, public Interface
 			s->get("was", m_made_by);
 		}
 		load_local_types();
+		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
+		// export beside its composition, before the rows load
+		// ([KIT_RTS] (4z37zzo) and before the composition: its params may
+		// name the export's prefabs and items)
+		json::Value edits;
+		if(first && host.opens_in_edit){
+			const ss_ dir = host.composition_path.substr(0,
+					host.composition_path.rfind('/'));
+			edits = import_export(dir);
+			take_game(dir);
+		}
 		json::json_error_t err;
 		err.line = -1;
 		const json::Value c = json::load_string(authored.c_str(), &err);
@@ -6305,15 +6398,6 @@ struct Module: public interface::Module, public Interface
 		if(!m_migrated_objects.empty())
 			m_runtime_dirty = true;
 		clear_migrated();
-		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
-		// export beside its composition, before the rows load
-		json::Value edits;
-		if(first && host.opens_in_edit){
-			const ss_ dir = host.composition_path.substr(0,
-					host.composition_path.rfind('/'));
-			edits = import_export(dir);
-			take_game(dir);
-		}
 		// The palette: every type of Kit's and of the app's that loads
 		for(const ss_ &author : {ss_("kit"), m_author}){
 			const ss_ dir = author_path(author);
@@ -11875,8 +11959,14 @@ struct Module: public interface::Module, public Interface
 		const world::Biome &b = bi->second;
 		// The roles the generator needs, each a voxel by its biome
 		sv_<ss_> need;
-		if(p.generator != "empty")
+		// [KIT_RTS] underground: its soil and rock (hard, ore and
+		// cave_floor stone where the biome has none)
+		if(p.generator == "underground")
+			need = {"filler", "stone"};
+		else if(p.generator != "empty")
 			need = {"top", "filler", "stone", "riverbed"};
+		if(p.generator == "underground" && p.border == "water")
+			need.push_back("riverbed");
 		if(p.generator == "noise" || p.generator == "valleys" ||
 				p.border == "water" || (p.generator == "flat" &&
 				p.sea_level > p.level))
@@ -12032,6 +12122,9 @@ struct Module: public interface::Module, public Interface
 			lo = std::min(lo, t), hi = std::max(hi, t);
 		if(p.generator == "empty")
 			lo = hi = p.level - 1;
+		// [KIT_RTS] the underground's ground down to its floor's top
+		if(p.generator == "underground")
+			lo = p.level - p.height;
 		uint32_t hash = world::hash_ints(tops);
 		if(!p.heightmap())
 			find_spawn(*h, ids);
@@ -12043,7 +12136,7 @@ struct Module: public interface::Module, public Interface
 		// And its caves, sampled every fourth column each way: a check sees
 		// that they are there and the same by the seed
 		ss_ caves;
-		if(p.with_caves() && !p.heightmap()){
+		if(p.with_caves() && !p.heightmap() && p.generator != "underground"){
 			size_t n = 0, of = 0;
 			for(int z = 0; z < fd; z += 4)
 				for(int x = 0; x < fw; x += 4){
@@ -12140,7 +12233,8 @@ struct Module: public interface::Module, public Interface
 				"voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
-				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
+				world::generator_version(p.generator),
+				p.with_caves() && !p.heightmap() ? ", caves" : "",
 				cs(caves), dn, dh, dwet, cs(ms.name));
 		// [KIT_SYMMETRY] a heightmap generated again: its authored slice
 		// copied over the others (a voxel World's in on_gen_queue)
@@ -14956,7 +15050,7 @@ struct Module: public interface::Module, public Interface
 			world::resolve_biome(m_w->materials, b.second, id, br.structs, bi);
 			br.biomes.push_back(std::make_pair(b.first, bi));
 			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.stone,
-					bi.riverbed, bi.cave_floor, bi.cave_wall})
+					bi.riverbed, bi.cave_floor, bi.cave_wall, bi.hard, bi.ore})
 				if(v)
 					br.ground.insert(v);
 			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.riverbed})
@@ -15949,13 +16043,32 @@ struct Module: public interface::Module, public Interface
 			auto put = [&](const pv::Vector3DInt32 &q, uint32_t v) -> bool {
 				uint32_t old = 0;
 				const bool have = loaded(w, q);
-				if(!have && (v == air || v == 0))
+				// (air where the generator makes air: nothing to write;
+				// [KIT_RTS] (4z37zzo) an underground World's is ground)
+				if(!have && (v == air || v == 0) && (base(q) == air ||
+						base(q) == 0))
 					return false;
 				if(have && voxel_id(w, q, old) && old == v)
 					return false;
 				const pv::Vector3DInt16 sp = section_of(w, q);
 				if(sp.getY() < WORLD_SECTION_Y0 || sp.getY() > WORLD_SECTION_Y1)
 					return false;
+				// [KIT_RTS] (4z37zzo) A section not generated yet is generated
+				// here (base()'s volume, as put_sections does): the
+				// generator's own arriving later would write over the cells
+				// (inside its section its volume wins)
+				if(!m_w->wp.heightmap() && !w->is_section_generated(sp)){
+					base(q);
+					w->load_section_no_generate(sp);
+					if(w->is_section_loaded(sp)){
+						w->set_section_generated(sp);
+						w->set_volume(*gen[std::make_tuple(sp.getX(),
+								sp.getY(), sp.getZ())], true);
+						if(m_w->sky)
+							w->relight_region_later(
+									w->get_section_region_voxels(sp));
+					}
+				}
 				if(!hm_section(w, q) && !loaded(w, q))
 					w->load_or_generate_section(sp);
 				if(!voxel_id(w, q, old) || old == v)
@@ -16740,7 +16853,8 @@ struct Module: public interface::Module, public Interface
 					p.border == "wall" ? 1 : 0;
 			const int ylo = std::min(m_w->world_min, p.border == "water" ?
 					p.sea_level - world::SEA_BED : INT_MAX) -
-					(p.with_caves() ? world::CAVE_DEEP : 8);
+					(p.with_caves() && p.generator != "underground" ?
+					world::CAVE_DEEP : 8);
 			const int yhi = std::max(m_w->world_max + (p.border == "wall" ? 4 : 0),
 					p.sea_level);
 			for(int sx = sec(p.x0() - m); sx <= sec(p.x0() + p.width - 1 + m); sx++)
@@ -17522,6 +17636,10 @@ struct Module: public interface::Module, public Interface
 			if(ty.unit && in.disabled.empty() && show.get("unit").is_undefined()){
 				json::Value u = json::object();
 				u.set("team", jstr(in.params, "team"));
+				// how far it sees under fog of war (its own team's darkening)
+				const double r = vision_of(e);
+				if(r > 0)
+					u.set("sight", r);
 				show.set("unit", u);
 			}
 			// (a seat: taken by a use, [KIT] stage 4h)
@@ -17716,6 +17834,7 @@ struct Module: public interface::Module, public Interface
 			n->SetVar(magic::StringHash("kit_show"),
 					magic::Variant(show.stringify().c_str()));
 			e.node = n->GetID();
+			fog_new_node(e, e.node); // [KIT_RTS] (before replicate sees it)
 		});
 		for(size_t i = 0; i < e.comps.size(); i++)
 			for(const ss_ &k : m_types[e.comps[i].type].shared)
@@ -17753,7 +17872,10 @@ struct Module: public interface::Module, public Interface
 			json::Value *batch = nullptr)
 	{
 		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end() || !pi->second.player || !has_node(e))
+		// ([KIT_RTS] none while the fog keeps it from them: fog_tick() sends
+		// what changed as it is seen again)
+		if(pi == m_peers.end() || !pi->second.player || !has_node(e) ||
+				fog_hides(peer, e.id))
 			return;
 		ss_ scene;
 		scene_of(e, &scene);
@@ -18374,6 +18496,11 @@ struct Module: public interface::Module, public Interface
 			o += ",regions=";
 			lua_lit(regions, o);
 		}
+		// [KIT_RTS] (4z37zzo) its scene's units
+		if(m_types[in.type].units){
+			o += ",units=";
+			lua_lit(units_lit(e), o);
+		}
 		// [KIT_MINIGAMES_1] its teams, by id: {id, params, state}
 		if(m_types[in.type].teams){
 			json::Value teams = json::array();
@@ -18427,6 +18554,9 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		// [KIT_RTS] c:voxel_at, c:voxels_at, c:set_voxels_at
+		if(m_types[in.type].world_voxels)
+			o += ",world_voxels=true";
 		// [KIT_MINIGAMES_FIX] its own name (c:name(c.id)), and whether the
 		// player who set it off is elsewhere than its scene
 		if(!e.name.empty())
@@ -18798,8 +18928,9 @@ struct Module: public interface::Module, public Interface
 			const bool at = e.has_pos && !sounds.at(i).at(1u).is_true();
 			if(at)
 				world_of(e, w);
+			// ([KIT_RTS] a positional one not to whom the fog keeps it from)
 			play_sound(jstr_at(sounds.at(i), 0), in_scene ? &scene : nullptr,
-					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type);
+					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type, 0, e.id);
 		}
 		// [KIT_PARTICLES] c:effect, c:event
 		const json::Value &effects = fx.get("effects");
@@ -18811,6 +18942,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &vx = fx.get("voxels");
 		if(vx.is_array() && vx.size())
 			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
+		// [KIT_RTS] c:set_voxels_at
+		const json::Value &vw = fx.get("voxels_at");
+		if(vw.is_array() && vw.size() && t.world_voxels)
+			set_voxels(e, in, vw, r.by, t.builds && pid ? 'b' : 'g', true);
 		// c:after(seconds, name, {player = id}): {{name, seconds, player}}
 		const json::Value &after = fx.get("after");
 		for(unsigned i = 0; i < after.size(); i++){
@@ -18867,6 +19002,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &fires = fx.get("fire");
 		for(unsigned i = 0; i < fires.size(); i++)
 			fire_fx(e, type, r.by, fires.at(i));
+		// [KIT_RTS] (4z37zzo) c:order (a reads_units type's)
+		const json::Value &orders = fx.get("order");
+		for(unsigned i = 0; i < orders.size() && m_types[type].units; i++)
+			order_fx(e, r.by, orders.at(i));
 		// [KIT_GUIDE_BOTS] c:use (a bot's)
 		if(fx.get("use").is_number() && m_types[type].decl.get("bot").is_true())
 			bot_use(e.id, (uint64_t)std::max(0.0, fx.get("use").as_number()));
@@ -24749,15 +24888,17 @@ struct Module: public interface::Module, public Interface
 	// [KIT_VOXEL_STATES] c:set_voxels(cells): {{x, y, z, name}...} in the
 	// instance's voxel box (x, y, z from its first cell), MAX_SET_CELLS at
 	// most, each a registered voxel's name; all written or, one refused,
-	// none (logged)
+	// none (logged). [KIT_RTS] world: c:set_voxels_at's, the World's whole
+	// cells (of the entity's scene, as ever), no box
 	void set_voxels(const Entity &e, const Instance &in, const json::Value &vx,
-			const ss_ &by, char origin)
+			const ss_ &by, char origin, bool world = false)
 	{
-		pv::Vector3DInt32 o;
-		int n[3];
+		pv::Vector3DInt32 o(0, 0, 0);
+		int n[3] = {0, 0, 0};
 		ss_ why;
 		sv_<Write> ws;
-		if(!voxel_box(e, in, o, n, &why)){
+		const char *call = world ? "set_voxels_at" : "set_voxels";
+		if(!world && !voxel_box(e, in, o, n, &why)){
 		} else if(vx.size() > (unsigned)MAX_SET_CELLS){
 			why = itos(vx.size())+" cells, past "+itos(MAX_SET_CELLS);
 		} else {
@@ -24767,9 +24908,12 @@ struct Module: public interface::Module, public Interface
 				int q[3];
 				for(unsigned k = 0; k < 3 && why.empty(); k++){
 					const json::Value &v = c.at(k);
-					if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
-							v.as_number() < 0 || v.as_number() >= n[k])
-						why = "cell "+itos(i + 1)+" is not in its box";
+					const bool whole = v.is_number() &&
+							v.as_number() == std::floor(v.as_number());
+					if(world ? !whole || std::fabs(v.as_number()) > MAX_WORLD_CELL :
+							!whole || v.as_number() < 0 || v.as_number() >= n[k])
+						why = "cell "+itos(i + 1)+(world ? " is not a cell" :
+								" is not in its box");
 					else
 						q[k] = (int)v.as_number();
 				}
@@ -24801,16 +24945,16 @@ struct Module: public interface::Module, public Interface
 				});
 		}
 		if(!why.empty()){
-			log_w(MODULE, "Entity %s's %s: set_voxels refused: %s",
-					cs(itos(e.id)), cs(in.type), cs(why));
-			add_log(e.id, "set_voxels refused: "+why);
+			log_w(MODULE, "Entity %s's %s: %s refused: %s",
+					cs(itos(e.id)), cs(in.type), call, cs(why));
+			add_log(e.id, ss_(call)+" refused: "+why);
 			return;
 		}
 		for(const Write &w : ws)
 			if(!set_voxel(w))
 				m_pending_voxels.push_back(w);
-		log_i(MODULE, "Entity %s's %s set %zu cells", cs(itos(e.id)),
-				cs(in.type), ws.size());
+		log_i(MODULE, "Entity %s's %s set %zu cells%s", cs(itos(e.id)),
+				cs(in.type), ws.size(), world ? " of the World" : "");
 	}
 
 	// A voxel an instance sets: false if its section is not loaded yet
@@ -25526,7 +25670,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_ENT_PERF] the tick's phases on the meter's "phases:" line: wall ms a
 	// tick each (the player's own steps step_bodies, the drives' step_drives)
 	enum Phase { PH_SYNC, PH_BODIES, PH_MINDS, PH_DRIVES, PH_TRACKS, PH_SHOTS,
-		PH_QUEUE, PH_N };
+		PH_QUEUE, PH_FOG, PH_N };
 	int64_t m_phase_us[PH_N] = {};
 	struct PhaseTimer
 	{
@@ -25574,7 +25718,7 @@ struct Module: public interface::Module, public Interface
 				m.pct_sum / m.n, m.pct_max, m_bodies.size(), m_drives.size(),
 				m_peers.size(), th);
 		static const char *const names[PH_N] = {"sync_motions", "step_bodies", "minds",
-				"step_drives", "send_tracks", "projectiles", "queue_rest"};
+				"step_drives", "send_tracks", "projectiles", "queue_rest", "fog"};
 		ss_ ph;
 		for(int k = 0; k < PH_N; k++){
 			char b[64];
@@ -26461,6 +26605,7 @@ struct Module: public interface::Module, public Interface
 		{ PhaseTimer t(*this, PH_DRIVES); spent += step_drives(budget - spent); }
 		m_meter.spent += spent;
 		m_meter.budget = budget;
+		{ PhaseTimer t(*this, PH_FOG); fog_tick(); } // [KIT_RTS]
 		{ PhaseTimer t(*this, PH_TRACKS); send_tracks(); }
 		free_bodies_tick();
 		own_tick(); // [KIT_AIRSHIPS]
@@ -27093,6 +27238,11 @@ struct Module: public interface::Module, public Interface
 		// [KIT_RTS] the name of their team (kit/unit's team), "" none
 		if(const uint64_t tm = team_of_player(pe.player))
 			c.set("team", team_name(tm));
+		// [KIT_RTS] under fog of war (its scene's kit/game_rules' fog, in a team,
+		// not in the tools): the client darkens what its team's units do not see
+		auto fpi = m_fog_peers.find(peer);
+		if(fpi != m_fog_peers.end() && fpi->second.fogged)
+			c.set("fog", true);
 		auto bi = m_bodies.find(peer);
 		if(bi != m_bodies.end() && !bi->second.type.empty()){
 			Body &b = bi->second;
@@ -27123,7 +27273,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &d : m_drives){
 			auto ei = m_entities.find(d.first);
 			if(m_free_objects.count(d.first) || ei == m_entities.end() ||
-					d.second.scene != pe.scene)
+					d.second.scene != pe.scene || fog_hides(peer, d.first))
 				continue;
 			json::Value r = json::array();
 			r.append((int64_t)d.first);
@@ -27137,7 +27287,8 @@ struct Module: public interface::Module, public Interface
 		auto psi = m_host.scenes.find(pe.scene);
 		json::Value objs = json::array();
 		for(auto &f : m_free_objects){
-			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
+			if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
+					fog_hides(peer, f.first))
 				continue;
 			json::Value r = json::array();
 			r.append(f.second.boxes); // [KIT_AIRSHIPS] its boxes' name
@@ -28976,7 +29127,8 @@ struct Module: public interface::Module, public Interface
 			}
 			m.walking = walking;
 			bool again = !m.pathed_us || m.gen != d.gen;
-			if(!again && flat(to, m.goal) > 1 && now - m.pathed_us > 500000)
+			// ([KIT_RTS] (4z37zzo) a cell on counts: a digger's next slice)
+			if(!again && flat(to, m.goal) > 0.9 && now - m.pathed_us > 500000)
 				again = true;
 			if(!again && !walking && !m.arrived && now - m.pathed_us > 1000000)
 				again = true;
@@ -31033,7 +31185,9 @@ struct Module: public interface::Module, public Interface
 			char buf[128];
 			for(auto &dp : m_drives){
 				const Drive &d = dp.second;
-				if(d.scene != p.second.scene || d.keys.empty())
+				// ([KIT_RTS] none of a unit the fog keeps from them)
+				if(d.scene != p.second.scene || d.keys.empty() ||
+						fog_hides(p.first, dp.first))
 					continue;
 				auto &s = sent[dp.first];
 				const bool fresh = s.first != d.gen;
@@ -31059,6 +31213,359 @@ struct Module: public interface::Module, public Interface
 				inetwork->send(p.first, "kit:track", out);
 			});
 		}
+	}
+
+	// ---- [KIT_RTS] Fog of war (kit/game_rules' fog; api.h's [KIT_RTS]): in
+	// a scene with it on, a unit (`unit = true`, its team param a kit/team's
+	// name) and what is under it are not sent to a peer of another team while
+	// none of that team's units sees it (a sphere of its `vision` parameter's
+	// metres round each). Worked out FOG_EVERY_US apart, and on the next tick
+	// for a unit made (fog_new_node() keeps it back meanwhile). replicate's
+	// filter answers from m_fog_nodes, under m_fog_mutex, on its own thread: a
+	// peer not worked out yet (just joined) gets none of the scene's fogged
+	// entities.
+	// simplified: a sphere through rock, no line of sight (a voxel walk from
+	// each unit at a low rate is the upgrade); O(seers x units) with squared
+	// distances (a grid bucket is the upgrade past a few hundred units)
+	static constexpr int64_t FOG_EVERY_US = 200000;
+	static constexpr double MAX_VISION = 64;
+	struct FogPeer
+	{
+		// Under fog (in a team, placed, not in the tools), in which scene, their
+		// team's name; the entities not sent to them
+		bool fogged = false;
+		ss_ scene, team;
+		std::set<uint64_t> hidden;
+	};
+	// By peer (the server's, not a session's: a peer is in one session); one
+	// for each peer in a fog's scene
+	std::map<size_t, FogPeer> m_fog_peers;
+	// m_fog_mutex's: by peer, its scene and the nodes kept from it there; by
+	// scene, its fogged entities' nodes (what a peer not worked out does not
+	// get)
+	std::mutex m_fog_mutex;
+	std::map<size_t, std::pair<main_context::SceneReference,
+			std::unordered_set<uint32_t>>> m_fog_nodes;
+	std::map<main_context::SceneReference, std::unordered_set<uint32_t>>
+			m_fog_ref_nodes;
+	// The scenes whose filter is set; by session the fog's scenes, their
+	// fogged entities, when it was last worked out and whether a unit made
+	// wants it again
+	std::set<main_context::SceneReference> m_fog_refs;
+	std::map<uint64_t, std::set<ss_>> m_fog_scenes;
+	std::map<uint64_t, std::set<uint64_t>> m_fog_ents;
+	std::map<uint64_t, int64_t> m_fog_at;
+	std::set<uint64_t> m_fog_due;
+
+	// Whether the fog keeps entity id from this peer now (one in the active
+	// session; not worked out yet: every fogged entity)
+	bool fog_hides(size_t peer, uint64_t id) const
+	{
+		if(m_fog_peers.empty() && m_fog_ents.empty())
+			return false;
+		auto it = m_fog_peers.find(peer);
+		if(it != m_fog_peers.end())
+			return it->second.hidden.count(id) != 0;
+		auto fe = m_fog_ents.find(m_active);
+		return fe != m_fog_ents.end() && fe->second.count(id);
+	}
+
+	// Its first running unit instance (nullptr: none)
+	const Instance* unit_instance(const Entity &e) const
+	{
+		for(const Instance &in : e.comps){
+			auto ti = m_types.find(in.type);
+			if(ti != m_types.end() && ti->second.unit && in.disabled.empty())
+				return &in;
+		}
+		return nullptr;
+	}
+
+	// How far it sees (m; 0 none): its types' `vision` parameters, the most
+	double vision_of(const Entity &e) const
+	{
+		double r = 0;
+		for(const Instance &in : e.comps){
+			auto ti = m_types.find(in.type);
+			if(ti != m_types.end() && !ti->second.vision.empty() &&
+					in.disabled.empty())
+				r = std::max(r, num(in.params, ti->second.vision.c_str(), 0, 0,
+						MAX_VISION));
+		}
+		return r;
+	}
+
+	// The fogged units it is or is under (a team param set), the nearest first
+	sv_<const Entity*> fog_units_over(const Entity &e) const
+	{
+		sv_<const Entity*> out;
+		const Entity *at = &e;
+		for(int depth = 0; at && depth <= MAX_NEST + 2; depth++){
+			if(const Instance *ui = unit_instance(*at))
+				if(!jstr(ui->params, "team").empty())
+					out.push_back(at);
+			auto it = m_entities.find(at->parent);
+			at = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return out;
+	}
+
+	// The filter on a scene, on or off
+	void fog_filter(main_context::SceneReference ref, bool on)
+	{
+		if(on == (m_fog_refs.count(ref) != 0))
+			return;
+		if(on)
+			m_fog_refs.insert(ref);
+		else
+			m_fog_refs.erase(ref);
+		std::function<bool(replicate::PeerId, uint)> f;
+		if(on)
+			f = [this, ref](replicate::PeerId peer, uint node){
+				std::lock_guard<std::mutex> lock(m_fog_mutex);
+				auto it = m_fog_nodes.find(peer);
+				if(it != m_fog_nodes.end() && it->second.first == ref)
+					return !it->second.second.count(node);
+				auto r = m_fog_ref_nodes.find(ref);
+				return r == m_fog_ref_nodes.end() || !r->second.count(node);
+			};
+		else {
+			std::lock_guard<std::mutex> lock(m_fog_mutex);
+			m_fog_ref_nodes.erase(ref);
+		}
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_named_node_filter(ref, "kit_fog", f);
+		});
+		log_i(MODULE, "[KIT_RTS] fog of war %s on a scene", on ? "on" : "off");
+	}
+
+	// make_node()'s, in main_context as the node is made: a fogged entity kept
+	// from the fogged peers of other teams until fog_tick() says (next tick)
+	void fog_new_node(const Entity &e, uint32_t node)
+	{
+		auto si = m_fog_scenes.find(m_active);
+		if(si == m_fog_scenes.end() || si->second.empty())
+			return;
+		ss_ scene;
+		const main_context::SceneReference ref = scene_of(e, &scene);
+		if(!si->second.count(scene))
+			return;
+		std::set<ss_> teams;
+		for(const Entity *u : fog_units_over(e))
+			teams.insert(jstr(unit_instance(*u)->params, "team"));
+		if(teams.empty())
+			return;
+		m_fog_ents[m_active].insert(e.id);
+		std::lock_guard<std::mutex> lock(m_fog_mutex);
+		m_fog_ref_nodes[ref].insert(node);
+		for(auto &fp : m_fog_peers){
+			FogPeer &f = fp.second;
+			if(!f.fogged || f.scene != scene || !m_peers.count(fp.first) ||
+					(teams.size() == 1 && teams.count(f.team)))
+				continue;
+			f.hidden.insert(e.id);
+			m_fog_nodes[fp.first].second.insert(node);
+		}
+		m_fog_due.insert(m_active);
+	}
+
+	void fog_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		int64_t &at = m_fog_at[m_active];
+		if(!m_fog_due.count(m_active) && now - at < FOG_EVERY_US)
+			return;
+		m_fog_due.erase(m_active);
+		at = now;
+		// The scenes it is on in (their nearest kit/game_rules' fog)
+		std::set<ss_> &on = m_fog_scenes[m_active];
+		on.clear();
+		for(auto &s : m_host.scenes){
+			const bool f = game_rules(s.first).get("fog").is_true();
+			if(f)
+				on.insert(s.first);
+			fog_filter(s.second, f);
+		}
+		bool any = !on.empty();
+		for(auto &p : m_peers)
+			any = any || m_fog_peers.count(p.first);
+		if(!any){
+			m_fog_ents.erase(m_active);
+			return;
+		}
+		// The fogged units in those scenes: their team, place and sight; what
+		// is under them ([KIT_NESTING]) and its scene
+		struct U { uint64_t id; ss_ team, scene; double w[3]; double r; };
+		sv_<U> units;
+		std::map<uint64_t, std::pair<ss_, sv_<uint64_t>>> fogged;
+		if(!on.empty())
+			for(auto &p : m_entities){
+				const Entity &e = p.second;
+				const sv_<const Entity*> over = fog_units_over(e);
+				ss_ scene;
+				if(over.empty() || !scene_of(e, &scene) || !on.count(scene))
+					continue;
+				auto &fo = fogged[e.id];
+				fo.first = scene;
+				for(const Entity *o : over)
+					fo.second.push_back(o->id);
+				if(!e.has_pos || over[0] != &e)
+					continue;
+				U u;
+				u.id = e.id;
+				u.team = jstr(unit_instance(e)->params, "team");
+				u.scene = scene;
+				world_of(e, u.w);
+				u.r = vision_of(e);
+				units.push_back(u);
+			}
+		std::set<uint64_t> &ents = m_fog_ents[m_active];
+		ents.clear();
+		std::map<ss_, std::set<uint64_t>> fogged_in;
+		for(auto &f : fogged){
+			ents.insert(f.first);
+			fogged_in[f.second.first].insert(f.first);
+		}
+		{
+			std::map<main_context::SceneReference, std::unordered_set<uint32_t>> rn;
+			for(auto &f : fogged){
+				auto ei = m_entities.find(f.first);
+				auto si = m_host.scenes.find(f.second.first);
+				if(ei->second.node && si != m_host.scenes.end())
+					rn[si->second].insert(ei->second.node);
+			}
+			std::lock_guard<std::mutex> lock(m_fog_mutex);
+			for(const ss_ &s : on){
+				auto si = m_host.scenes.find(s);
+				if(si != m_host.scenes.end())
+					m_fog_ref_nodes[si->second].swap(rn[si->second]);
+			}
+		}
+		// Each peer's team: under the fog in a fog's scene, placed, not in the
+		// tools, not the server's camera, in a team
+		std::set<std::pair<ss_, ss_>> views; // (scene, team)
+		std::map<size_t, ss_> who; // "" none: sees all
+		for(auto &p : m_peers){
+			const Peer &pe = p.second;
+			const bool fs = on.count(pe.scene) && pe.player && !pe.editing &&
+					!pe.still && p.first != m_cam.peer;
+			const ss_ team = fs ? team_name(team_of_player(pe.player)) : ss_();
+			who[p.first] = team;
+			if(!team.empty())
+				views.insert(std::make_pair(pe.scene, team));
+		}
+		// What each (scene, team) does not see of the units: another team's
+		// beyond every sight of one of its own; and what is under those
+		std::map<std::pair<ss_, ss_>, std::set<uint64_t>> hidden;
+		for(const auto &v : views){
+			std::set<uint64_t> unseen;
+			for(const U &u : units){
+				if(u.scene != v.first || u.team == v.second)
+					continue;
+				bool seen = false;
+				for(const U &s : units){
+					if(s.team != v.second || s.scene != v.first || s.r <= 0)
+						continue;
+					const double dx = s.w[0] - u.w[0], dy = s.w[1] - u.w[1],
+							dz = s.w[2] - u.w[2];
+					if(dx * dx + dy * dy + dz * dz <= s.r * s.r){
+						seen = true;
+						break;
+					}
+				}
+				if(!seen)
+					unseen.insert(u.id);
+			}
+			std::set<uint64_t> &out = hidden[v];
+			if(!unseen.empty())
+				for(auto &f : fogged)
+					if(f.second.first == v.first)
+						for(uint64_t o : f.second.second)
+							if(unseen.count(o)){
+								out.insert(f.first);
+								break;
+							}
+		}
+		// Each peer's change: their filter's nodes, replicate asked again about
+		// those that changed, their per_player state of the ones seen again
+		for(auto &p : m_peers){
+			const size_t peer = p.first;
+			const ss_ &team = who[peer];
+			const bool in_fog = on.count(p.second.scene) != 0;
+			auto fi = m_fog_peers.find(peer);
+			if(!in_fog && fi == m_fog_peers.end())
+				continue;
+			FogPeer &f = m_fog_peers[peer];
+			// (new: what the filter kept from them so far, every fogged one)
+			if(fi == m_fog_peers.end())
+				f.hidden = fogged_in[p.second.scene];
+			std::set<uint64_t> now_hidden;
+			if(!team.empty())
+				now_hidden = hidden[std::make_pair(p.second.scene, team)];
+			const bool same = fi != m_fog_peers.end() &&
+					f.fogged == !team.empty() && f.scene == p.second.scene &&
+					f.hidden == now_hidden;
+			f.fogged = !team.empty();
+			f.scene = p.second.scene;
+			f.team = team;
+			if(same)
+				continue;
+			sv_<uint64_t> changed, shown;
+			std::set_symmetric_difference(f.hidden.begin(), f.hidden.end(),
+					now_hidden.begin(), now_hidden.end(), std::back_inserter(changed));
+			// (a track's keys go on from the last sent when seen again: the
+			// client's are in time order, the hidden span a jump)
+			for(uint64_t id : changed)
+				if(!now_hidden.count(id))
+					shown.push_back(id);
+			f.hidden.swap(now_hidden);
+			auto si = m_host.scenes.find(p.second.scene);
+			const main_context::SceneReference ref =
+					si == m_host.scenes.end() ? nullptr : si->second;
+			std::unordered_set<uint32_t> hn;
+			for(uint64_t id : f.hidden){
+				auto ei = m_entities.find(id);
+				if(ei != m_entities.end() && ei->second.node)
+					hn.insert(ei->second.node);
+			}
+			sv_<uint> nodes;
+			for(uint64_t id : changed){
+				auto ei = m_entities.find(id);
+				if(ei != m_entities.end() && ei->second.node)
+					nodes.push_back(ei->second.node);
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_fog_mutex);
+				auto &fn = m_fog_nodes[peer];
+				fn.first = ref;
+				fn.second.swap(hn);
+			}
+			if(ref && !nodes.empty())
+				replicate::access(m_server, [&](replicate::Interface *irep){
+					irep->refresh_peer_node_ids(ref, peer, nodes);
+				});
+			for(uint64_t id : shown){
+				auto ei = m_entities.find(id);
+				if(ei == m_entities.end())
+					continue;
+				for(size_t i = 0; i < ei->second.comps.size(); i++)
+					for(const ss_ &k : m_types[ei->second.comps[i].type].per_player)
+						send_mine(peer, ei->second, i, k);
+			}
+			log_v(MODULE, "[KIT_RTS] fog: peer %zu (team \"%s\"): %zu entities "
+					"hidden, %zu changed", peer, cs(team), f.hidden.size(),
+					changed.size());
+			if(!in_fog && f.hidden.empty())
+				fog_forget(peer);
+		}
+	}
+
+	// A peer out of a session (gone, or to another): nothing of theirs kept
+	void fog_forget(size_t peer)
+	{
+		m_fog_peers.erase(peer);
+		std::lock_guard<std::mutex> lock(m_fog_mutex);
+		m_fog_nodes.erase(peer);
 	}
 
 	// [KIT_SURVIVAL_TUNING] Fall damage: a landing's speed (move.lua's
@@ -32669,7 +33176,7 @@ struct Module: public interface::Module, public Interface
 	// or at == null for each where they are; except a peer (0 none: its
 	// client played it already). why: the trigger, for the log
 	void play_sound(const ss_ &name, const ss_ *scene, const double *at,
-			const ss_ &why, size_t except = 0)
+			const ss_ &why, size_t except = 0, uint64_t from = 0)
 	{
 		if(name.empty())
 			return;
@@ -32684,7 +33191,8 @@ struct Module: public interface::Module, public Interface
 		size_t n = 0;
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &o : m_peers)
-				if((!scene || o.second.scene == *scene) && o.first != except){
+				if((!scene || o.second.scene == *scene) && o.first != except &&
+						!(at && fog_hides(o.first, from))){
 					inetwork->send(o.first, "kit:sound", data);
 					n++;
 				}
@@ -33284,7 +33792,9 @@ struct Module: public interface::Module, public Interface
 		size_t n = 0;
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers){
-				if(in_scene && p.second.scene != scene)
+				// ([KIT_RTS] none at an entity the fog keeps from them)
+				if((in_scene && p.second.scene != scene) || fog_hides(p.first, e.id) ||
+						fog_hides(p.first, on->id))
 					continue;
 				const double dx = p.second.pos[0] - at[0], dy = p.second.pos[1] -
 						at[1], dz = p.second.pos[2] - at[2];
@@ -36227,8 +36737,7 @@ struct Module: public interface::Module, public Interface
 	// square ORDER_SPACING m apart about the point (the units sorted by z then
 	// x, as the spots), center = the point, k = its place in the order (from
 	// 1), n = how many} or {target = id, k, n} (an entity with a place in that
-	// scene). simplified: a spot may be in a wall (the pathfinder goes as
-	// near as it can)
+	// scene); the spots out of walls (issue_order())
 	static constexpr size_t ORDER_MAX = 256;
 	static constexpr double ORDER_SPACING = 1.5;
 	void on_order(const network::Packet &packet)
@@ -36272,8 +36781,10 @@ struct Module: public interface::Module, public Interface
 		if(target){
 			auto ti = m_entities.find(target);
 			ss_ ts;
+			// ([KIT_RTS] one the fog keeps from them is none to them)
 			if(ti == m_entities.end() || !ti->second.has_pos ||
-					!scene_of(ti->second, &ts) || ts != pe.scene)
+					!scene_of(ti->second, &ts) || ts != pe.scene ||
+					fog_hides(peer, target))
 				return refuse("no such target");
 		}
 		const ss_ team = team_name(team_of_player(pe.player));
@@ -36302,6 +36813,26 @@ struct Module: public interface::Module, public Interface
 			refuse(itos(refused)+" of "+itos(ids.size())+" not theirs to command");
 		if(units.empty())
 			return;
+		const int n = (int)units.size();
+		issue_order(units, has_at ? p : nullptr, target, by_of(pe.name));
+		if(target)
+			log_i(MODULE, "Order by %s: %d units at entity %s", cs(pe.name), n,
+					cs(itos(target)));
+		else
+			log_i(MODULE, "Order by %s: %d units to %.2f,%.2f,%.2f", cs(pe.name), n,
+					p[0], p[1], p[2]);
+	}
+
+	// [KIT_RTS] An order's runs: on_order(c, order, by) on each unit's
+	// instances that have it, their spots laid out about p (nullptr: a
+	// target's order). (4z37zzo) A spot whose cell a body cannot stand in (a
+	// wall, the air over a drop) moves to the nearest that it can within
+	// ORDER_SNAP cells (the pathfinder's cells: the voxels and the solid
+	// looks), else to the point itself
+	static constexpr int ORDER_SNAP = 3;
+	void issue_order(sv_<std::pair<uint64_t, std::array<double, 3>>> units,
+			const double *p, uint64_t target, const ss_ &by)
+	{
 		typedef std::pair<uint64_t, std::array<double, 3>> U;
 		std::sort(units.begin(), units.end(), [](const U &a, const U &b){
 			return a.second[2] != b.second[2] ? a.second[2] < b.second[2] :
@@ -36310,14 +36841,60 @@ struct Module: public interface::Module, public Interface
 		const int n = (int)units.size();
 		const int cols = (int)std::ceil(std::sqrt((double)n));
 		const int rows = (n + cols - 1) / cols;
-		const ss_ by = by_of(pe.name);
+		// The cells round the spots, as the pathfinder reads them
+		creatures::Grid g;
+		if(p && n){
+			const int half = (int)std::ceil(cols * ORDER_SPACING / 2) + ORDER_SNAP + 1;
+			g.x0 = (int)std::floor(p[0] + 0.5) - half;
+			g.z0 = (int)std::floor(p[2] + 0.5) - half;
+			g.y0 = (int)std::floor(p[1] + 0.5) - ORDER_SNAP - 4;
+			g.nx = g.nz = 2 * half + 1;
+			g.ny = 2 * ORDER_SNAP + 8;
+			read_grid(scene_of(m_entities[units[0].first]), g, 0);
+		}
+		// A body's cell: not solid, the one over it neither, something not
+		// air under it within 3 (UNKNOWN, not loaded, taken as standing)
+		auto stands = [&](int x, int y, int z){
+			if(g.at(x, y, z) == creatures::SOLID || g.at(x, y + 1, z) == creatures::SOLID)
+				return false;
+			for(int d = 1; d <= 3; d++)
+				if(g.at(x, y - d, z) != creatures::AIR)
+					return true;
+			return false;
+		};
+		size_t moved = 0;
 		for(int k = 0; k < n; k++){
 			json::Value o = json::object();
 			if(target){
 				o.set("target", (int64_t)target);
 			} else {
-				const double s[3] = {p[0] + (k % cols - (cols - 1) / 2.0) * ORDER_SPACING,
+				double s[3] = {p[0] + (k % cols - (cols - 1) / 2.0) * ORDER_SPACING,
 						p[1], p[2] + (k / cols - (rows - 1) / 2.0) * ORDER_SPACING};
+				const int cx = (int)std::floor(s[0] + 0.5),
+						cy = (int)std::floor(s[1] + 0.51), cz = (int)std::floor(s[2] + 0.5);
+				if(!stands(cx, cy, cz)){
+					bool found = false;
+					for(int r = 1; r <= ORDER_SNAP && !found; r++)
+					for(int dy = 0; dy <= 2 && !found; dy++)
+					for(int dz = -r; dz <= r && !found; dz++)
+					for(int dx = -r; dx <= r && !found; dx++){
+						if(std::max(std::abs(dx), std::abs(dz)) != r)
+							continue;
+						for(int sy : {dy, -dy}){
+							if(stands(cx + dx, cy + sy, cz + dz)){
+								s[0] = cx + dx;
+								s[1] = cy + sy - 0.5;
+								s[2] = cz + dz;
+								found = true;
+								break;
+							}
+						}
+					}
+					if(!found)
+						for(int i = 0; i < 3; i++)
+							s[i] = p[i];
+					moved++;
+				}
 				o.set("at", point(s));
 				o.set("center", point(p));
 			}
@@ -36338,12 +36915,119 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		}
-		if(target)
-			log_i(MODULE, "Order by %s: %d units at entity %s", cs(pe.name), n,
-					cs(itos(target)));
-		else
-			log_i(MODULE, "Order by %s: %d units to %.2f,%.2f,%.2f", cs(pe.name), n,
-					p[0], p[1], p[2]);
+		if(moved)
+			log_i(MODULE, "[KIT_RTS] An order's %zu spots moved out of walls or "
+					"drops", moved);
+	}
+
+	// [KIT_RTS] (4z37zzo) c:order({id...}, {at = {x, y, z}} | {target = id})
+	// from a reads_units type: its scene's units among the ids (any team's:
+	// the game's own code), ordered as a player's kit:order does them
+	// (issue_order), by the run's by
+	void order_fx(const Entity &e, const ss_ &by, const json::Value &o)
+	{
+		if(!o.is_array() || o.size() < 3)
+			return;
+		const json::Value &ids = o.at(0), &at = o.at(1);
+		const uint64_t target = o.at(2).is_number() ?
+				(uint64_t)std::max(0.0, o.at(2).as_number()) : 0;
+		ss_ scene;
+		if(!scene_of(e, &scene))
+			return;
+		double p[3] = {0, 0, 0};
+		const bool has_at = at.is_array() && at.size() == 3;
+		for(unsigned k = 0; has_at && k < 3; k++)
+			p[k] = at.at(k).is_number() ? at.at(k).as_number() : 0;
+		if(target){
+			auto ti = m_entities.find(target);
+			ss_ ts;
+			if(ti == m_entities.end() || !ti->second.has_pos ||
+					!scene_of(ti->second, &ts) || ts != scene){
+				log_i(MODULE, "Entity %s's order: no target %s", cs(itos(e.id)),
+						cs(itos(target)));
+				return;
+			}
+		} else if(!has_at){
+			return;
+		}
+		sv_<std::pair<uint64_t, std::array<double, 3>>> units;
+		std::set<uint64_t> seen;
+		for(unsigned i = 0; i < ids.size() && units.size() < ORDER_MAX; i++){
+			const uint64_t id = ids.at(i).is_number() ?
+					(uint64_t)std::max(0.0, ids.at(i).as_number()) : 0;
+			auto ei = m_entities.find(id);
+			ss_ es;
+			if(!seen.insert(id).second || ei == m_entities.end() ||
+					!ei->second.has_pos || !scene_of(ei->second, &es) ||
+					es != scene || !is_unit(ei->second))
+				continue;
+			std::array<double, 3> w;
+			world_of(ei->second, w.data());
+			units.push_back(std::make_pair(id, w));
+		}
+		if(!units.empty())
+			issue_order(units, target ? nullptr : p, target, by);
+	}
+
+	bool is_unit(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].unit && in.disabled.empty())
+				return true;
+		return false;
+	}
+
+	// [KIT_RTS] (4z37zzo) c.units of a reads_units type: every unit in its
+	// scene, {id, pos, team, types, health (its kit/health's share; none
+	// without), moving (a way to walk), target (a senses type's state target,
+	// 0 none)}, by id
+	json::Value units_lit(const Entity &self)
+	{
+		ss_ scene;
+		json::Value out = json::array();
+		if(!scene_of(self, &scene))
+			return out;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			const Instance *ui = nullptr;
+			for(const Instance &in : e.comps)
+				if(m_types[in.type].unit && in.disabled.empty())
+					ui = &in;
+			ss_ es;
+			if(!ui || !scene_of(e, &es) || es != scene)
+				continue;
+			double w[3];
+			world_of(e, w);
+			json::Value j = json::object();
+			j.set("id", (int64_t)e.id);
+			j.set("name", e.name);
+			j.set("pos", point(w));
+			j.set("team", jstr(ui->params, "team"));
+			json::Value types = json::array();
+			int64_t target = 0;
+			for(const Instance &in : e.comps){
+				types.append(in.type);
+				const Type &t = m_types[in.type];
+				if(t.health){
+					const double hp = row_num(in.state, "hp"), mx = row_num(in.state, "max");
+					if(mx > 0)
+						j.set("health", hp / mx);
+				}
+				if(t.decl.get("senses").is_true() && in.state.get("target").is_number())
+					target = (int64_t)in.state.get("target").as_number();
+			}
+			j.set("types", types);
+			j.set("target", target);
+			auto di = m_drives.find(e.id);
+			const bool moving = di != m_drives.end() &&
+					di->second.state.get("path").is_array() &&
+					di->second.state.get("path").size() > 0;
+			j.set("moving", moving);
+			out.append(j);
+		}
+		return out;
 	}
 
 	// [KIT_UI_COMPONENTS] "kit:ui" "<id> 1" pressed, "<id> 0" released:
@@ -36631,6 +37315,7 @@ struct Module: public interface::Module, public Interface
 		m_tool_use.erase(peer);
 		m_open_chest.erase(peer);
 		m_peers.erase(peer);
+		fog_forget(peer); // [KIT_RTS]
 		if(player)
 			unplace_player(player);
 		if(guest && gone)

@@ -1,0 +1,7 @@
+<!-- [KIT_RTS] KitVoxelSkyPhysAlpha.xml under fog of war: KITFOG's darkening
+     outside the team's sight (module.lua's set_fog). -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITLINEAR KITTINT KITSKY" psdefines="KITCUT KITFOG KITLINEAR KITSPOTS KITNORMALS KITWATER DIFFMAP KITTINT KITSKY">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

@@ -36,6 +36,11 @@
 -- player in it (placed, not editing) has the pause menu open: its bodies,
 -- creatures, vehicles, projectiles, timers and clock (c.now) stop until
 -- the menu closes or a second player comes in
+-- [KIT_RTS] fog: fog of war in its scenes. A unit (kit/unit) of a team and
+-- what is under it reach a player of another team only while one of their
+-- team's units sees it (its sight, through rock); the voxels their units do
+-- not see are drawn darker on their screen. A player in no team, a builder in
+-- the tools and the server's camera see everything.
 -- [KIT_SCENE_TREE] One placed on a scene ("on": "scene") is that scene's
 -- and the scenes' under it, whole: a player's rules are the nearest copy's
 -- from their scene up, the root's last. The HUD's parameters go further:
@@ -125,6 +130,7 @@ return {
 		respawn = {type = "string", default = "at_once",
 			choices = {"at_once", "on_signal"}},
 		pause_alone = {type = "bool", default = true},
+		fog = {type = "bool", default = false},
 	},
 	about = {
 		group = "World",
@@ -178,6 +184,7 @@ return {
 			hand_level = "The highest material level a bare hand digs (15: any).",
 			respawn = "A dead player respawns at once, or waits for the respawn input.",
 			pause_alone = "The scene pauses while its only player has the pause menu open.",
+			fog = "Fog of war: another team's units are hidden from a player until one of their team's units sees them.",
 		},
 	},
 	inputs = {respawn = "any"},
