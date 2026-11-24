@@ -416,8 +416,9 @@ struct Type
 	// state members and score); it reads every team (reads_teams = true)
 	bool team = false, teams = false;
 	// [KIT_RTS] A unit a player commands (unit = true: its param team, the
-	// orders' on_order; kit/unit)
-	bool unit = false;
+	// orders' on_order; kit/unit); [KIT_RTS] (4z37zzo) it reads its scene's
+	// units (reads_units = true: c.units, c:order)
+	bool unit = false, units = false;
 	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
 	// c:region_at)
 	bool regions = false;
@@ -2091,7 +2092,7 @@ struct Module: public interface::Module, public Interface
 				"linked_in", "listed", "look", "marker", "movement", "nearby",
 				"no_position", "outputs", "owns_voxel", "parallax", "params",
 				"placeable", "player", "reads_players", "reads_regions",
-				"reads_teams", "reads_voxels", "region", "right_use", "root",
+				"reads_teams", "reads_units", "reads_voxels", "region", "right_use", "root",
 				"seat", "senses", "sight", "single", "space", "spawn",
 				"spawn_spots", "state", "takes_text", "team", "ui", "unit", "usable",
 				"use_range", "use_when", "version", "volume", "voxel_box",
@@ -2221,6 +2222,7 @@ struct Module: public interface::Module, public Interface
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
 		t.unit = t.decl.get("unit").is_true();
+		t.units = t.decl.get("reads_units").is_true();
 		t.teams = t.decl.get("reads_teams").is_true();
 		t.regions = t.decl.get("reads_regions").is_true();
 		t.events = jstr(t.decl, "events");
@@ -18282,6 +18284,11 @@ struct Module: public interface::Module, public Interface
 			o += ",regions=";
 			lua_lit(regions, o);
 		}
+		// [KIT_RTS] (4z37zzo) its scene's units
+		if(m_types[in.type].units){
+			o += ",units=";
+			lua_lit(units_lit(e), o);
+		}
 		// [KIT_MINIGAMES_1] its teams, by id: {id, params, state}
 		if(m_types[in.type].teams){
 			json::Value teams = json::array();
@@ -18775,6 +18782,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &fires = fx.get("fire");
 		for(unsigned i = 0; i < fires.size(); i++)
 			fire_fx(e, type, r.by, fires.at(i));
+		// [KIT_RTS] (4z37zzo) c:order (a reads_units type's)
+		const json::Value &orders = fx.get("order");
+		for(unsigned i = 0; i < orders.size() && m_types[type].units; i++)
+			order_fx(e, r.by, orders.at(i));
 		// [KIT_GUIDE_BOTS] c:use (a bot's)
 		if(fx.get("use").is_number() && m_types[type].decl.get("bot").is_true())
 			bot_use(e.id, (uint64_t)std::max(0.0, fx.get("use").as_number()));
@@ -36069,8 +36080,7 @@ struct Module: public interface::Module, public Interface
 	// square ORDER_SPACING m apart about the point (the units sorted by z then
 	// x, as the spots), center = the point, k = its place in the order (from
 	// 1), n = how many} or {target = id, k, n} (an entity with a place in that
-	// scene). simplified: a spot may be in a wall (the pathfinder goes as
-	// near as it can)
+	// scene); the spots out of walls (issue_order())
 	static constexpr size_t ORDER_MAX = 256;
 	static constexpr double ORDER_SPACING = 1.5;
 	void on_order(const network::Packet &packet)
@@ -36144,6 +36154,26 @@ struct Module: public interface::Module, public Interface
 			refuse(itos(refused)+" of "+itos(ids.size())+" not theirs to command");
 		if(units.empty())
 			return;
+		const int n = (int)units.size();
+		issue_order(units, has_at ? p : nullptr, target, by_of(pe.name));
+		if(target)
+			log_i(MODULE, "Order by %s: %d units at entity %s", cs(pe.name), n,
+					cs(itos(target)));
+		else
+			log_i(MODULE, "Order by %s: %d units to %.2f,%.2f,%.2f", cs(pe.name), n,
+					p[0], p[1], p[2]);
+	}
+
+	// [KIT_RTS] An order's runs: on_order(c, order, by) on each unit's
+	// instances that have it, their spots laid out about p (nullptr: a
+	// target's order). (4z37zzo) A spot whose cell a body cannot stand in (a
+	// wall, the air over a drop) moves to the nearest that it can within
+	// ORDER_SNAP cells (the pathfinder's cells: the voxels and the solid
+	// looks), else to the point itself
+	static constexpr int ORDER_SNAP = 3;
+	void issue_order(sv_<std::pair<uint64_t, std::array<double, 3>>> units,
+			const double *p, uint64_t target, const ss_ &by)
+	{
 		typedef std::pair<uint64_t, std::array<double, 3>> U;
 		std::sort(units.begin(), units.end(), [](const U &a, const U &b){
 			return a.second[2] != b.second[2] ? a.second[2] < b.second[2] :
@@ -36152,14 +36182,60 @@ struct Module: public interface::Module, public Interface
 		const int n = (int)units.size();
 		const int cols = (int)std::ceil(std::sqrt((double)n));
 		const int rows = (n + cols - 1) / cols;
-		const ss_ by = by_of(pe.name);
+		// The cells round the spots, as the pathfinder reads them
+		creatures::Grid g;
+		if(p && n){
+			const int half = (int)std::ceil(cols * ORDER_SPACING / 2) + ORDER_SNAP + 1;
+			g.x0 = (int)std::floor(p[0] + 0.5) - half;
+			g.z0 = (int)std::floor(p[2] + 0.5) - half;
+			g.y0 = (int)std::floor(p[1] + 0.5) - ORDER_SNAP - 4;
+			g.nx = g.nz = 2 * half + 1;
+			g.ny = 2 * ORDER_SNAP + 8;
+			read_grid(scene_of(m_entities[units[0].first]), g, 0);
+		}
+		// A body's cell: not solid, the one over it neither, something not
+		// air under it within 3 (UNKNOWN, not loaded, taken as standing)
+		auto stands = [&](int x, int y, int z){
+			if(g.at(x, y, z) == creatures::SOLID || g.at(x, y + 1, z) == creatures::SOLID)
+				return false;
+			for(int d = 1; d <= 3; d++)
+				if(g.at(x, y - d, z) != creatures::AIR)
+					return true;
+			return false;
+		};
+		size_t moved = 0;
 		for(int k = 0; k < n; k++){
 			json::Value o = json::object();
 			if(target){
 				o.set("target", (int64_t)target);
 			} else {
-				const double s[3] = {p[0] + (k % cols - (cols - 1) / 2.0) * ORDER_SPACING,
+				double s[3] = {p[0] + (k % cols - (cols - 1) / 2.0) * ORDER_SPACING,
 						p[1], p[2] + (k / cols - (rows - 1) / 2.0) * ORDER_SPACING};
+				const int cx = (int)std::floor(s[0] + 0.5),
+						cy = (int)std::floor(s[1] + 0.51), cz = (int)std::floor(s[2] + 0.5);
+				if(!stands(cx, cy, cz)){
+					bool found = false;
+					for(int r = 1; r <= ORDER_SNAP && !found; r++)
+					for(int dy = 0; dy <= 2 && !found; dy++)
+					for(int dz = -r; dz <= r && !found; dz++)
+					for(int dx = -r; dx <= r && !found; dx++){
+						if(std::max(std::abs(dx), std::abs(dz)) != r)
+							continue;
+						for(int sy : {dy, -dy}){
+							if(stands(cx + dx, cy + sy, cz + dz)){
+								s[0] = cx + dx;
+								s[1] = cy + sy - 0.5;
+								s[2] = cz + dz;
+								found = true;
+								break;
+							}
+						}
+					}
+					if(!found)
+						for(int i = 0; i < 3; i++)
+							s[i] = p[i];
+					moved++;
+				}
 				o.set("at", point(s));
 				o.set("center", point(p));
 			}
@@ -36180,12 +36256,119 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		}
-		if(target)
-			log_i(MODULE, "Order by %s: %d units at entity %s", cs(pe.name), n,
-					cs(itos(target)));
-		else
-			log_i(MODULE, "Order by %s: %d units to %.2f,%.2f,%.2f", cs(pe.name), n,
-					p[0], p[1], p[2]);
+		if(moved)
+			log_i(MODULE, "[KIT_RTS] An order's %zu spots moved out of walls or "
+					"drops", moved);
+	}
+
+	// [KIT_RTS] (4z37zzo) c:order({id...}, {at = {x, y, z}} | {target = id})
+	// from a reads_units type: its scene's units among the ids (any team's:
+	// the game's own code), ordered as a player's kit:order does them
+	// (issue_order), by the run's by
+	void order_fx(const Entity &e, const ss_ &by, const json::Value &o)
+	{
+		if(!o.is_array() || o.size() < 3)
+			return;
+		const json::Value &ids = o.at(0), &at = o.at(1);
+		const uint64_t target = o.at(2).is_number() ?
+				(uint64_t)std::max(0.0, o.at(2).as_number()) : 0;
+		ss_ scene;
+		if(!scene_of(e, &scene))
+			return;
+		double p[3] = {0, 0, 0};
+		const bool has_at = at.is_array() && at.size() == 3;
+		for(unsigned k = 0; has_at && k < 3; k++)
+			p[k] = at.at(k).is_number() ? at.at(k).as_number() : 0;
+		if(target){
+			auto ti = m_entities.find(target);
+			ss_ ts;
+			if(ti == m_entities.end() || !ti->second.has_pos ||
+					!scene_of(ti->second, &ts) || ts != scene){
+				log_i(MODULE, "Entity %s's order: no target %s", cs(itos(e.id)),
+						cs(itos(target)));
+				return;
+			}
+		} else if(!has_at){
+			return;
+		}
+		sv_<std::pair<uint64_t, std::array<double, 3>>> units;
+		std::set<uint64_t> seen;
+		for(unsigned i = 0; i < ids.size() && units.size() < ORDER_MAX; i++){
+			const uint64_t id = ids.at(i).is_number() ?
+					(uint64_t)std::max(0.0, ids.at(i).as_number()) : 0;
+			auto ei = m_entities.find(id);
+			ss_ es;
+			if(!seen.insert(id).second || ei == m_entities.end() ||
+					!ei->second.has_pos || !scene_of(ei->second, &es) ||
+					es != scene || !is_unit(ei->second))
+				continue;
+			std::array<double, 3> w;
+			world_of(ei->second, w.data());
+			units.push_back(std::make_pair(id, w));
+		}
+		if(!units.empty())
+			issue_order(units, target ? nullptr : p, target, by);
+	}
+
+	bool is_unit(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].unit && in.disabled.empty())
+				return true;
+		return false;
+	}
+
+	// [KIT_RTS] (4z37zzo) c.units of a reads_units type: every unit in its
+	// scene, {id, pos, team, types, health (its kit/health's share; none
+	// without), moving (a way to walk), target (a senses type's state target,
+	// 0 none)}, by id
+	json::Value units_lit(const Entity &self)
+	{
+		ss_ scene;
+		json::Value out = json::array();
+		if(!scene_of(self, &scene))
+			return out;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			const Instance *ui = nullptr;
+			for(const Instance &in : e.comps)
+				if(m_types[in.type].unit && in.disabled.empty())
+					ui = &in;
+			ss_ es;
+			if(!ui || !scene_of(e, &es) || es != scene)
+				continue;
+			double w[3];
+			world_of(e, w);
+			json::Value j = json::object();
+			j.set("id", (int64_t)e.id);
+			j.set("name", e.name);
+			j.set("pos", point(w));
+			j.set("team", jstr(ui->params, "team"));
+			json::Value types = json::array();
+			int64_t target = 0;
+			for(const Instance &in : e.comps){
+				types.append(in.type);
+				const Type &t = m_types[in.type];
+				if(t.health){
+					const double hp = row_num(in.state, "hp"), mx = row_num(in.state, "max");
+					if(mx > 0)
+						j.set("health", hp / mx);
+				}
+				if(t.decl.get("senses").is_true() && in.state.get("target").is_number())
+					target = (int64_t)in.state.get("target").as_number();
+			}
+			j.set("types", types);
+			j.set("target", target);
+			auto di = m_drives.find(e.id);
+			const bool moving = di != m_drives.end() &&
+					di->second.state.get("path").is_array() &&
+					di->second.state.get("path").size() > 0;
+			j.set("moving", moving);
+			out.append(j);
+		}
+		return out;
 	}
 
 	// [KIT_UI_COMPONENTS] "kit:ui" "<id> 1" pressed, "<id> 0" released:

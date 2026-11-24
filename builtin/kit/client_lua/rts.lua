@@ -161,6 +161,12 @@ end
 
 -- ---- The camera (controls.lua's Update calls it in the rts mode)
 
+-- [KIT_RTS] (4z37zzo) a put (a teleport, a team's join onto its pad): the
+-- camera's point taken again from where the player is
+function M.rts_put()
+	R.at = nil
+end
+
 function M.rts_camera(dt, at, node, par)
 	local cam = node:GetComponent("Camera")
 	if not R.on then

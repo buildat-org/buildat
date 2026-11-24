@@ -2086,6 +2086,19 @@ namespace interface
 // and shoots it with its weapon (c:fire) while there (its state target, so
 // c.target), until the target is gone or another order comes. kit:controls
 // carries the player's team's name (team) for the client's selection.
+// [KIT_RTS] (4z37zzo) A spot whose cell a body cannot stand in (solid, solid
+// over it, or air for 3 cells under it, by the pathfinder's cells: the
+// voxels and the solid looks) moves to the nearest one it can within 3
+// cells, else to the point clicked (the server's log: "An order's n spots
+// moved"). A type with `reads_units = true` (a game's opponent, its
+// round) reads c.units = {{id, name, pos = {x, y, z}, team (its unit type's
+// param), types = {type...}, health (its kit/health's share, 0...1; nil
+// without one), moving (its drive has a way to walk), target (its senses
+// type's state target, 0 none)}...}, every unit of its scene (fogged or not:
+// fog of war is the clients'), as the run began; and orders them as a player
+// does: c:order({id...}, {at = {x, y, z}} | {target = id}) (8 a run, 256
+// ids; any team's units of its scene, the others left out), the same
+// on_order runs and spots, by the run's by.
 // [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
 // acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
 // <id>"): its own goal state as a player's, a goal's zone entered, and

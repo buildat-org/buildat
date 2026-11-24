@@ -519,6 +519,9 @@ buildat.sub_packet("kit:body", function(data)
 	if b.put then
 		C.put = tonumber(b.put) or 0
 		C.s = b.s
+		if M.rts_put then
+			M.rts_put()
+		end
 		C.pending = {}
 		C.out = {}
 		C.seq = math.max(C.seq, tonumber(b.ack) or 0)
