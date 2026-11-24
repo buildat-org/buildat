@@ -1590,7 +1590,7 @@ type kit/terrain param decorations | {"default": true, "kind": "bool"}
 type kit/terrain param depth | {"default": 64, "kind": "number", "max": 2048, "min": 4}
 type kit/terrain param dig | {"choices": ["all", "builders", "none"], "default": "all", "kind": "string"}
 type kit/terrain param flatten | {"default": true, "kind": "bool"}
-type kit/terrain param generator | {"choices": ["empty", "flat", "noise", "valleys"], "default": "flat", "kind": "string"}
+type kit/terrain param generator | {"choices": ["empty", "flat", "noise", "valleys", "underground"], "default": "flat", "kind": "string"}
 type kit/terrain param height | {"default": 12, "kind": "number", "max": 100, "min": 0}
 type kit/terrain param level | {"default": 0, "kind": "number", "max": 200, "min": -100}
 type kit/terrain param materials | {"default": "", "kind": "string"}
@@ -2008,11 +2008,13 @@ builtin voxel kit/dandelion
 builtin voxel kit/dirt
 builtin voxel kit/grass
 builtin voxel kit/gravel
+builtin voxel kit/hard_rock
 builtin voxel kit/leaves
 builtin voxel kit/log
 builtin voxel kit/mossy_cobble
 builtin voxel kit/mushroom_brown
 builtin voxel kit/mushroom_red
+builtin voxel kit/ore
 builtin voxel kit/planks
 builtin voxel kit/poppy
 builtin voxel kit/sand

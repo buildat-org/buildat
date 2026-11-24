@@ -2240,7 +2240,9 @@ namespace interface
 //
 // **The World** ([KIT] stage 4e; terrain.h says how it is made): one
 // game-wide kit/terrain on the app root, its parameters the choices -- the
-// generator (empty, flat, noise, valleys), the seed, the biome, the size
+// generator (empty, flat, noise, valleys, [KIT_RTS] underground: solid
+// from level down height cells, soil, rock, hard rock and ore, caverns,
+// point-symmetric; types/terrain.lua), the seed, the biome, the size
 // (finite width x depth round the origin, baked; or infinite, only edited
 // sections saved, the generator's version pinned in the row "world"), a
 // finite map's border (void, wall, water) and the surface (voxels or
@@ -2250,7 +2252,7 @@ namespace interface
 // the load points), and its voxels (register_voxels(): Kit's own
 // material set, materials.json) before the save. Generators work against
 // roles (stone, top, filler, water, riverbed, dust, cave_floor,
-// cave_wall) that a material set's biomes bind to voxels, never voxel
+// cave_wall, [KIT_RTS] hard, ore) that a material set's biomes bind to voxels, never voxel
 // names; a role missing is refused, named. An edit of the World's
 // parameters generates again every section nobody wrote; a builder is
 // sent "kit:warning" (text) for the seams and a refusal. Voxel objects
