@@ -518,7 +518,15 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if help_text.width ~= w then
 		help_text:SetFixedWidth(w)
 	end
-	local bottom = top and top - magic.ui.root.height - 4 or -10
+	-- ([KIT_RTS] over the game's own bottom panels and buttons: Deepcore's
+	-- build bar was half under it)
+	local rh = magic.ui.root.height
+	local gt = kit.own_frames_top and kit.own_frames_top(10, 10 + w,
+			(top or rh - 10) - help_text.height, true)
+	if gt then
+		top = math.min(top or gt, gt)
+	end
+	local bottom = top and top - rh - 4 or -10
 	if help_text.position.y ~= bottom then
 		help_text:SetPosition(10, bottom)
 		log:info("the hint's bottom at " .. bottom .. " (UI units)")

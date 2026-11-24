@@ -16,7 +16,7 @@
 		{"id": 106, "parent": 21, "name": "build refinery", "components": [{"type": "kit/ui_button", "version": 2, "params": {"label": "Refinery $150", "size": 1.8}, "links": [{"output": "pressed", "to": 10, "input": "build_refinery"}]}]},
 		{"id": 107, "parent": 21, "name": "build factory", "components": [{"type": "kit/ui_button", "version": 2, "params": {"label": "Factory $200", "size": 1.8}, "links": [{"output": "pressed", "to": 10, "input": "build_factory"}]}]},
 		{"id": 24, "parent": 1, "name": "the money", "components": [{"type": "kit/ui_text", "version": 2, "params": {"to": "player", "text": "{value}", "anchor": "top_left", "x": 1, "y": 1, "size": 2.6, "color": "#ffd060"}}]},
-		{"id": 25, "parent": 1, "name": "what a buy did", "components": [{"type": "kit/ui_text", "version": 2, "params": {"to": "player", "text": "{value}", "anchor": "bottom", "y": 6, "size": 1.8, "clear_after": 4}}]},
+		{"id": 25, "parent": 1, "name": "what a buy did", "components": [{"type": "kit/ui_text", "version": 2, "params": {"to": "player", "text": "{value}", "anchor": "top", "y": 9, "size": 1.8, "clear_after": 8}}]},
 		{"id": 22, "parent": 1, "name": "the result card", "components": [{"type": "kit/ui_panel", "version": 2, "params": {"screen": "over", "to": "player", "title": "The deep is decided", "layout": "column", "width": 0, "height": 0, "size": 2.2, "appear": "fade", "shown": false}}]},
 		{"id": 23, "parent": 22, "name": "the result", "components": [{"type": "kit/ui_text", "version": 2, "params": {"to": "player", "text": "{value}", "size": 2.4}}]},
 		{"id": 108, "parent": 22, "name": "Again", "components": [{"type": "kit/ui_button", "version": 2, "params": {"label": "Again", "size": 2.4}, "links": [{"output": "pressed", "to": 10, "input": "again"}]}]},

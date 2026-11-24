@@ -215,6 +215,12 @@ function M.rts_camera(dt, at, node, par)
 		R.yaw = (R.yaw - t * 90 * dt) % 360
 		R.pitch = math.max(15, math.min(89, R.pitch + tl * 45 * dt))
 		local mm = magic.input:GetMouseMove()
+		-- (not the move of the press's own frame, made before it: a quick
+		-- right click turned the view and was no order)
+		if R.pressed then
+			R.pressed = nil
+			mm = {x = 0, y = 0}
+		end
 		if not TOUCH and magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
 			R.yaw = (R.yaw + mm.x * 0.3) % 360
 			R.pitch = math.max(15, math.min(89, R.pitch + mm.y * 0.2))
@@ -388,6 +394,7 @@ local function box_rect(d)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+	R.pressed = true
 	if TOUCH or not playing() or ui_utils.clicks_wanted() then
 		return
 	end
@@ -647,6 +654,37 @@ magic.SubscribeToEvent("command_seq:kit_rts_focus", function(_, data)
 	local x, y, z = data:GetString("Param"):match("^(%S+) (%S+) (%S+)")
 	if tonumber(z) then
 		R.at = {tonumber(x), tonumber(y), tonumber(z)}
+	end
+end)
+
+-- For a drive: "event kit_rts_where <id | x,y,z>..." logs where each unit
+-- or point is drawn on the screen (the mouse's pixels), for a real click
+-- there; nothing: the player's own units
+magic.SubscribeToEvent("command_seq:kit_rts_where", function(_, data)
+	local cam, list = cam_of(), {}
+	local w, h = screen()
+	for s in data:GetString("Param"):gmatch("%S+") do
+		list[#list + 1] = s
+	end
+	if #list == 0 then
+		for id, n in pairs(P.nodes) do
+			if id ~= P.you and own(n) then
+				list[#list + 1] = tostring(id)
+			end
+		end
+		table.sort(list)
+		log:info("kit: rts: own units: " .. #list)
+	end
+	for _, s in ipairs(list) do
+		local x, y, z = s:match("^([^,]+),([^,]+),([^,]+)$")
+		local n = not z and P.nodes[tonumber(s)]
+		local p = z and magic.Vector3(tonumber(x) or 0, tonumber(y) or 0,
+				tonumber(z) or 0) or n and unit_point(n)
+		local sx, sy = on_screen(cam, p)
+		local what = (z and "point " or "unit ") .. s
+		log:info(sx and sx >= 0 and sy >= 0 and sx < w and sy < h and
+				string.format("kit: rts: %s on the screen at %d, %d", what, sx, sy) or
+				"kit: rts: " .. what .. " not on the screen")
 	end
 end)
 

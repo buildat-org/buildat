@@ -54,7 +54,8 @@
 --   notice of it instead, [KIT_STOPPED_NOTICE] below); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
 --   screen; while a panel with a button is up (both drawn:
---   [KIT_PANEL_HIDDEN_INPUT]) the pointer is free (ui_utils.wants_clicks)
+--   [KIT_PANEL_HIDDEN_INPUT]) the pointer is free (ui_utils.wants_clicks;
+--   not with a free pointer's camera, [KIT_RTS])
 --   and the walk held for a player in mouse look; a button out of
 --   a panel is not drawn in mouse look on a desktop
 --   ([KIT_HUD_BUTTONS_MOUSE_LOOK]). [KIT_TEXT_INPUT]
@@ -786,11 +787,14 @@ end
 
 -- [WIN_TEXT_CLIPS] The top (screen UI y) of Kit's own bottom frames shown
 -- over x0..x1, if one of them reaches below y0; else nil. The editor's guide
--- goes over them (at 800x600 it ran over the hotbar's frame)
-function M.own_frames_top(x0, x1, y0)
+-- goes over them (at 800x600 it ran over the hotbar's frame).
+-- [KIT_RTS] game: the game's bottom panels and buttons instead, for an app's
+-- hint line over them (Deepcore's build bar was half under Workbench's)
+function M.own_frames_top(x0, x1, y0, game)
 	local top, hit
 	for _, r in pairs(U) do
-		if r.own and r.el and r.w and shown(r.el) and
+		if (game and not r.own and (r.kind == "panel" or r.kind == "button") or
+				not game and r.own) and r.el and r.w and shown(r.el) and
 				tostring(r.ui.anchor):find("bottom") then
 			local p = r.el.screenPosition
 			if p.x < x1 and p.x + r.w > x0 then
@@ -2410,7 +2414,10 @@ local function update()
 			log:info("kit: ui: the pointer freed for a panel's button")
 		end
 	end
-	want.visible = wants
+	-- ([KIT_RTS] not with the pointer free anyway, the rts camera's or a top
+	-- down one's: its clicks are the game's, the panel's own under ui_at, and
+	-- Deepcore's build bar up made every click on a unit nothing)
+	want.visible = wants and not (M.pointer_free and M.pointer_free())
 	full_menu = menu_on
 end
 
