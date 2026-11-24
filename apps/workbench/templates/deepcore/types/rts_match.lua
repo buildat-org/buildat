@@ -6,9 +6,12 @@
 --   player in Blue to wait, the next in Red, and starts. A start clears what
 --   an earlier match made, sets each team's score (its money) to
 --   `start_money`, makes each side's HQ at its base (`blue_base`, `red_base`)
---   with a refinery, a harvester and a digger, and puts ore pockets into
---   each base's walls (`ore_pockets`, `room` cells out from the HQ), shows the
---   players their `hud` (a team's join put them on its pad, at their base).
+--   with a refinery, a factory (`start_factory`), a harvester and a digger,
+--   and puts ore pockets into each base's walls (`ore_pockets`, `room` cells
+--   out from the HQ), shows the players their `hud` (a team's join put them
+--   on its pad, at their base). A harvester of a team standing still 15 s
+--   (it waits where it is with no ore it reaches): the team's player is
+--   told so.
 --   Buying (build_<what> from a button, by a player of a team; or "build"
 --   with "<Team> <what>" from the computer): `cost_<what>` off the team's
 --   money; a unit (harvester, digger, tank) queues at the team's least busy
@@ -19,7 +22,8 @@
 --   The end: a side with no building left loses ("Blue wins"), the `result`
 --   panel on each player's screen ("again": the same match once more; "lobby":
 --   back). The `money` text (to its team) shows the team's money, `status`
---   (to the player) what a buy did.
+--   (to the player) what a buy did, `notice` (to the player, in the middle
+--   of the screen for a few seconds) a buy refused and an idle harvester.
 -- simplified: dug tunnels stay dug from one match to the next (Stop puts the
 -- World back); a building is made at once, no construction time; a player
 -- leaving a 1v1 does not end it
@@ -45,9 +49,15 @@ local function team_of_player(c, by)
 	end
 end
 
-local function say(c, by, text)
-	if c.params.status ~= 0 and by and tostring(by):match("^player:") then
-		c:send(c.params.status, "value", text, by)
+-- (bad: a buy refused, also the `notice` in the middle of their screen)
+local function say(c, by, text, bad)
+	if by and tostring(by):match("^player:") then
+		if c.params.status ~= 0 then
+			c:send(c.params.status, "value", text, by)
+		end
+		if bad and c.params.notice ~= 0 then
+			c:send(c.params.notice, "value", text, by)
+		end
 	end
 	c:log(text)
 end
@@ -125,16 +135,16 @@ end
 local function buy(c, team, what, by)
 	local s = c.state
 	if s.mode ~= "playing" then
-		return say(c, by, "Not in a match")
+		return say(c, by, "Not in a match", true)
 	end
 	local cost = c.params["cost_" .. what]
 	local t = team_named(c, team)
 	if not cost or not t then
-		return say(c, by, "Nothing to buy: " .. tostring(what))
+		return say(c, by, "Nothing to buy: " .. tostring(what), true)
 	end
 	if (t.state.score or 0) < cost then
 		return say(c, by, team .. ": not enough money for a " .. what ..
-			" ($" .. cost .. ")")
+			" ($" .. cost .. ")", true)
 	end
 	local n, _, kinds = count(c, team)
 	if UNITS[what] then
@@ -145,7 +155,7 @@ local function buy(c, team, what, by)
 			end
 		end
 		if n + queued >= c.params.cap then
-			return say(c, by, team .. ": at the unit cap (" .. c.params.cap .. ")")
+			return say(c, by, team .. ": at the unit cap (" .. c.params.cap .. ")", true)
 		end
 		local best, bn = nil, 1e9
 		for _, u in ipairs(c.units or {}) do
@@ -158,7 +168,7 @@ local function buy(c, team, what, by)
 			end
 		end
 		if not best then
-			return say(c, by, team .. ": a " .. what .. " needs a factory")
+			return say(c, by, team .. ": a " .. what .. " needs a factory", true)
 		end
 		local key = tostring(best.id)
 		local q = s.queue[key] or {team = team, list = {}, busy = false,
@@ -181,11 +191,11 @@ local function buy(c, team, what, by)
 			end
 		end
 		if not hq then
-			return say(c, by, team .. ": a " .. what .. " needs an HQ")
+			return say(c, by, team .. ": a " .. what .. " needs an HQ", true)
 		end
 		local p = spot(c, hq)
 		if not p then
-			return say(c, by, team .. ": no room for a " .. what .. " round the HQ")
+			return say(c, by, team .. ": no room for a " .. what .. " round the HQ", true)
 		end
 		c:send(t.id, "add", -cost)
 		spawn(c, what, team, p)
@@ -193,25 +203,27 @@ local function buy(c, team, what, by)
 	end
 end
 
--- Ore into a base's walls: n pockets of 2 x 2 x 2, each where the cells
--- are solid, in the walls of the room `room` cells each way from the HQ
--- (its walls room + 1 out), to each side in turn
-local function pockets(c, base)
-	local r, out = c.params.room, {}
+-- Ore into a base's walls: n pockets of 5 x 2 x 5 (5 deep: mined a layer at
+-- a time from the room), each where the cells are solid, in the walls of
+-- the room `room` cells each way from the HQ (its walls room + 1 out): east,
+-- west, south, north, then east and west again further north (Blue's
+-- tunnel leaves its east wall south of the HQ). Red's are Blue's turned
+-- round the map's middle (side -1), as the bases are
+local function pockets(c, base, side)
+	local r, out, P = c.params.room, {}, 5
 	local h = {math.floor(base[1] + 0.5), math.floor(base[2] + 0.5), math.floor(base[3] + 0.5)}
-	local function at(s, o)
-		return s > 0 and r + 1 or s < 0 and -r - 2 or o
-	end
-	local sides = {{1, 0, -1}, {-1, 0, -1}, {0, 1, -1}, {0, -1, -1}, {1, 0, 4}, {-1, 0, -5}}
-	for k = 1, math.min(c.params.ore_pockets, #sides) do
-		local sd = sides[k]
-		local x = h[1] + at(sd[1], sd[3])
-		local z = h[3] + at(sd[2], sd[3])
-		local v = c:voxels_at({x, h[2], z}, {2, 2, 2})
+	local corners = {{r + 1, -2}, {-r - P, -2}, {-1, r + 1}, {-1, -r - P}, {r + 1, -2 - P},
+		{-r - P, -2 - P}}
+	for k = 1, math.min(c.params.ore_pockets, #corners) do
+		local o = corners[k]
+		-- (the box's low corner, Blue's way or Red's)
+		local x = h[1] + (side > 0 and o[1] or -o[1] - (P - 1))
+		local z = h[3] + (side > 0 and o[2] or -o[2] - (P - 1))
+		local v = c:voxels_at({x, h[2], z}, {P, 2, P})
 		local i = 0
 		for y = 0, 1 do
-			for dz = 0, 1 do
-				for dx = 0, 1 do
+			for dz = 0, P - 1 do
+				for dx = 0, P - 1 do
 					i = i + 1
 					if v[i] and v[i] ~= "air" and v[i] ~= "" then
 						out[#out + 1] = {x + dx, h[2] + y, z + dz, c.params.ore}
@@ -253,11 +265,18 @@ local function start(c)
 		spawn(c, "hq", team, {b[1], b[2], b[3]})
 		local side = team == "Blue" and 1 or -1
 		spawn(c, "refinery", team, {b[1] + 6 * side, b[2], b[3] - 5 * side})
+		if p.start_factory then
+			-- (west of Blue's HQ, east of Red's: its door, +z, to the
+			-- room, away from the tunnels into the rooms; on a whole cell
+			-- as a bought one: what it makes stands on the floor)
+			spawn(c, "factory", team, {b[1] - 7 * side, math.floor(b[2] + 0.5),
+				b[3] + (side > 0 and 3 or -3)})
+		end
 		-- (movers half a cell up, as a factory's: on the floor's top they
 		-- stood stuck)
 		spawn(c, "harvester", team, {b[1] + 3 * side, b[2] + 0.5, b[3] + 4 * side})
 		spawn(c, "digger", team, {b[1] - 3 * side, b[2] + 0.5, b[3] + 4 * side})
-		c:log(team .. "'s ore pockets: " .. pockets(c, b) .. " cells")
+		c:log(team .. "'s ore pockets: " .. pockets(c, b, side) .. " cells")
 	end
 	c:send(p.ai, s.vs == "computer" and "start" or "stop")
 	for team, by in pairs(s.players) do
@@ -293,6 +312,8 @@ return {
 			result = "The result card's panel.", result_text = "The result card's text.",
 			money = "A text shown to a team: its money.",
 			status = "A text shown to a player: what their buy did.",
+			notice = "A text shown to a player in the middle of the screen: a buy refused, a harvester idle.",
+			start_factory = "Each side starts with a factory.",
 			blue_base = "Where Blue's HQ is made.", red_base = "Where Red's HQ is made.",
 			start_money = "Each side's money at the start.",
 			cap = "Units a side at most (buildings aside).",
@@ -320,13 +341,15 @@ return {
 		lobby = {type = "entity", default = 0}, hud = {type = "entity", default = 0},
 		result = {type = "entity", default = 0}, result_text = {type = "entity", default = 0},
 		money = {type = "entity", default = 0}, status = {type = "entity", default = 0},
+		notice = {type = "entity", default = 0},
+		start_factory = {type = "bool", default = true},
 		blue_base = {type = "position", default = {-36, 4, -9}},
 		red_base = {type = "position", default = {35, 4, 8}},
 		start_money = {type = "number", default = 400, min = 0, max = 100000},
 		cap = {type = "number", default = 30, min = 1, max = 100},
 		build_time = {type = "number", default = 4, min = 0.2, max = 60},
 		room = {type = "number", default = 9, min = 3, max = 30},
-		ore_pockets = {type = "number", default = 3, min = 0, max = 6},
+		ore_pockets = {type = "number", default = 6, min = 0, max = 6},
 		ore = {type = "voxel", default = "kit/ore"},
 		cost_harvester = {type = "number", default = 80, min = 0, max = 10000},
 		cost_digger = {type = "number", default = 60, min = 0, max = 10000},
@@ -342,7 +365,8 @@ return {
 	},
 	state = {mode = {default = "lobby", shared = true}, vs = {default = ""},
 		players = {default = {}}, queue = {default = {}}, winner = {default = "", shared = true},
-		since = {default = 0}, waiting = {default = ""}, money = {default = {}}},
+		since = {default = 0}, waiting = {default = ""}, money = {default = {}},
+		idle = {default = {}}, still = {default = {}}},
 	inputs = {vs_computer = "none", versus = "none", again = "none", lobby = "none",
 		build = "string", build_harvester = "none", build_digger = "none",
 		build_tank = "none", build_refinery = "none", build_factory = "none"},
@@ -365,7 +389,7 @@ return {
 		if what then
 			local team = team_of_player(c, by)
 			if not team then
-				return say(c, by, "Not on a side")
+				return say(c, by, "Not on a side", true)
 			end
 			return buy(c, team, what, by)
 		elseif input == "build" then
@@ -424,6 +448,29 @@ return {
 					c:send(p.money, "value", "$" .. math.floor(t.state.score or 0), by)
 				end
 			end
+			-- a harvester still 15 s (simplified: seen by what it does, not
+			-- told by it: a made copy reaches nothing outside itself, and
+			-- play's c:set_param is not a Lua type's c.params)
+			local still = {}
+			for _, u in ipairs(c.units or {}) do
+				if u.name == "harvester" then
+					local k, w = tostring(u.id), s.still[tostring(u.id)]
+					if u.moving or not w or math.abs(w[1] - u.pos[1]) + math.abs(w[2] - u.pos[3]) > 0.3 then
+						w = {u.pos[1], u.pos[3], c.now}
+					elseif c.now - w[3] > 15 and c.now - (s.idle[u.team] or -100) > 20 then
+						s.idle[u.team] = c.now
+						c:log(u.team .. "'s harvester idle (" .. k .. ")")
+						local _, _, kinds = count(c, u.team)
+						if s.players[u.team] then
+							say(c, s.players[u.team], kinds.refinery and
+								"Harvester idle: no reachable ore - dig to a pocket" or
+								"Harvester idle: no refinery", true)
+						end
+					end
+					still[k] = w
+				end
+			end
+			s.still = still
 			-- (a second for the start's buildings to be made)
 			if c.now - s.since > 2 then
 				if not alive.Blue then

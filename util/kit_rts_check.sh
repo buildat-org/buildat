@@ -283,13 +283,13 @@ echo "ok: the digger selected by a click and ordered by a right click: $(stop $D
 m=$(mark "$SL")
 cmd 'click Button "Factory*"'
 await "$SL" "$m" 10 "Blue: a factory built"
-FAC=$(made Blue factory)
-fpos=$(grep -aoP "made Blue factory $FAC at \K\S+" "$SL" | tail -1)
 m=$(mark "$SL")
 cmd 'click Button "Tank*"'
 await "$SL" "$m" 10 "Blue: a tank queued at the factory"
 await "$SL" "$m" 20 "made Blue tank [0-9]+"
 TANK=$(made Blue tank)
+# (made in the bay of the least busy factory: Blue's first one or the new)
+fpos=$(grep -aoP "made Blue tank $TANK at \K\S+" "$SL" | tail -1)
 await "$SL" "$m" 30 "Entity $TANK stopped at "
 tpos=$(stop $TANK $m)
 python3 -I - "$fpos" "$tpos" <<'PY' || fail "the tank did not drive out of the factory's door ($SL)"

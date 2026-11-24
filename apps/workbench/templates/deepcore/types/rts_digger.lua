@@ -10,7 +10,9 @@
 -- the World's cells (c:set_voxels_at, game changes), so the pathfinder takes
 -- any unit through them.
 -- simplified: straight runs along the grid, no diagonal; a slice's cells
--- dug at once after its time; it gives up after two blocked tries; diggers
+-- dug at once after its time; it gives up after two blocked tries, or
+-- after three steps from the same cell (it could not get into its slice:
+-- a building, a drop); diggers
 -- ordered together all dig to the point clicked (not a spot each)
 local function digs(s)
 	local t = {}
@@ -82,6 +84,17 @@ local function step(c)
 		c:log("dug to " .. g[1] .. "," .. g[2] .. "," .. g[3])
 		return
 	end
+	-- (three steps from the same cell: it does not get into the slice it
+	-- dug, a drop or a unit in the way)
+	local here = a[1] .. "," .. a[3]
+	c.state.stuck = c.state.last == here and c.state.stuck + 1 or 0
+	c.state.last = here
+	if c.state.stuck >= 3 then
+		c.state.goal = false
+		c:propose_move(nil)
+		c:log("stuck at " .. here .. " towards " .. g[1] .. "," .. g[3])
+		return
+	end
 	local times = digs(c.params.digs)
 	local tries = math.abs(dx) >= math.abs(dz) and {{sign(dx), 0}, {0, sign(dz)}} or
 		{{0, sign(dz)}, {sign(dx), 0}}
@@ -127,14 +140,15 @@ return {
 		height = {type = "number", default = 2, min = 2, max = 3},
 	},
 	state = {goal = {default = false}, next = {default = false},
-		cells = {default = false}, waits = {default = 0}},
+		cells = {default = false}, waits = {default = 0}, last = {default = ""},
+		stuck = {default = 0}},
 	on_order = function(c, order)
 		-- (the point clicked, not its spot: a spot is moved out of walls)
 		local at = order.center or order.at
 		if at then
 			local g = cell({at[1], c.pos[2], at[3]})
 			c.state.goal = g
-			c.state.waits = 0
+			c.state.waits, c.state.last = 0, ""
 			c:log("digging to " .. g[1] .. "," .. g[2] .. "," .. g[3])
 			c:after(0.05, "dig")
 		else
