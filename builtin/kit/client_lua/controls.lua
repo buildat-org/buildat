@@ -1636,6 +1636,13 @@ local function hint_used(ty, k)
 			(ok and "" or ", not kept: " .. tostring(err)))
 end
 function M.movement_help()
+	-- [KIT_RTS] (4z37zzo) a camera alone: the rts camera's keys, not a walker's
+	if camera_mode() == "rts" then
+		return TOUCH and "Stick: pan  drag: move the ground  tap a unit: select  tap: order" or
+				M.key_text("{key:forward}{key:left}{key:back}{key:right}: pan  " ..
+				"wheel: zoom  right drag: turn  left: select  right: order  " ..
+				"PageUp/PageDown: cut  {key:edit}: edit  Esc: menu")
+	end
 	local m, list = move(), decl()[TOUCH and "touch_help" or "help"]
 	if not m or type(list) ~= "table" then
 		return nil

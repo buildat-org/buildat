@@ -153,7 +153,14 @@ local function cut_look(id, n)
 	end
 end
 
+-- ([KIT_RTS] (4z37zzo) the occlusion buffer off while it is on: the cut is the
+-- chunks' shader's, their occluders stay whole, and the rock over a cavern hid
+-- the units in it)
 local function set_cut(y)
+	if (y ~= nil) ~= (R.cut ~= nil) then
+		R.occluders = R.occluders or magic.renderer.maxOccluderTriangles
+		magic.renderer.maxOccluderTriangles = y and 0 or R.occluders
+	end
 	R.cut = y
 	M.set_cut(y)
 	log:info("kit: rts: the cut " .. (y and string.format("at %.1f", y) or "off"))
