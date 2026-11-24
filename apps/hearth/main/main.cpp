@@ -20,6 +20,11 @@
 //                    ([HEARTH_DISCUSSED_API]); see discussed()
 //   /api/v1/feed     the recent threads as JSON, for a launcher
 //                    ([LIVELY_MENU]); see feed()
+//   /api/v1/topics   every topic's {id, name, parent} as JSON
+//   POST /api/v1/post  {token, topic, title, body[, kind]} or {token,
+//                    thread, body}: a thread or a reply by a script, as
+//                    the account of a token the admin made in Settings,
+//                    "API tokens" ([HEARTH_POST_API]); see post_api()
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -384,7 +389,12 @@ static const char *INDEXES =
 	// keeps its row, not active, so giving it again tells no one twice
 	"CREATE TABLE IF NOT EXISTS thanks(message INTEGER NOT NULL, "
 		"account TEXT NOT NULL, time INTEGER NOT NULL, "
-		"active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(message, account));";
+		"active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(message, account));"
+	// [HEARTH_POST_API]: an account's one API token, as its sha256 (hex);
+	// when the admin made it and when it was last used (0: never)
+	"CREATE TABLE IF NOT EXISTS api_tokens(account TEXT PRIMARY KEY, "
+		"hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, "
+		"used INTEGER NOT NULL DEFAULT 0);";
 
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
@@ -419,6 +429,8 @@ static const char *const COLUMNS_ADDED[][3] = {
 	// helper said), 0 as its uploader's level is (a new account's, shown
 	// once it is a member), -1 taken back by a helper
 	{"files", "vetted", "INTEGER NOT NULL DEFAULT 1"},
+	// [HEARTH_POST_API]: 1 when posted through POST /api/v1/post by a token
+	{"messages", "api", "INTEGER NOT NULL DEFAULT 0"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -534,7 +546,8 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/v1/discussed", "/api/v1/feed"};
+		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/v1/discussed", "/api/v1/feed",
+		"/api/v1/post", "/api/v1/topics"};
 
 // Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): accounts' levels, spaced so
 // one added later goes between two; compared with >=, never ==. Saved as
@@ -580,6 +593,9 @@ static const int ACTIVE_DAYS = 5;
 // Searches a minute, per address on the HTTP face and per account by
 // packet: a search is a full-text query
 static const int SEARCHES_A_MINUTE = 30;
+// [HEARTH_POST_API] Bad tokens a minute per address, past which the
+// address's every POST /api/v1/post waits out the minute
+static const int BAD_TOKENS_A_MINUTE = 10;
 // Pages a minute per address, and the bodies of a thread's part (a page,
 // an answer): one request a bounded render, so a long thread cannot hold
 // the server
@@ -613,6 +629,9 @@ struct Module: public interface::Module
 	// What a request changed, sent once it is committed
 	sv_<int64_t> m_new_messages;
 	std::set<ss_> m_notified;
+	// [HEARTH_POST_API] While a request by token runs: its messages are
+	// marked so
+	bool m_api = false;
 	// [PACKAGE_SUBJECT]: the release poller's thread and what it shares,
 	// under m_rmutex
 	struct ReleaseFound { ss_ aitta; json::Value rel; ss_ changelog; };
@@ -1515,7 +1534,7 @@ struct Module: public interface::Module
 				"hidden_reason, (SELECT count(*) FROM thanks WHERE "
 				"message = messages.id AND active = 1), (SELECT count(*) "
 				"FROM thanks WHERE message = messages.id AND account = ? AND "
-				"active = 1) FROM messages "
+				"active = 1), api FROM messages "
 				"WHERE thread = ? AND id > ? ORDER BY id");
 		m.b(viewer).b(id).b(after);
 		size_t bytes = 0;
@@ -1539,6 +1558,8 @@ struct Module: public interface::Module
 			// A hidden message's thanks are kept and not shown
 			v.set("thanks", hidden ? (int64_t)0 : m.i(7));
 			v.set("thanked", m.i(8) != 0);
+			// [HEARTH_POST_API] posted by a token, shown as such
+			v.set("api", m.i(9) != 0);
 			if(hidden)
 				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
@@ -1688,9 +1709,9 @@ struct Module: public interface::Module
 			const ss_ &title, bool mention = true, bool held = false)
 	{
 		const int64_t t = now_s();
-		Q q(m_db, "INSERT INTO messages(thread, author, body, created) "
-				"VALUES(?, ?, ?, ?)");
-		q.b(thread_id).b(author).b(body).b(t).step();
+		Q q(m_db, "INSERT INTO messages(thread, author, body, created, api) "
+				"VALUES(?, ?, ?, ?, ?)");
+		q.b(thread_id).b(author).b(body).b(t).b((int64_t)m_api).step();
 		const int64_t id = sqlite3_last_insert_rowid(m_db);
 		link_files(id, body);
 		if(held){
@@ -1918,7 +1939,10 @@ struct Module: public interface::Module
 				"<span style=\"float:right\">+"+itos(jint(m, "thanks"))+
 				"</span>" : "")+(answer ? "<b>This answered it:</b> " :
 				"")+"<b><a href=\"/u/"+html(jstr(m, "author"))+"\">"+
-				html(jstr(m, "author"))+"</a></b>, <a href=\"/m/"+id+"\">"+
+				html(jstr(m, "author"))+"</a></b>"+(m.get("api").is_true() ?
+				// [HEARTH_POST_API] machine text shown as what it is
+				" <span title=\"posted by a script with the account's API "
+				"token\">(via API)</span>" : "")+", <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
 				unshown_images(interface::markup::to_html(jstr(m, "body")),
@@ -2075,6 +2099,25 @@ struct Module: public interface::Module
 			});
 			return;
 		}
+		// [HEARTH_POST_API] The topics, for a script to find one's id
+		if(r.path == "/api/v1/topics"){
+			if(r.method != "GET")
+				return respond(r, 405, "{}", "application/json");
+			const json::Value ts = topics();
+			json::Value l = json::array();
+			for(unsigned i = 0; i < ts.size(); i++){
+				json::Value t = json::object();
+				for(const char *k : {"id", "name", "parent"})
+					t.set(k, ts.at(i).get(k));
+				l.append(t);
+			}
+			json::Value v = json::object();
+			v.set("topics", l);
+			return respond(r, 200, v.stringify(), "application/json",
+					"Cache-Control: max-age=60\r\n");
+		}
+		if(r.path == "/api/v1/post")
+			return post_api(r, from);
 		// **The launcher's mark** ([FORUM] 4): a POST of {name, token}, the
 		// client's kept login for this Hearth, answers {unseen} without a
 		// join
@@ -2130,6 +2173,96 @@ struct Module: public interface::Module
 		if(body.empty())
 			return respond(r, 404, page("Not found", "<p>Nothing is here.</p>"));
 		respond(r, 200, page(title, body, r.path));
+	}
+
+	// [HEARTH_POST_API] What a token is kept as
+	static ss_ token_hash(const ss_ &token)
+	{
+		return interface::sha256::hex(interface::sha256::calculate(token));
+	}
+
+	// [HEARTH_POST_API] **POST /api/v1/post**, for a script (release notes):
+	// {token, topic, title, body[, kind]} starts a thread, {token, thread,
+	// body} replies -- the client's new_thread and reply, as the token's
+	// account, its rights, limits and moderation with them. Answers {ok,
+	// id, url} (the thread's id, or the reply's), or {ok: false, error}:
+	// 403 a bad or revoked token (BAD_TOKENS_A_MINUTE an address), 400 what
+	// Hearth refuses. Not cached, and nothing for a page: a request with an
+	// Origin (a browser's) is refused.
+	// simplified: Hearth's own token, one an account, made by the admin;
+	// accounts' agent tokens ([KIT_AGENTS]) once kit merges into dev
+	void post_api(const network::HttpRequest &r, const ss_ &from)
+	{
+		auto answer = [&](int status, const json::Value &v){
+			respond(r, status, v.stringify(), "application/json",
+					"Cache-Control: no-store\r\n");
+		};
+		auto refuse = [&](int status, const ss_ &why){
+			json::Value v = json::object();
+			v.set("ok", false);
+			v.set("error", why);
+			answer(status, v);
+		};
+		if(r.method != "POST")
+			return refuse(405, "POST only");
+		if(!r.origin.empty())
+			return refuse(403, "not for a page in a browser");
+		if(!m_searches.ok("token", from, BAD_TOKENS_A_MINUTE, 60, false))
+			return refuse(429, "too many bad tokens from this address; try "
+					"again in a minute");
+		const json::Value q = json::load_string(r.body.c_str());
+		const ss_ token = jstr(q, "token");
+		ss_ name;
+		if(token.compare(0, 4, "hrt_") == 0){
+			Q t(m_db, "SELECT account FROM api_tokens WHERE hash = ?");
+			t.b(token_hash(token));
+			if(t.step())
+				name = t.s(0);
+		}
+		bool gone = false;
+		if(!name.empty())
+			accounts::access(m_server, [&](accounts::Interface *a){
+				gone = !a->exists(name);
+				for(const ss_ &b : a->ban_list())
+					gone = gone || b.substr(0, b.find('|')) == name;
+			});
+		if(name.empty() || gone){
+			m_searches.ok("token", from, BAD_TOKENS_A_MINUTE, 60);
+			return refuse(403, name.empty() ? "a bad or revoked token" :
+					"the token's account is banned or deleted");
+		}
+		Q u(m_db, "UPDATE api_tokens SET used = ? WHERE account = ?");
+		u.b(now_s()).b(name).step();
+		const bool reply = !q.get("thread").is_undefined();
+		json::Value c = json::object();
+		for(const char *k : reply ? sv_<const char*>{"thread", "body"} :
+				sv_<const char*>{"topic", "title", "body", "kind"})
+			if(!q.get(k).is_undefined())
+				c.set(k, q.get(k));
+		int64_t id;
+		m_api = true;
+		try {
+			exec("BEGIN");
+			id = handle(name, level(name), reply ? "reply" : "new_thread", c,
+					0).as_integer();
+			exec("COMMIT");
+		} catch(std::exception &e){
+			sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+			m_api = false;
+			m_new_messages.clear();
+			m_notified.clear();
+			return refuse(400, e.what());
+		}
+		m_api = false;
+		push();
+		log_i(MODULE, "%s posted %s %lld by API token", cs(name),
+				reply ? "the reply" : "the thread", (long long)id);
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("id", id);
+		v.set("url", base_url(r.host)+(reply ? message_path(jint(q, "thread"),
+				id) : "/t/"+itos(id)));
+		answer(200, v);
 	}
 
 	void http_page(const ss_ &path, const ss_ &query, ss_ &title, ss_ &body)
@@ -2256,8 +2389,8 @@ struct Module: public interface::Module
 						"\">Later messages</a></p>\n";
 		} else if((id = path_id(path, "/m/")) >= 0){
 			Q q(m_db, "SELECT m.id, m.author, m.body, m.created, m.edited, "
-					"m.thread, t.title, m.hidden, m.hidden_reason, t.hidden "
-					"FROM messages m "
+					"m.thread, t.title, m.hidden, m.hidden_reason, t.hidden, "
+					"m.api FROM messages m "
 					"JOIN threads t ON t.id = m.thread WHERE m.id = ?");
 			q.b(id);
 			// A hidden thread is seen on its own page only
@@ -2272,6 +2405,7 @@ struct Module: public interface::Module
 			m.set("hidden", q.i(7) != 0);
 			m.set("hidden_reason", q.s(8));
 			m.set("hidden_text", hidden_text(q.i(7), q.s(8)));
+			m.set("api", q.i(10) != 0);
 			const ss_ thread_title = q.s(6);
 			title = thread_title+" - Hearth";
 			body = "<p class=\"meta\">In <a href=\""+
