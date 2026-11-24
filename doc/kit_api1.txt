@@ -131,6 +131,7 @@ server c.spots
 server c.state
 server c.target
 server c.teams
+server c.units
 server c.yaw
 server c:add | (item, n, ext)
 server c:after | (seconds, name, opts)
@@ -157,6 +158,7 @@ server c:log | (...)
 server c:move | (pos, opts)
 server c:name | (by)
 server c:nearest | (ty)
+server c:order | (ids, o)
 server c:params_of | (t)
 server c:propose_move | (g)
 server c:random | (seed)
@@ -331,6 +333,7 @@ server type_field player
 server type_field reads_players
 server type_field reads_regions
 server type_field reads_teams
+server type_field reads_units
 server type_field reads_voxels
 server type_field region
 server type_field right_use
