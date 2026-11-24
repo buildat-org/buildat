@@ -72,6 +72,15 @@ namespace replicate
 		virtual void set_node_filter(main_context::SceneReference scene_ref,
 				std::function<bool(PeerId peer, uint node_id)> filter) = 0;
 
+		// [KIT_RTS] A scene may have more than one filter, each by its name:
+		// a node goes to a peer only if every one wants it (voxelworld's
+		// chunks by distance, Kit's fog of war by team). set_node_filter()
+		// is the one named "". Bound as it is. Pass nullptr to drop it. A
+		// deleted scene's filters go with it.
+		virtual void set_named_node_filter(main_context::SceneReference scene_ref,
+				const ss_ &name,
+				std::function<bool(PeerId peer, uint node_id)> filter) = 0;
+
 		// Which of a peer's dirty nodes are synced first: the smallest
 		// number. A streaming world gives the distance from the peer, so
 		// that what it stands in comes before the rest over a slow link
@@ -84,6 +93,13 @@ namespace replicate
 		// where the peer is, and nothing else here knows that it moved.
 		virtual void refresh_peer_nodes(
 				main_context::SceneReference scene_ref, PeerId peer) = 0;
+
+		// [KIT_RTS] The same for these nodes alone: what the filters say of
+		// them changed for this peer (Kit's fog: a unit seen or not), and a
+		// walk of the whole scene for a few ids is the cost refresh_peer_nodes
+		// would be
+		virtual void refresh_peer_node_ids(main_context::SceneReference scene_ref,
+				PeerId peer, const sv_<uint> &node_ids) = 0;
 
 		virtual void sync_node_immediate(
 				main_context::SceneReference scene_ref, uint node_id) = 0;

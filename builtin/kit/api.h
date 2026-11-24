@@ -2112,10 +2112,43 @@ namespace interface
 // param), types = {type...}, health (its kit/health's share, 0...1; nil
 // without one), moving (its drive has a way to walk), target (its senses
 // type's state target, 0 none)}...}, every unit of its scene (fogged or not:
-// fog of war is the clients'), as the run began; and orders them as a player
+// the fog of war below is what clients are sent), as the run began; and orders them as a player
 // does: c:order({id...}, {at = {x, y, z}} | {target = id}) (8 a run, 256
 // ids; any team's units of its scene, the others left out), the same
 // on_order runs and spots, by the run's by.
+// [KIT_RTS] Fog of war: kit/game_rules' param fog (bool, false; the scene's
+// nearest kit/game_rules) turns it on in a scene; off, nothing of it runs. A
+// fogged entity is a unit with a team param set ("" never is) and what is
+// under it ([KIT_NESTING]); scenery, UI, players and the World are never
+// hidden. A type field vision = "<param>" names a number param of its own
+// as how far its entity sees (m, 0...64; kit/unit: vision = "sight", sight
+// 12), a sphere round it; simplified: through rock (a voxel walk from each
+// unit at a low rate is the upgrade). A peer's team is their player's
+// kit/team's; a team sees its own units and every unit within one of its
+// units' sight. A peer in no team, a builder in the tools and the server's
+// camera see everything. Worked out 5 times a second, and for
+// a unit made before its node is sent. What a peer does not see is never
+// sent to them: no node, no kit:track, no kit:effect or positional
+// kit:sound at it, no per_player state; it is not in kit:controls' steered
+// list or free objects, and a kit:order at it is refused ("no such target").
+// simplified: kit:shot, kit:projectile and kit:flow go on to all (the
+// upgrade: a shot left out when both its ends are unseen); a free object's
+// own node is not filtered. On the server a hidden entity is as any other:
+// it runs, moves, links, hears and is heard. Its show has unit.sight (its
+// vision, when above 0); kit:controls has fog = true for a peer under it,
+// and the client darkens the world outside its own team's sights (KITFOG,
+// KitVoxel.glsl; at most 16 circles, the near ones merged).
+// Client code under the fog: an entity hidden from a client does not exist
+// there. It goes as if removed (its parts' on_remove, its node gone) and
+// comes back as a new node whose parts start afresh (on_add; part state
+// they kept is lost, kit.shared stays as the parts left it, so keep there
+// what must outlive a hide). Its per_player state (kit:mine) is not sent
+// while hidden; what changed is sent as it comes back. Links, events and
+// signals run on the server and reach a client only through what is sent:
+// nothing of a hidden entity's. A sound or effect at a hidden entity is not
+// heard or seen there; one at a seen entity is, whatever caused it.
+// Selection, the hover and a click's target see only what the client has:
+// a client cannot select or target what it does not see.
 // [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
 // acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
 // <id>"): its own goal state as a player's, a goal's zone entered, and
