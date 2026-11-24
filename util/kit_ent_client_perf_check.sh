@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-24)
-# covers: builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua
+# covers: builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/merge.lua builtin/kit/kit.cpp
 # [KIT_ENT_PERF] (kit_plan 4z37zzl) A client drawing 100 moving units of 5 parts
 # each (a unit's root and 4 kit/parts under it): 2 groups, each a unit steered
 # round a circle of 1.5 m by a check type (a steered movement: the client draws
@@ -15,10 +15,19 @@
 #     it (the type's yaw); each unit under it and each part at its parent's
 #     place and turn applied to its own offset, turned as its parent; the
 #     groups moving between samples.
+# [KIT_ENT_PERF_2] (kit_plan 4z37zzm) Each unit's look has merge_parts on
+# (client_lua/merge.lua): asserted
+#   - all 100 units merged, 500 looks, on at most 2 shared models, and the
+#     still platform merged of itself ("event kit_merged");
+#   - "event kit_merged off" draws every look on its own again (300 draws
+#     more at least), "on" merges them all again;
+#   - a third movement the server steps, its steps too slow for 2 s from the
+#     client's join: throttled ("throttled to"), not stopped, and back to
+#     full steps once cheap, never failed.
 # simplified: 2 movements the server steps, not 100: with 500 entities in the
-# world alpha.70's box fits some 4 in a step's budget, and one past it is
-# stopped for good (4z37zzk's item). The client's work is its 500 moving
-# nodes'; it reckons a link's turn once a frame, not each node's.
+# world alpha.70's box fits some 4 in a step's budget. The client's work is
+# its 500 moving nodes'; it reckons a link's turn once a frame, not each
+# node's.
 #   util/kit_ent_client_perf_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -59,6 +68,36 @@ return {
 	end,
 }
 EOF
+# Along x at 0.5 m/s; for 2 s from a player's join each step too slow (past
+# box.c's STEP_CAP): its input f (step_drives' from the state's "throttle") 1
+cat > "$BUILDAT_WORKBENCH_TYPES/ent_slow.lua" <<'EOF'
+return {
+	version = 1,
+	about = {what = "A check's mover: too slow for 2 s from a join."},
+	component = true,
+	movement = {body = {r = 0.5, h = 1}, steered = true},
+	params = {},
+	on_join = function(c)
+		c.state.throttle = 1
+		c:after(2, "calm")
+	end,
+	on_timer = function(c)
+		c.state.throttle = 0
+	end,
+	step = function(s, i, dt, w, p)
+		local pos = type(s.pos) == "table" and s.pos or {0, 0, 0}
+		local x = 0
+		if (tonumber(i.f) or 0) > 0.5 then
+			for k = 1, 1000000 do
+				x = x + k % 7
+			end
+		end
+		s.x = x
+		s.pos = {pos[1] + 0.5 * dt, pos[2], pos[3]}
+		s.vel = {0.5, 0, 0}
+	end,
+}
+EOF
 
 # The save, made by a first start; the units written into it
 start_server "$t/srv0.log" "Hosted: |Not hosted: " 300 auto \
@@ -79,9 +118,15 @@ ents = [{"id": 2, "parent": 1, "name": "world", "kind": "scene"},
 	{"id": 3, "parent": 2, "name": "start", "pos": [0, 21, -40],
 		"components": [{"type": "kit/spawner", "params": {"players": True}}]},
 	{"id": 4, "parent": 2, "name": "platform", "pos": [0, 20, -40],
-		"components": [{"type": "kit/part", "params": {"size": [1.5, 1, 1.5]}}]}]
-def part(size, color):
-	return {"type": "kit/part", "params": {"size": size, "color": color, "collision": False}}
+		"components": [{"type": "kit/part", "params": {"size": [1.5, 1, 1.5]}}]},
+	{"id": 5, "parent": 2, "name": "slow", "pos": [20, 1, -30],
+		"components": [{"type": "kit/part", "params": {"collision": False}},
+			{"type": "workbench/ent_slow"}]}]
+def part(size, color, merge=False):
+	p = {"type": "kit/part", "params": {"size": size, "color": color, "collision": False}}
+	if merge:
+		p["params"]["merge_parts"] = True
+	return p
 PARTS = [([0.8, 0.4, 0.8], [0, 0.5, 0], "#c03030"), ([0.2, 0.2, 1.0], [0, 0.5, 0.8], "#404040"),
 	([0.3, 0.5, 1.9], [0.7, -0.1, 0], "#303030"), ([0.3, 0.5, 1.9], [-0.7, -0.1, 0], "#303030")]
 ROOTS = [(-14, -8), (14, -8)]
@@ -92,12 +137,12 @@ for i in range(n):
 		x, z = ROOTS[i // 50]
 		g, pos = u, [x, 1, z]
 		ents.append({"id": u, "parent": 2, "name": "unit %d" % i, "pos": pos,
-			"components": [part([1.4, 0.6, 1.8], "#3060c0"), {"type": "workbench/ent_mover"}]})
+			"components": [part([1.4, 0.6, 1.8], "#3060c0", True), {"type": "workbench/ent_mover"}]})
 		print(u, 2, *pos)
 	else:
 		pos = list(UNDER[i % 50 - 1])
 		ents.append({"id": u, "parent": g, "name": "unit %d" % i, "pos": pos,
-			"components": [part([1.4, 0.6, 1.8], "#3060c0")]})
+			"components": [part([1.4, 0.6, 1.8], "#3060c0", True)]})
 		print(u, g, *pos)
 	for k, (size, off, col) in enumerate(PARTS):
 		ents.append({"id": u + 1 + k, "parent": u, "name": "p%d_%d" % (i, k), "pos": off,
@@ -162,16 +207,56 @@ ids=$(awk '{ for (k = 0; k < 5; k++) printf "%d ", $1 + k }' "$t/units")
 		echo 'frames 30'
 	done
 	echo "screenshot $t/units.png"
+	echo 'event kit_merged'
+	echo 'event kit_merged off'
+	echo 'frames 5'
+	echo 'event kit_merged'
+	echo "screenshot $t/apart.png"
+	echo 'event kit_merged on'
+	echo 'frames 100'
+	echo 'event kit_merged'
+	echo 'frames 3'
+	echo "screenshot $t/again.png"
 } > "$t/c1.cmd"
-wait_for_log "$CL" "Wrote screenshot" 300 || fail "the drive did not finish ($CL)"
+wait_for_log "$CL" "Wrote screenshot.*again.png" 300 || fail "the drive did not finish ($CL)"
 grep -a "error shown in a dialog" "$CL" && fail "a script error ($CL)"
 
-python3 -I - "$CL" "$t/units" "$N" <<'PY'
+python3 -I - "$CL" "$t/units" "$N" "$SL" <<'PY'
 import math, re, sys
 log = open(sys.argv[1], errors="replace").read()
 n = int(sys.argv[3])
 units = [l.split() for l in open(sys.argv[2])]
 bad = []
+# [KIT_ENT_PERF_2] merged, apart, merged again
+mg = re.findall(r"kit: merged: (\d+) static looks in \d+ regions \(\d+ geometries, \d+ nodes\), "
+	r"(\d+) units of (\d+) looks on (\d+) models; .*; (\d+) draws the last frame", log)
+if len(mg) < 3:
+	sys.exit("FAIL: %d kit: merged lines" % len(mg))
+(s1, u1, l1, m1, d1), (s2, u2, l2, m2, d2), (s3, u3, l3, m3, d3) = [map(int, m) for m in mg[:3]]
+print("merged: %d static, %d units of %d looks on %d models, %d draws; apart %d draws; "
+	"again %d units of %d looks, %d draws" % (s1, u1, l1, m1, d1, d2, u3, l3, d3))
+for u, l, m, what in ((u1, l1, m1, "merged"), (u3, l3, m3, "merged again")):
+	if u != n or l != 5 * n or m > 2:
+		bad.append("%s: %d units of %d looks on %d models, not %d of %d on 2 at most" %
+			(what, u, l, m, n, 5 * n))
+if s1 < 1:
+	bad.append("the platform not merged")
+if u2 or l2 or s2:
+	bad.append("off, still %d units and %d static merged" % (u2, s2))
+if d2 < d1 + 300 or d3 > d1 + 50:
+	bad.append("draws merged %d, apart %d, again %d" % (d1, d2, d3))
+# The slow mover throttled, back to full steps, never failed
+sl = open(sys.argv[4], errors="replace").read()
+slow = [l for l in sl.splitlines() if "Entity 5's " in l]
+thr = [i for i, l in enumerate(slow) if "throttled to" in l]
+back = [i for i, l in enumerate(slow) if "back to full steps" in l]
+print("the slow mover: %d throttles, %d recoveries; the first %s" % (len(thr), len(back),
+	slow[thr[0]].split("Entity 5's ", 1)[1] if thr else "none"))
+if not thr or not back or back[-1] < thr[-1]:
+	bad.append("the slow mover not throttled and back (%s)" % slow[:6])
+for l in slow:
+	if re.search(r" [WE] ", l) and "throttled to" not in l:
+		bad.append("the slow mover: " + l)
 # Kit's ms a frame: the second ask's (200 frames)
 looks = re.findall(r"kit: looks: (\d+) frames, [0-9.]+ read a frame of ([0-9.]+), ([0-9.]+) ms a frame; "
 	r"frames ([0-9.]+) ms", log)
@@ -260,4 +345,4 @@ sys.exit(1 if bad else 0)
 PY
 verdict_keep
 [ "$verdict_rc" = 0 ] || fail "the units' draw (above; $t)"
-echo "PASS: $N moving units of 5 parts drawn where their movement has them, Kit within its bound"
+echo "PASS: $N moving units of 5 parts drawn where their movement has them, Kit within its bound, merged and apart; a slow movement throttled and back"

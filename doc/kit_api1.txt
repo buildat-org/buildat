@@ -87,6 +87,7 @@ move math.sin
 move math.sqrt
 reserved ext.kit_*
 reserved ext.player
+reserved param merge_parts | {"default": false, "kind": "bool"}
 reserved param own_look | {"default": true, "kind": "bool"}
 reserved param use | {"default": "all", "kind": "string"}
 reserved params.kit_*
@@ -396,6 +397,7 @@ client kit.shake | (amount)
 client kit.shared
 client kit.ui_keys | ()
 client kit.use | (id)
+client part.skip_offscreen
 move i.auto
 move i.down
 move i.f
@@ -528,6 +530,7 @@ type kit/arena param map_pick | {"choices": ["round_robin", "random", "signal"],
 type kit/arena param maps | {"default": "", "kind": "string"}
 type kit/arena param max_players | {"default": 8, "kind": "number", "max": 64, "min": 1}
 type kit/arena param max_rounds | {"default": 2, "kind": "number", "max": 8, "min": 1}
+type kit/arena param merge_parts | {"default": false, "kind": "bool"}
 type kit/arena param own_look | {"default": true, "kind": "bool"}
 type kit/arena param players | {"default": 2, "kind": "number", "max": 16, "min": 1}
 type kit/arena param ready | {"default": 0, "kind": "number", "max": 1, "min": 0}
@@ -586,6 +589,7 @@ type kit/ball param bounce | {"default": 0.4, "kind": "number", "max": 1, "min":
 type kit/ball param gravity | {"default": 20, "kind": "number", "max": 100, "min": 0}
 type kit/ball param jump_impulse | {"default": 70, "kind": "number", "max": 100000, "min": 0}
 type kit/ball param mass | {"default": 10, "kind": "number", "max": 10000, "min": 0.1}
+type kit/ball param merge_parts | {"default": false, "kind": "bool"}
 type kit/ball param own_look | {"default": true, "kind": "bool"}
 type kit/ball param push | {"default": 150, "kind": "number", "max": 100000, "min": 0}
 type kit/ball param rate | {"default": 60, "kind": "number", "max": 120, "min": 10}
@@ -599,6 +603,7 @@ type kit/bot param aim | {"default": 75, "kind": "number", "max": 100, "min": 0}
 type kit/bot param brake | {"default": 8, "kind": "number", "max": 40, "min": 1}
 type kit/bot param drive | {"default": false, "kind": "bool"} [experimental]
 type kit/bot param grip | {"default": 12, "kind": "number", "max": 40, "min": 1}
+type kit/bot param merge_parts | {"default": false, "kind": "bool"}
 type kit/bot param name | {"default": "Bot", "kind": "string"}
 type kit/bot param own_look | {"default": true, "kind": "bool"}
 type kit/bot param path | {"default": 0, "kind": "entity"}
@@ -636,6 +641,7 @@ type kit/button handlers | on_timer on_use
 type kit/button param color | {"default": "#d03030", "kind": "string"}
 type kit/button param color_down | {"default": "#702020", "kind": "string"}
 type kit/button param hold | {"default": 1, "kind": "number", "max": 60, "min": 0.1}
+type kit/button param merge_parts | {"default": false, "kind": "bool"}
 type kit/button param own_look | {"default": true, "kind": "bool"}
 type kit/button param sound_press | {"default": "kit/click", "kind": "sound"}
 type kit/button param use | {"default": "all", "kind": "string"}
@@ -671,6 +677,7 @@ type kit/checkpoint state last | per_player
 type kit/chest | version 1
 type kit/chest handlers | on_start on_use
 type kit/chest param items | {"default": "", "kind": "string"}
+type kit/chest param merge_parts | {"default": false, "kind": "bool"}
 type kit/chest param own_look | {"default": true, "kind": "bool"}
 type kit/chest param size | {"default": 27, "kind": "number", "max": 54, "min": 1}
 type kit/chest param use | {"default": "all", "kind": "string"}
@@ -697,6 +704,7 @@ type kit/collectible param again | {"default": 0, "kind": "number", "max": 3600,
 type kit/collectible param color | {"default": "#4cc9f0", "kind": "string"}
 type kit/collectible param edge | {"default": "", "kind": "string"}
 type kit/collectible param look_size | {"default": 0.25, "kind": "number", "max": 8, "min": 0.02}
+type kit/collectible param merge_parts | {"default": false, "kind": "bool"}
 type kit/collectible param offset | {"default": [0, 0, 0], "kind": "position"}
 type kit/collectible param own_look | {"default": true, "kind": "bool"}
 type kit/collectible param size | {"default": [1, 1, 1], "kind": "position"}
@@ -752,6 +760,7 @@ type kit/controls input shake | any
 type kit/controls input tint | any
 type kit/counter | version 1
 type kit/counter handlers | on_input
+type kit/counter param merge_parts | {"default": false, "kind": "bool"}
 type kit/counter param own_look | {"default": true, "kind": "bool"}
 type kit/counter param target | {"default": 0, "kind": "number", "max": 1000000, "min": 0}
 type kit/counter input add | number
@@ -780,6 +789,7 @@ type kit/door | version 2
 type kit/door handlers | on_input on_timer on_use
 type kit/door param close_after | {"default": 0, "kind": "number", "max": 3600, "min": 0}
 type kit/door param material | {"default": "", "kind": "voxel"}
+type kit/door param merge_parts | {"default": false, "kind": "bool"}
 type kit/door param mirror | {"default": false, "kind": "bool"}
 type kit/door param own_look | {"default": true, "kind": "bool"}
 type kit/door param size | {"default": [1, 2, 1], "kind": "position"}
@@ -906,6 +916,7 @@ type kit/explosive param friendly_fire | {"default": true, "kind": "bool"}
 type kit/explosive param fuse | {"default": 5, "kind": "number", "max": 3600, "min": 0}
 type kit/explosive param hurt | {"default": 0, "kind": "number", "max": 32, "min": 0}
 type kit/explosive param kill | {"default": 3, "kind": "number", "max": 32, "min": 0}
+type kit/explosive param merge_parts | {"default": false, "kind": "bool"}
 type kit/explosive param own_look | {"default": true, "kind": "bool"}
 type kit/explosive param power | {"default": 1, "kind": "number", "max": 1000, "min": 0}
 type kit/explosive param radius | {"default": 3, "kind": "number", "max": 9, "min": 0}
@@ -944,6 +955,7 @@ type kit/flag param marker_color | {"default": "#ffe040", "kind": "string"}
 type kit/flag param marker_label | {"default": "Flag", "kind": "string"}
 type kit/flag param marker_lift | {"default": 1, "kind": "number", "max": 10, "min": 0}
 type kit/flag param marker_style | {"choices": ["shapes", "plain"], "default": "shapes", "kind": "string"}
+type kit/flag param merge_parts | {"default": false, "kind": "bool"}
 type kit/flag param on_blast | {"choices": ["fall", "home", "none"], "default": "fall", "kind": "string"}
 type kit/flag param on_death | {"choices": ["home", "drop"], "default": "home", "kind": "string"}
 type kit/flag param own_look | {"default": true, "kind": "bool"}
@@ -1062,6 +1074,7 @@ type kit/game_rules input respawn | any
 type kit/gate | version 2
 type kit/gate handlers | on_input
 type kit/gate param material | {"default": "", "kind": "voxel"}
+type kit/gate param merge_parts | {"default": false, "kind": "bool"}
 type kit/gate param own_look | {"default": true, "kind": "bool"}
 type kit/gate param size | {"default": [3, 3, 1], "kind": "position"}
 type kit/gate input close | none
@@ -1138,6 +1151,7 @@ type kit/inventory state slots
 type kit/item_box | version 1
 type kit/item_box handlers | on_use
 type kit/item_box param item | {"default": "kit/sword", "kind": "string"}
+type kit/item_box param merge_parts | {"default": false, "kind": "bool"}
 type kit/item_box param own_look | {"default": true, "kind": "bool"}
 type kit/item_box param use | {"default": "all", "kind": "string"}
 type kit/item_box output put | none
@@ -1147,6 +1161,7 @@ type kit/item_giver | version 1
 type kit/item_giver handlers | on_use
 type kit/item_giver param count | {"default": 1, "kind": "number", "max": 1000, "min": 1}
 type kit/item_giver param item | {"default": "key", "kind": "string"}
+type kit/item_giver param merge_parts | {"default": false, "kind": "bool"}
 type kit/item_giver param once | {"default": true, "kind": "bool"}
 type kit/item_giver param own_look | {"default": true, "kind": "bool"}
 type kit/item_giver param use | {"default": "all", "kind": "string"}
@@ -1157,6 +1172,7 @@ type kit/key_door | version 2
 type kit/key_door handlers | on_input on_use
 type kit/key_door param key | {"default": "key", "kind": "string"}
 type kit/key_door param material | {"default": "", "kind": "voxel"}
+type kit/key_door param merge_parts | {"default": false, "kind": "bool"}
 type kit/key_door param mirror | {"default": false, "kind": "bool"}
 type kit/key_door param own_look | {"default": true, "kind": "bool"}
 type kit/key_door param size | {"default": [1, 2, 1], "kind": "position"}
@@ -1169,6 +1185,7 @@ type kit/key_door output refused | none
 type kit/key_door state open | shared
 type kit/lever | version 2
 type kit/lever handlers | on_input on_use
+type kit/lever param merge_parts | {"default": false, "kind": "bool"}
 type kit/lever param own_look | {"default": true, "kind": "bool"}
 type kit/lever param use | {"default": "all", "kind": "string"}
 type kit/lever input off | none
@@ -1179,6 +1196,7 @@ type kit/lever output on | none
 type kit/lever state on | shared
 type kit/lights_out | version 1
 type kit/lights_out handlers | on_build on_input
+type kit/lights_out param merge_parts | {"default": false, "kind": "bool"}
 type kit/lights_out param own_look | {"default": true, "kind": "bool"}
 type kit/lights_out param seed | {"default": 0, "kind": "number", "max": 1000000, "min": 0}
 type kit/lights_out param size | {"default": 5, "kind": "number", "max": 7, "min": 5}
@@ -1188,6 +1206,7 @@ type kit/lights_out state lit | shared
 type kit/lights_out_tile | version 1
 type kit/lights_out_tile handlers | on_input on_start on_use
 type kit/lights_out_tile param lit | {"default": false, "kind": "bool"}
+type kit/lights_out_tile param merge_parts | {"default": false, "kind": "bool"}
 type kit/lights_out_tile param own_look | {"default": true, "kind": "bool"}
 type kit/lights_out_tile param use | {"default": "all", "kind": "string"}
 type kit/lights_out_tile input toggle | none
@@ -1227,6 +1246,7 @@ type kit/mover | version 1
 type kit/mover handlers | on_input on_start on_timer
 type kit/mover param color | {"default": "#9090a0", "kind": "string"}
 type kit/mover param material | {"default": "", "kind": "voxel"}
+type kit/mover param merge_parts | {"default": false, "kind": "bool"}
 type kit/mover param offset | {"default": [0, 2, 0], "kind": "position"}
 type kit/mover param own_look | {"default": true, "kind": "bool"}
 type kit/mover param size | {"default": [1, 0.25, 1], "kind": "position"}
@@ -1255,6 +1275,7 @@ type kit/music state playing
 type kit/npc | version 1
 type kit/npc handlers | on_input on_start on_use
 type kit/npc param lines | {"default": "Hello!|Press the button to open the gate.|Mind the timer.", "kind": "string"}
+type kit/npc param merge_parts | {"default": false, "kind": "bool"}
 type kit/npc param name | {"default": "Bob", "kind": "string"}
 type kit/npc param own_look | {"default": true, "kind": "bool"}
 type kit/npc param use | {"default": "all", "kind": "string"}
@@ -1289,6 +1310,7 @@ type kit/part param collision | {"default": true, "kind": "bool"}
 type kit/part param color | {"default": "#b0b0b0", "kind": "string"}
 type kit/part param friction | {"default": 1, "kind": "number", "max": 10, "min": 0}
 type kit/part param material | {"choices": ["plain", "metal", "glass", "glow"], "default": "plain", "kind": "string"}
+type kit/part param merge_parts | {"default": false, "kind": "bool"}
 type kit/part param own_look | {"default": true, "kind": "bool"}
 type kit/part param rotation | {"default": [0, 0, 0], "kind": "position"}
 type kit/part param shape | {"choices": ["box", "wedge", "sphere"], "default": "box", "kind": "string"}
@@ -1313,6 +1335,7 @@ type kit/pickup | version 1
 type kit/pickup handlers | on_enter on_start
 type kit/pickup param count | {"default": 1, "kind": "number", "max": 1000000, "min": 1}
 type kit/pickup param item | {"default": "kit/stone", "kind": "string"}
+type kit/pickup param merge_parts | {"default": false, "kind": "bool"}
 type kit/pickup param own_look | {"default": true, "kind": "bool"}
 type kit/pickup param size | {"default": [1, 2, 1], "kind": "position"}
 type kit/pickup param sound | {"default": "kit/pickup", "kind": "sound"}
@@ -1344,6 +1367,7 @@ type kit/polygon param edge_depth | {"default": 0.25, "kind": "number", "max": 4
 type kit/polygon param floor | {"default": false, "kind": "bool"}
 type kit/polygon param friction | {"default": 1, "kind": "number", "max": 10, "min": 0}
 type kit/polygon param material | {"choices": ["plain", "metal", "glass", "glow"], "default": "plain", "kind": "string"}
+type kit/polygon param merge_parts | {"default": false, "kind": "bool"}
 type kit/polygon param own_look | {"default": true, "kind": "bool"}
 type kit/polygon param points | {"default": [[-2, -0.5], [2, -0.5], [2, 0.5], [-2, 0.5]], "kind": "points"}
 type kit/polygon param surface | {"default": "polygon", "kind": "string"}
@@ -1452,6 +1476,7 @@ type kit/shop | version 1
 type kit/shop handlers | on_input on_join on_start on_use
 type kit/shop param color | {"default": "#d0a030", "kind": "string"}
 type kit/shop param free_outside_rounds | {"default": false, "kind": "bool"}
+type kit/shop param merge_parts | {"default": false, "kind": "bool"}
 type kit/shop param mount | {"default": false, "kind": "bool"}
 type kit/shop param own_look | {"default": true, "kind": "bool"}
 type kit/shop param pad | {"default": [0, 0, 6], "kind": "position"}
@@ -1474,6 +1499,7 @@ type kit/sign param both_sides | {"default": false, "kind": "bool"}
 type kit/sign param color | {"default": "#ffffff", "kind": "string"}
 type kit/sign param facing | {"choices": ["flat", "camera"], "default": "flat", "kind": "string"}
 type kit/sign param material | {"default": "", "kind": "voxel"}
+type kit/sign param merge_parts | {"default": false, "kind": "bool"}
 type kit/sign param own_look | {"default": true, "kind": "bool"}
 type kit/sign param size | {"default": 0.25, "kind": "number", "max": 4, "min": 0.05}
 type kit/sign param solid | {"default": true, "kind": "bool"}
@@ -1485,6 +1511,7 @@ type kit/sign state value
 type kit/sound | version 1
 type kit/sound handlers | on_input
 type kit/sound param everywhere | {"default": false, "kind": "bool"}
+type kit/sound param merge_parts | {"default": false, "kind": "bool"}
 type kit/sound param own_look | {"default": true, "kind": "bool"}
 type kit/sound param sound | {"default": "kit/click", "kind": "sound"}
 type kit/sound input play | none
@@ -1511,6 +1538,7 @@ type kit/spawner handlers | on_input on_join on_params on_remove on_start on_tim
 type kit/spawner param copy | {"default": 0, "kind": "entity"}
 type kit/spawner param every | {"default": 0, "kind": "number", "max": 3600, "min": 0}
 type kit/spawner param max | {"default": 5, "kind": "number", "max": 100, "min": 1}
+type kit/spawner param merge_parts | {"default": false, "kind": "bool"}
 type kit/spawner param own_look | {"default": true, "kind": "bool"}
 type kit/spawner param players | {"default": false, "kind": "bool"}
 type kit/spawner param prefab | {"default": "", "kind": "prefab"}
@@ -1539,6 +1567,7 @@ type kit/supply | version 1
 type kit/supply handlers | on_enter on_start on_timer
 type kit/supply param color | {"default": "#e8c040", "kind": "string"}
 type kit/supply param every | {"default": 30, "kind": "number", "max": 3600, "min": 0}
+type kit/supply param merge_parts | {"default": false, "kind": "bool"}
 type kit/supply param money | {"default": 10, "kind": "number", "max": 100000, "min": 0}
 type kit/supply param own_look | {"default": true, "kind": "bool"}
 type kit/supply param repair | {"default": false, "kind": "bool"}
@@ -1558,6 +1587,7 @@ type kit/team | version 1
 type kit/team handlers | on_input on_params on_start
 type kit/team param color | {"default": "#d03030", "kind": "string"}
 type kit/team param friendly_fire | {"default": false, "kind": "bool"}
+type kit/team param merge_parts | {"default": false, "kind": "bool"}
 type kit/team param name | {"default": "Red", "kind": "string"}
 type kit/team param own_look | {"default": true, "kind": "bool"}
 type kit/team param win_score | {"default": 0, "kind": "number", "max": 1000000, "min": 0}
@@ -1572,6 +1602,7 @@ type kit/team state score | shared
 type kit/team state status | shared
 type kit/teleporter | version 1
 type kit/teleporter handlers | on_enter on_input on_use
+type kit/teleporter param merge_parts | {"default": false, "kind": "bool"}
 type kit/teleporter param own_look | {"default": true, "kind": "bool"}
 type kit/teleporter param pad | {"default": [1, 1, 1], "kind": "position"}
 type kit/teleporter param scene | {"default": "", "kind": "string"}

@@ -55,7 +55,9 @@
 --   else its point (s.pos, a cell's middle up: what zones met before)
 --   A seat's holder is met by its point (the seat's place)
 --   a step past box.c's STEP_CAP Lua instructions errs "too slow": the body
---     stops (the component's Log says it) till put again or the next version;
+--     is throttled (kit.cpp's Throttle: stepped less often, answered where it
+--     stands meanwhile; the component's Log says it) till its steps are cheap
+--     again, put again or the next version;
 --     put_type steps a new version once (an empty world) and refuses it so,
 --     the version before kept. Three client steps past 50 ms in a row turn
 --     its prediction off

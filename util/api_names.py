@@ -492,7 +492,8 @@ def kit_surface():
         srv["reserved param " + p] = json.dumps(injected[p], sort_keys=True)
     # simplified: which types get them, as load_type() decides it, by hand
     on = {"use": lambda d: d.get("usable") is True,
-            "own_look": lambda d: isinstance(d.get("look"), dict)}
+            "own_look": lambda d: isinstance(d.get("look"), dict),
+            "merge_parts": lambda d: isinstance(d.get("look"), dict)}
     if set(injected) != set(on):
         raise SystemExit("kit.cpp puts the parameters %s on types: teach "
                 "api_names.py which types" % sorted(injected))
@@ -510,6 +511,9 @@ def kit_surface():
                 cl["client handler " + h] = ""
     for h in re.findall(r'type\(part\.(\w+)\) == "function"', ctl):
         cl["client handler " + h] = ""
+    # (a part's table's flags: module.lua's `part.<name> == true`)
+    for f in re.findall(r'\bpart\.(\w+) == true', ml):
+        cl["client part." + f] = ""
     a = ml.index("local function entity_view(")
     ev = ml[a:ml.index("\nend\n", a)]
     for f in block_members(ev, ev.index("local e = {") + 10)[0]:

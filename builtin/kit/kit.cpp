@@ -1917,6 +1917,16 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	bool interp_box() const
+	{
+		return m_box && m_box->engine_name().compare(0, 11, "interpreter") == 0;
+	}
+	// A step request's slice of the meter (box_call's)
+	int64_t step_slice() const
+	{
+		return m_box ? m_box->budget() / 4 * (interp_box() ? INTERP_STEP : 1) : 0;
+	}
+
 	// One request: true and the answer, or false and the error.
 	// *runaway: the meter stopped it (the box is a new one after that)
 	// *in_provider: the meter stopped it in a call into the replacing
@@ -1943,8 +1953,7 @@ struct Module: public interface::Module, public Interface
 		// cold cache) a handler's slice is a tick's: its units are a
 		// sixteenth of the compiled engine's, and a handler fine there was
 		// disabled for good here
-		const bool interp = m_box->engine_name().compare(0, 11,
-				"interpreter") == 0;
+		const bool interp = interp_box();
 		// [KIT_GENERATORS] a build (in the editor, not a tick's) a call's
 		// [KIT_INTERP_BUDGETS] In the interpreter a body's batch gets
 		// INTERP_STEP of its quarter and a build INTERP_BUILD of the whole:
@@ -1968,7 +1977,7 @@ struct Module: public interface::Module, public Interface
 				m_box->budget() :
 				m_building ? std::min(m_box->budget() * (interp ? INTERP_BUILD : 1),
 						m_build_left > 0 ? m_build_left : INT64_MAX) :
-				request[0] == 'S' ? m_box->budget() / 4 * (interp ? INTERP_STEP : 1) :
+				request[0] == 'S' ? step_slice() :
 				m_box->budget() / SLICE_DIV * (interp ? TICK_SLICES : 1);
 		m_box->set_call_budget(slice);
 		m_box->input = request;
@@ -2316,6 +2325,28 @@ struct Module: public interface::Module, public Interface
 			t.decl.set("params", ps);
 			kit_param_about("own_look", "Off: its look is not drawn in play "
 					"(faded in edit mode); its collision stays.");
+		}
+		// [KIT_ENT_PERF_2] Whether the clients draw its look and those of the
+		// entities under it as one model moving as a whole (show_of()'s merge,
+		// client_lua/merge.lua): a unit of parts, a draw where it was one a part
+		if(t.decl.get("look").is_object()){
+			json::Value ps = t.decl.get("params");
+			if(!ps.is_object())
+				ps = json::object();
+			if(!ps.get("merge_parts").is_undefined()){
+				why = name+": \"merge_parts\" is Kit's parameter on a type with "
+						"a look";
+				return false;
+			}
+			json::Value o = json::object();
+			o.set("type", "bool");
+			o.set("default", false);
+			o.set("cat", "look");
+			ps.set("merge_parts", o);
+			t.decl.set("params", ps);
+			kit_param_about("merge_parts", "On: its look and those under it drawn "
+					"as one model (fewer draws); a part that changes is drawn apart "
+					"till it is still again.");
 		}
 		// [KIT_PARAM_CATEGORIES] Which of the inspector's categories a
 		// parameter is under. Another value does not stop the type: warned
@@ -2900,6 +2931,62 @@ struct Module: public interface::Module, public Interface
 	// fixed delay is the upgrade if a driver's timing ever matters
 	static constexpr double DRIVE_LEAD = 0.1; // s
 	static constexpr double TRACK_KEEP = 3; // s of keys kept
+	// [KIT_ENT_PERF_2] (kit_plan 4z37zzm) A drive's or a body's steps past their
+	// box budget (a call stopped by the meter, a step "too slow", or a call over
+	// three quarters of its slice) are throttled, not stopped for good: its steps
+	// a call halved (cap), and at one a call tried again only every `wait` ticks
+	// (doubling to THROTTLE_WAIT_MAX); THROTTLE_CALM cheap calls in a row (a
+	// quarter of the slice at most) double it back, the wait first. Its time: a
+	// drive catches up as far as its cap lets it and loses what falls over a
+	// second behind (slowed, step_drives); a body's inputs meanwhile are answered
+	// where it stands (its client set back). Logged as it changes ("throttled
+	// to", "back to full steps"); the meter counts the throttled ones. The
+	// tick's own budget still caps them all (step_drives starts where the last
+	// tick's ran out)
+	static constexpr int THROTTLE_WAIT_MAX = 300, THROTTLE_CALM = 10;
+	struct Throttle
+	{
+		int cap = 0; // steps a call at most (0: not throttled)
+		int wait = 0, skip = 0; // ticks between tries at one a call, left now
+		int calm = 0; // cheap calls in a row
+	};
+	// What a call of n steps that ran past (or near) its budget does to t: what
+	// it is now, for the log
+	static ss_ throttle_hit(Throttle &t, int n)
+	{
+		t.calm = 0;
+		if(n > 1){
+			t.cap = std::max(1, n / 2);
+		} else {
+			t.cap = 1;
+			t.wait = std::min(THROTTLE_WAIT_MAX, std::max(1, t.wait * 2));
+			t.skip = t.wait;
+		}
+		return "throttled to "+itos(t.cap)+" step"+(t.cap > 1 ? "s" : "")+" a call"+
+				(t.wait ? ", tried every "+itos(t.wait + 1)+" ticks" : ss_());
+	}
+	// A call that went through, `used` of its `slice`, `full` steps a call
+	// unthrottled: whether t has just come back to full steps
+	static bool throttle_ok(Throttle &t, int64_t used, int64_t slice, int full)
+	{
+		if(!t.cap)
+			return false;
+		if(used * 4 > slice){
+			t.calm = 0;
+			return false;
+		}
+		if(++t.calm < THROTTLE_CALM)
+			return false;
+		t.calm = 0;
+		if(t.wait)
+			t.wait /= 2;
+		else
+			t.cap *= 2;
+		if(t.wait || t.cap < full)
+			return false;
+		t = Throttle();
+		return true;
+	}
 	struct Drive
 	{
 		int64_t gen = 0;
@@ -2932,9 +3019,11 @@ struct Module: public interface::Module, public Interface
 		// round it as last read, when (us)
 		creatures::Grid near;
 		int64_t near_us = 0;
+		Throttle th; // [KIT_ENT_PERF_2]
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
+	uint64_t m_drive_from = 0; // [KIT_ENT_PERF_2] the drive a tick starts at
 	// [KIT_GUIDE_STATIONS] The bots in seats (by the bot): the seat, its input
 	// there (a holder's fields, kit/bot's c:drive), where it stood before
 	struct BotSeat
@@ -5489,9 +5578,9 @@ struct Module: public interface::Module, public Interface
 			if(pj.is_object())
 				for(json::Iterator it(pj); it; ++it){
 					// (use: Kit's, gone with a type no longer usable; own_look
-					// with one that has no look)
+					// and merge_parts with one that has no look)
 					if((object || it.key() == "use" ||
-							it.key() == "own_look") &&
+							it.key() == "own_look" || it.key() == "merge_parts") &&
 							!decl.get(it.key()).is_object())
 						continue;
 					const ss_ bad = !decl.get(it.key()).is_object() ? "" :
@@ -7301,7 +7390,7 @@ struct Module: public interface::Module, public Interface
 			}
 			for(auto &bp : m_bodies)
 				if(bp.second.type == name)
-					bp.second.failed = bp.second.slow = false;
+					bp.second.failed = false, bp.second.th = Throttle();
 			m_runtime_dirty = true;
 		});
 		return n;
@@ -17385,6 +17474,9 @@ struct Module: public interface::Module, public Interface
 				if(in.params.get("own_look").is_false())
 					l.set("hidden", true);
 				show.set("look", l);
+				// [KIT_ENT_PERF_2] its parts drawn as one (client_lua/merge.lua)
+				if(in.params.get("merge_parts").is_true())
+					show.set("merge", true);
 			}
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
@@ -25468,13 +25560,19 @@ struct Module: public interface::Module, public Interface
 		m.pct_max = std::max(m.pct_max, pct);
 		if(now - m.since < COST_WINDOW_US)
 			return;
+		// ([KIT_ENT_PERF_2] the throttled ones now)
+		size_t th = 0;
+		for(auto &d : m_drives)
+			th += d.second.th.cap ? 1 : 0;
+		for(auto &b : m_bodies)
+			th += b.second.th.cap ? 1 : 0;
 		log_i(MODULE, "meter: %lld ticks in %.1f s, gap %.1f/%.1f ms, Kit's tick "
 				"%.2f/%.2f ms, the box %.1f/%.1f %% of a tick's budget (mean/worst), "
-				"%zu bodies, %zu drives, %zu peers", (long long)m.n,
+				"%zu bodies, %zu drives, %zu peers, %zu throttled", (long long)m.n,
 				(now - m.since) / 1e6, m.gaps ? m.gap_sum / 1e3 / m.gaps : 0.0,
 				m.gap_max / 1e3, m.own_sum / 1e3 / m.n, m.own_max / 1e3,
 				m.pct_sum / m.n, m.pct_max, m_bodies.size(), m_drives.size(),
-				m_peers.size());
+				m_peers.size(), th);
 		static const char *const names[PH_N] = {"sync_motions", "step_bodies", "minds",
 				"step_drives", "send_tracks", "projectiles", "queue_rest"};
 		ss_ ph;
@@ -26548,9 +26646,9 @@ struct Module: public interface::Module, public Interface
 		// one that is not steered here moves it by this body's steps)
 		uint64_t ride = 0;
 		bool failed = false; // a step's error logged
-		// [KIT_PLANE] stage 4: a step was too slow: none stepped till a put or the
-		// type's next version
-		bool slow = false;
+		// [KIT_ENT_PERF_2] its steps past the box's budget: throttled (was
+		// [KIT_PLANE] stage 4's stop till a put or the type's next version)
+		Throttle th;
 		// [KIT_PLANE] stage 4: s.pose last set on the player's node ("kit_mpose")
 		ss_ mpose_sent;
 		// [KIT_TOOLS_1] the last input's yaw (degrees from +z toward +x):
@@ -27493,7 +27591,7 @@ struct Module: public interface::Module, public Interface
 		b.allowance = 0;
 		b.last_us = interface::os::time_us();
 		b.failed = false;
-		b.slow = false;
+		b.th = Throttle();
 		const int64_t n = ++b.puts;
 		body_moved(peer, b);
 		// The controls first: the client steps the put with the movement
@@ -28362,13 +28460,33 @@ struct Module: public interface::Module, public Interface
 			u.h = num(d.params, "height", 0.9, 0.1, 4);
 			natives[d.scene].push_back(u);
 		}
-		for(auto &dp : m_drives){
+		// [KIT_ENT_PERF_2] from the one the last tick's budget ran out at, round:
+		// the same first ones each tick starved the rest
+		sv_<std::map<uint64_t, Drive>::iterator> order;
+		order.reserve(m_drives.size());
+		const auto from = m_drives.lower_bound(m_drive_from);
+		for(auto it = from; it != m_drives.end(); ++it)
+			order.push_back(it);
+		for(auto it = m_drives.begin(); it != from; ++it)
+			order.push_back(it);
+		bool ran_out = false;
+		for(auto dpi : order){
+			auto &dp = *dpi;
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
+			if(spent >= budget && !ran_out){
+				ran_out = true;
+				m_drive_from = dp.first;
+			}
 			// ([KIT_PAUSE_ALONE] its scene's time: none while paused)
 			if(ei == m_entities.end() || d.failed || !m_box || spent >= budget ||
 					paused(d.scene))
 				continue;
+			// [KIT_ENT_PERF_2] throttled: tried again after its wait
+			if(d.th.skip > 0){
+				d.th.skip--;
+				continue;
+			}
 			const double now = motion_t(d.scene);
 			const Entity &e = ei->second;
 			const Instance *mv = movement_on(e);
@@ -28390,7 +28508,7 @@ struct Module: public interface::Module, public Interface
 			if(d.t < now - 1)
 				d.t = now - 1;
 			const int n = std::min((int)std::floor((now + DRIVE_LEAD - d.t) * rate),
-					2 * BATCH);
+					d.th.cap ? d.th.cap : 2 * BATCH);
 			if(n <= 0)
 				continue;
 			// The input: its holder's, else its own state's (signals)
@@ -28504,10 +28622,28 @@ struct Module: public interface::Module, public Interface
 				int64_t used = 0;
 				const bool ok = box_call(o, answer, why, &runaway, &used);
 				spent += used;
+				const int64_t slice = step_slice();
+				// [KIT_ENT_PERF_2] past its budget or too slow: throttled
+				if(!ok && (runaway || why.find("too slow") != ss_::npos)){
+					const ss_ t = throttle_hit(d.th, n);
+					log_w(MODULE, "Entity %s's %s: %s: %s", cs(itos(e.id)), cs(d.type),
+							cs(why), cs(t));
+					add_log(e.id, d.type+": "+why+": "+t);
+					continue;
+				}
 				if(!ok){
 					log_w(MODULE, "Entity %s's %s: %s", cs(itos(e.id)), cs(d.type), cs(why));
 					d.failed = true;
 					continue;
+				}
+				if(n > 1 && used * 4 > slice * 3){
+					const ss_ t = throttle_hit(d.th, n);
+					log_w(MODULE, "Entity %s's %s: near its budget (%lld of %lld): %s",
+							cs(itos(e.id)), cs(d.type), (long long)used, (long long)slice,
+							cs(t));
+				} else if(throttle_ok(d.th, used, slice, 2 * BATCH)){
+					log_i(MODULE, "Entity %s's %s: back to full steps", cs(itos(e.id)),
+							cs(d.type));
 				}
 				d.state = json::load_string(answer.c_str());
 			}
@@ -31067,8 +31203,12 @@ struct Module: public interface::Module, public Interface
 					(now - b.last_us) / 1e6 * rate * 1.05);
 			b.last_us = now;
 			bool stepped = false;
-			// (its inputs answered where it stopped)
-			if(b.slow && !b.inputs.empty()){
+			// ([KIT_ENT_PERF_2] throttled, waiting: its inputs answered where it
+			// stands)
+			const bool waits = b.th.skip > 0;
+			if(waits)
+				b.th.skip--;
+			if(waits && !b.inputs.empty()){
 				b.ack = b.inputs.back().first;
 				b.inputs.clear();
 				network::access(m_server, [&](network::Interface *inetwork){
@@ -31101,7 +31241,8 @@ struct Module: public interface::Module, public Interface
 				// client's prediction takes "kit:controls"' move.speed alike)
 				ss_ spd;
 				lua_lit(json::Value(b.speed), spd);
-				for(; n_in < BATCH && !b.inputs.empty() &&
+				const int cap = b.th.cap ? b.th.cap : BATCH;
+				for(; n_in < cap && !b.inputs.empty() &&
 						b.allowance >= 1; n_in++){
 					const ss_ &in = b.inputs.front().second;
 					o += in.substr(0, in.size() - 1)+",speed="+spd+"},";
@@ -31125,28 +31266,42 @@ struct Module: public interface::Module, public Interface
 				int64_t used = 0;
 				const bool ok = box_call(o, answer, why, &runaway, &used);
 				spent += used;
+				const int64_t slice = step_slice();
 				if(!ok){
 					// [KIT_PLANE] stage 4: a step past the box's cap (or the batch
-					// past its budget) stops the body, said in the Log of the
-					// movement's component
+					// past its budget), said in the Log of the movement's component:
+					// [KIT_ENT_PERF_2] throttled, its inputs answered where it stands
 					const bool slow = runaway || why.find("too slow") != ss_::npos;
-					if(!b.failed){
-						log_w(MODULE, "%s's body (%s): %s", cs(pi->second.name),
-								cs(b.type), cs(why));
+					const ss_ t = slow ? throttle_hit(b.th, n_in) : ss_();
+					if(!b.failed || slow){
+						log_w(MODULE, "%s's body (%s): %s%s", cs(pi->second.name),
+								cs(b.type), cs(why), cs(slow ? ": "+t : ss_()));
 						rec_error(pi->first, slow ? "budget" : "movement", 0,
 								b.type, "", why); // [KIT_PLAYTEST_REC]
 						uint64_t id = 0;
 						size_t comp = 0;
 						if(slow && movement_root(b.type, pi->second.scene, id, comp))
-							add_log(id, b.type+" too slow: "+pi->second.name+"'s body "
-									"stopped till put again or the type's next version ("+
-									why+")");
+							add_log(id, b.type+" too slow: "+pi->second.name+"'s body "+
+									t+" ("+why+")");
 					}
-					b.failed = true;
-					b.slow = b.slow || slow;
+					b.failed = !slow;
+					if(slow){
+						b.ack = b.inputs.empty() ? last : b.inputs.back().first;
+						network::access(m_server, [&](network::Interface *inetwork){
+							inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
+									",\"s\":"+b.state_json+"}");
+						});
+					}
 					b.inputs.clear();
 					break;
 				}
+				if(n_in > 1 && used * 4 > slice * 3)
+					log_w(MODULE, "%s's body (%s): near its budget (%lld of %lld): %s",
+							cs(pi->second.name), cs(b.type), (long long)used,
+							(long long)slice, cs(throttle_hit(b.th, n_in)));
+				else if(throttle_ok(b.th, used, slice, BATCH))
+					log_i(MODULE, "%s's body (%s): back to full steps",
+							cs(pi->second.name), cs(b.type));
 				b.ack = last;
 				b.state = json::load_string(answer.c_str());
 				b.state_json = answer;
@@ -31160,6 +31315,9 @@ struct Module: public interface::Module, public Interface
 				}
 				with_vars(b);
 				stepped = true;
+				// ([KIT_ENT_PERF_2] throttled: one call a tick)
+				if(b.th.cap)
+					break;
 			}
 			if(!stepped)
 				continue;
@@ -37620,7 +37778,8 @@ struct Module: public interface::Module, public Interface
 				"movement.zone = \"box\" its body box (kit/walker's), else its "
 				"point. A step of more than 200000 Lua instructions is too slow: "
 				"a put with such a step is refused (the version before runs on); "
-				"in play, the body stops. movement.raw_keys = true: the side "
+				"in play, the body is throttled (stepped less often, logged). "
+				"movement.raw_keys = true: the side "
 				"camera's keys as they are (f, r); touch = \"drive\" (Gas, "
 				"Brake, the stick's r), touch_buttons = {{\"Turn\", \"jump\"}} "
 				"(above Brake; a third \"low\": under Gas), touch_axes "
