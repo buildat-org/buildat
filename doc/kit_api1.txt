@@ -169,6 +169,7 @@ server c:session_start | (players, map, others)
 server c:set_param | (id, ty, param, value, opts)
 server c:set_voxel | (name)
 server c:set_voxels | (cells)
+server c:set_voxels_at | (cells)
 server c:sound | (name, opts)
 server c:spawn | (t)
 server c:speed | (player, factor)
@@ -176,8 +177,10 @@ server c:take | (item, n, ext)
 server c:teleport | (pos, opts)
 server c:use | (id)
 server c:use_item | (name)
+server c:voxel_at | (x, y, z)
 server c:voxel_box | (t) [experimental]
 server c:voxels | ()
+server c:voxels_at | (o, s)
 server env assert
 server env error
 server env getmetatable
@@ -351,6 +354,7 @@ server type_field volume
 server type_field voxel_box
 server type_field world
 server type_field world_region
+server type_field world_voxels
 server type_field zone
 client e.body
 client e.hinge
