@@ -347,6 +347,7 @@ server type_field usable
 server type_field use_range
 server type_field use_when
 server type_field version
+server type_field vision
 server type_field volume
 server type_field voxel_box
 server type_field world
@@ -1020,6 +1021,7 @@ type kit/game_rules param drop_items | {"default": true, "kind": "bool"}
 type kit/game_rules param feed_anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "top_right", "kind": "string"}
 type kit/game_rules param feed_x | {"default": 0.9, "kind": "number", "max": 400, "min": -400}
 type kit/game_rules param feed_y | {"default": 3.7, "kind": "number", "max": 400, "min": -400}
+type kit/game_rules param fog | {"default": false, "kind": "bool"}
 type kit/game_rules param full | {"choices": ["drop", "refuse"], "default": "drop", "kind": "string"}
 type kit/game_rules param hand_level | {"default": 15, "kind": "number", "max": 15, "min": 0}
 type kit/game_rules param health_anchor | {"choices": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"], "default": "bottom", "kind": "string"}
@@ -1878,6 +1880,7 @@ type kit/ui_view state value | shared
 type kit/unit | version 1
 type kit/unit handlers | on_order on_timer
 type kit/unit param range | {"default": 10, "kind": "number", "max": 64, "min": 0.5}
+type kit/unit param sight | {"default": 12, "kind": "number", "max": 64, "min": 0}
 type kit/unit param team | {"default": "", "kind": "string"}
 type kit/unit param weapon | {"default": "", "kind": "string"}
 type kit/unit state target

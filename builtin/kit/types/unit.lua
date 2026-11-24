@@ -8,6 +8,9 @@
 -- (order.target) is gone after to within range and, with a weapon (a ranged
 -- item's name), shot at (c:fire) while it is there. Its state `target` (0:
 -- none) is c.target to the behaviours on the entity (`senses = true`).
+-- [KIT_RTS] Under kit/game_rules' fog its `sight` is how far (m) it sees for
+-- its team (`vision = "sight"`): another team's units that near are sent to
+-- its team's players.
 -- simplified: no queue of orders, no stance; a target is chased wherever it
 -- goes, until it is gone or another order comes
 local function think(c)
@@ -43,16 +46,19 @@ return {
 			team = "The name of the team (kit/team) whose members command it; empty: any player.",
 			weapon = "A ranged item (as kit/bow) it shoots at a target it was ordered at; empty: none.",
 			range = "How near in metres it goes to a target before it shoots.",
+			sight = "How far in metres it sees for its team under fog of war (kit/game_rules' fog).",
 		},
 	},
 	component = true,
 	creature = true,
 	senses = true,
 	unit = true,
+	vision = "sight",
 	params = {
 		team = {type = "string", default = ""},
 		weapon = {type = "string", default = ""},
 		range = {type = "number", default = 10, min = 0.5, max = 64},
+		sight = {type = "number", default = 12, min = 0, max = 64},
 	},
 	state = {target = {default = 0}},
 	on_order = function(c, order)

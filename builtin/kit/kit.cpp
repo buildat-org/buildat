@@ -10,6 +10,7 @@
 #include "accounts/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
+#include "replicate/api.h"
 #include "storage/api.h"
 #include "voxelworld/api.h"
 #include "interface/wasm_box.h"
@@ -51,6 +52,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #ifndef _WIN32
 	// [KIT_SERVER_PUBLISH] the server's key file's mode
 	#include <fcntl.h>
@@ -418,6 +420,9 @@ struct Type
 	// [KIT_RTS] A unit a player commands (unit = true: its param team, the
 	// orders' on_order; kit/unit)
 	bool unit = false;
+	// [KIT_RTS] Its number parameter that is how far a unit sees for its
+	// team under fog of war (vision = "<param>"; "": none)
+	ss_ vision;
 	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
 	// c:region_at)
 	bool regions = false;
@@ -1714,6 +1719,15 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AGENT_NEXT_1] the camera ends with this instance
 		if(m_cam.running)
 			camera_say("stop");
+		// [KIT_RTS] the fog's filters hold this
+		if(!m_fog_refs.empty()) try {
+			replicate::access(m_server, [&](replicate::Interface *irep){
+				for(main_context::SceneReference ref : m_fog_refs)
+					irep->set_named_node_filter(ref, "kit_fog", nullptr);
+			});
+		} catch(std::exception &e){
+			log_w(MODULE, "The fog's filters not taken back: %s", e.what());
+		}
 		// [KIT_AGENTS]
 		if(!m_agent_peers.empty()) try {
 			network::access(m_server, [&](network::Interface *i){
@@ -2094,7 +2108,7 @@ struct Module: public interface::Module, public Interface
 				"reads_teams", "reads_voxels", "region", "right_use", "root",
 				"seat", "senses", "sight", "single", "space", "spawn",
 				"spawn_spots", "state", "takes_text", "team", "ui", "unit", "usable",
-				"use_range", "use_when", "version", "volume", "voxel_box",
+				"use_range", "use_when", "version", "vision", "volume", "voxel_box",
 				"world", "world_region", "zone"};
 		return F;
 	}
@@ -2221,6 +2235,14 @@ struct Module: public interface::Module, public Interface
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
 		t.unit = t.decl.get("unit").is_true();
+		// [KIT_RTS] its sight's parameter, a number one of its own
+		t.vision = jstr(t.decl, "vision");
+		if(!t.vision.empty() && jstr(t.decl.get("params").get(t.vision.c_str()), "type") !=
+				"number"){
+			log_w(MODULE, "Component type %s: vision \"%s\" is no number parameter "
+					"of its own: it sees nothing", cs(name), cs(t.vision));
+			t.vision.clear();
+		}
 		t.teams = t.decl.get("reads_teams").is_true();
 		t.regions = t.decl.get("reads_regions").is_true();
 		t.events = jstr(t.decl, "events");
@@ -17430,6 +17452,10 @@ struct Module: public interface::Module, public Interface
 			if(ty.unit && in.disabled.empty() && show.get("unit").is_undefined()){
 				json::Value u = json::object();
 				u.set("team", jstr(in.params, "team"));
+				// how far it sees under fog of war (its own team's darkening)
+				const double r = vision_of(e);
+				if(r > 0)
+					u.set("sight", r);
 				show.set("unit", u);
 			}
 			// (a seat: taken by a use, [KIT] stage 4h)
@@ -17624,6 +17650,7 @@ struct Module: public interface::Module, public Interface
 			n->SetVar(magic::StringHash("kit_show"),
 					magic::Variant(show.stringify().c_str()));
 			e.node = n->GetID();
+			fog_new_node(e, e.node); // [KIT_RTS] (before replicate sees it)
 		});
 		for(size_t i = 0; i < e.comps.size(); i++)
 			for(const ss_ &k : m_types[e.comps[i].type].shared)
@@ -17661,7 +17688,10 @@ struct Module: public interface::Module, public Interface
 			json::Value *batch = nullptr)
 	{
 		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end() || !pi->second.player || !has_node(e))
+		// ([KIT_RTS] none while the fog keeps it from them: fog_tick() sends
+		// what changed as it is seen again)
+		if(pi == m_peers.end() || !pi->second.player || !has_node(e) ||
+				fog_hides(peer, e.id))
 			return;
 		ss_ scene;
 		scene_of(e, &scene);
@@ -18706,8 +18736,9 @@ struct Module: public interface::Module, public Interface
 			const bool at = e.has_pos && !sounds.at(i).at(1u).is_true();
 			if(at)
 				world_of(e, w);
+			// ([KIT_RTS] a positional one not to whom the fog keeps it from)
 			play_sound(jstr_at(sounds.at(i), 0), in_scene ? &scene : nullptr,
-					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type);
+					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type, 0, e.id);
 		}
 		// [KIT_PARTICLES] c:effect, c:event
 		const json::Value &effects = fx.get("effects");
@@ -25434,7 +25465,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_ENT_PERF] the tick's phases on the meter's "phases:" line: wall ms a
 	// tick each (the player's own steps step_bodies, the drives' step_drives)
 	enum Phase { PH_SYNC, PH_BODIES, PH_MINDS, PH_DRIVES, PH_TRACKS, PH_SHOTS,
-		PH_QUEUE, PH_N };
+		PH_QUEUE, PH_FOG, PH_N };
 	int64_t m_phase_us[PH_N] = {};
 	struct PhaseTimer
 	{
@@ -25476,7 +25507,7 @@ struct Module: public interface::Module, public Interface
 				m.pct_sum / m.n, m.pct_max, m_bodies.size(), m_drives.size(),
 				m_peers.size());
 		static const char *const names[PH_N] = {"sync_motions", "step_bodies", "minds",
-				"step_drives", "send_tracks", "projectiles", "queue_rest"};
+				"step_drives", "send_tracks", "projectiles", "queue_rest", "fog"};
 		ss_ ph;
 		for(int k = 0; k < PH_N; k++){
 			char b[64];
@@ -26363,6 +26394,7 @@ struct Module: public interface::Module, public Interface
 		{ PhaseTimer t(*this, PH_DRIVES); spent += step_drives(budget - spent); }
 		m_meter.spent += spent;
 		m_meter.budget = budget;
+		{ PhaseTimer t(*this, PH_FOG); fog_tick(); } // [KIT_RTS]
 		{ PhaseTimer t(*this, PH_TRACKS); send_tracks(); }
 		free_bodies_tick();
 		own_tick(); // [KIT_AIRSHIPS]
@@ -26995,6 +27027,11 @@ struct Module: public interface::Module, public Interface
 		// [KIT_RTS] the name of their team (kit/unit's team), "" none
 		if(const uint64_t tm = team_of_player(pe.player))
 			c.set("team", team_name(tm));
+		// [KIT_RTS] under fog of war (its scene's kit/game_rules' fog, in a team,
+		// not in the tools): the client darkens what its team's units do not see
+		auto fpi = m_fog_peers.find(peer);
+		if(fpi != m_fog_peers.end() && fpi->second.fogged)
+			c.set("fog", true);
 		auto bi = m_bodies.find(peer);
 		if(bi != m_bodies.end() && !bi->second.type.empty()){
 			Body &b = bi->second;
@@ -27025,7 +27062,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &d : m_drives){
 			auto ei = m_entities.find(d.first);
 			if(m_free_objects.count(d.first) || ei == m_entities.end() ||
-					d.second.scene != pe.scene)
+					d.second.scene != pe.scene || fog_hides(peer, d.first))
 				continue;
 			json::Value r = json::array();
 			r.append((int64_t)d.first);
@@ -27039,7 +27076,8 @@ struct Module: public interface::Module, public Interface
 		auto psi = m_host.scenes.find(pe.scene);
 		json::Value objs = json::array();
 		for(auto &f : m_free_objects){
-			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
+			if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
+					fog_hides(peer, f.first))
 				continue;
 			json::Value r = json::array();
 			r.append(f.second.boxes); // [KIT_AIRSHIPS] its boxes' name
@@ -30897,7 +30935,9 @@ struct Module: public interface::Module, public Interface
 			char buf[128];
 			for(auto &dp : m_drives){
 				const Drive &d = dp.second;
-				if(d.scene != p.second.scene || d.keys.empty())
+				// ([KIT_RTS] none of a unit the fog keeps from them)
+				if(d.scene != p.second.scene || d.keys.empty() ||
+						fog_hides(p.first, dp.first))
 					continue;
 				auto &s = sent[dp.first];
 				const bool fresh = s.first != d.gen;
@@ -30923,6 +30963,359 @@ struct Module: public interface::Module, public Interface
 				inetwork->send(p.first, "kit:track", out);
 			});
 		}
+	}
+
+	// ---- [KIT_RTS] Fog of war (kit/game_rules' fog; api.h's [KIT_RTS]): in
+	// a scene with it on, a unit (`unit = true`, its team param a kit/team's
+	// name) and what is under it are not sent to a peer of another team while
+	// none of that team's units sees it (a sphere of its `vision` parameter's
+	// metres round each). Worked out FOG_EVERY_US apart, and on the next tick
+	// for a unit made (fog_new_node() keeps it back meanwhile). replicate's
+	// filter answers from m_fog_nodes, under m_fog_mutex, on its own thread: a
+	// peer not worked out yet (just joined) gets none of the scene's fogged
+	// entities.
+	// simplified: a sphere through rock, no line of sight (a voxel walk from
+	// each unit at a low rate is the upgrade); O(seers x units) with squared
+	// distances (a grid bucket is the upgrade past a few hundred units)
+	static constexpr int64_t FOG_EVERY_US = 200000;
+	static constexpr double MAX_VISION = 64;
+	struct FogPeer
+	{
+		// Under fog (in a team, placed, not in the tools), in which scene, their
+		// team's name; the entities not sent to them
+		bool fogged = false;
+		ss_ scene, team;
+		std::set<uint64_t> hidden;
+	};
+	// By peer (the server's, not a session's: a peer is in one session); one
+	// for each peer in a fog's scene
+	std::map<size_t, FogPeer> m_fog_peers;
+	// m_fog_mutex's: by peer, its scene and the nodes kept from it there; by
+	// scene, its fogged entities' nodes (what a peer not worked out does not
+	// get)
+	std::mutex m_fog_mutex;
+	std::map<size_t, std::pair<main_context::SceneReference,
+			std::unordered_set<uint32_t>>> m_fog_nodes;
+	std::map<main_context::SceneReference, std::unordered_set<uint32_t>>
+			m_fog_ref_nodes;
+	// The scenes whose filter is set; by session the fog's scenes, their
+	// fogged entities, when it was last worked out and whether a unit made
+	// wants it again
+	std::set<main_context::SceneReference> m_fog_refs;
+	std::map<uint64_t, std::set<ss_>> m_fog_scenes;
+	std::map<uint64_t, std::set<uint64_t>> m_fog_ents;
+	std::map<uint64_t, int64_t> m_fog_at;
+	std::set<uint64_t> m_fog_due;
+
+	// Whether the fog keeps entity id from this peer now (one in the active
+	// session; not worked out yet: every fogged entity)
+	bool fog_hides(size_t peer, uint64_t id) const
+	{
+		if(m_fog_peers.empty() && m_fog_ents.empty())
+			return false;
+		auto it = m_fog_peers.find(peer);
+		if(it != m_fog_peers.end())
+			return it->second.hidden.count(id) != 0;
+		auto fe = m_fog_ents.find(m_active);
+		return fe != m_fog_ents.end() && fe->second.count(id);
+	}
+
+	// Its first running unit instance (nullptr: none)
+	const Instance* unit_instance(const Entity &e) const
+	{
+		for(const Instance &in : e.comps){
+			auto ti = m_types.find(in.type);
+			if(ti != m_types.end() && ti->second.unit && in.disabled.empty())
+				return &in;
+		}
+		return nullptr;
+	}
+
+	// How far it sees (m; 0 none): its types' `vision` parameters, the most
+	double vision_of(const Entity &e) const
+	{
+		double r = 0;
+		for(const Instance &in : e.comps){
+			auto ti = m_types.find(in.type);
+			if(ti != m_types.end() && !ti->second.vision.empty() &&
+					in.disabled.empty())
+				r = std::max(r, num(in.params, ti->second.vision.c_str(), 0, 0,
+						MAX_VISION));
+		}
+		return r;
+	}
+
+	// The fogged units it is or is under (a team param set), the nearest first
+	sv_<const Entity*> fog_units_over(const Entity &e) const
+	{
+		sv_<const Entity*> out;
+		const Entity *at = &e;
+		for(int depth = 0; at && depth <= MAX_NEST + 2; depth++){
+			if(const Instance *ui = unit_instance(*at))
+				if(!jstr(ui->params, "team").empty())
+					out.push_back(at);
+			auto it = m_entities.find(at->parent);
+			at = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return out;
+	}
+
+	// The filter on a scene, on or off
+	void fog_filter(main_context::SceneReference ref, bool on)
+	{
+		if(on == (m_fog_refs.count(ref) != 0))
+			return;
+		if(on)
+			m_fog_refs.insert(ref);
+		else
+			m_fog_refs.erase(ref);
+		std::function<bool(replicate::PeerId, uint)> f;
+		if(on)
+			f = [this, ref](replicate::PeerId peer, uint node){
+				std::lock_guard<std::mutex> lock(m_fog_mutex);
+				auto it = m_fog_nodes.find(peer);
+				if(it != m_fog_nodes.end() && it->second.first == ref)
+					return !it->second.second.count(node);
+				auto r = m_fog_ref_nodes.find(ref);
+				return r == m_fog_ref_nodes.end() || !r->second.count(node);
+			};
+		else {
+			std::lock_guard<std::mutex> lock(m_fog_mutex);
+			m_fog_ref_nodes.erase(ref);
+		}
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_named_node_filter(ref, "kit_fog", f);
+		});
+		log_i(MODULE, "[KIT_RTS] fog of war %s on a scene", on ? "on" : "off");
+	}
+
+	// make_node()'s, in main_context as the node is made: a fogged entity kept
+	// from the fogged peers of other teams until fog_tick() says (next tick)
+	void fog_new_node(const Entity &e, uint32_t node)
+	{
+		auto si = m_fog_scenes.find(m_active);
+		if(si == m_fog_scenes.end() || si->second.empty())
+			return;
+		ss_ scene;
+		const main_context::SceneReference ref = scene_of(e, &scene);
+		if(!si->second.count(scene))
+			return;
+		std::set<ss_> teams;
+		for(const Entity *u : fog_units_over(e))
+			teams.insert(jstr(unit_instance(*u)->params, "team"));
+		if(teams.empty())
+			return;
+		m_fog_ents[m_active].insert(e.id);
+		std::lock_guard<std::mutex> lock(m_fog_mutex);
+		m_fog_ref_nodes[ref].insert(node);
+		for(auto &fp : m_fog_peers){
+			FogPeer &f = fp.second;
+			if(!f.fogged || f.scene != scene || !m_peers.count(fp.first) ||
+					(teams.size() == 1 && teams.count(f.team)))
+				continue;
+			f.hidden.insert(e.id);
+			m_fog_nodes[fp.first].second.insert(node);
+		}
+		m_fog_due.insert(m_active);
+	}
+
+	void fog_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		int64_t &at = m_fog_at[m_active];
+		if(!m_fog_due.count(m_active) && now - at < FOG_EVERY_US)
+			return;
+		m_fog_due.erase(m_active);
+		at = now;
+		// The scenes it is on in (their nearest kit/game_rules' fog)
+		std::set<ss_> &on = m_fog_scenes[m_active];
+		on.clear();
+		for(auto &s : m_host.scenes){
+			const bool f = game_rules(s.first).get("fog").is_true();
+			if(f)
+				on.insert(s.first);
+			fog_filter(s.second, f);
+		}
+		bool any = !on.empty();
+		for(auto &p : m_peers)
+			any = any || m_fog_peers.count(p.first);
+		if(!any){
+			m_fog_ents.erase(m_active);
+			return;
+		}
+		// The fogged units in those scenes: their team, place and sight; what
+		// is under them ([KIT_NESTING]) and its scene
+		struct U { uint64_t id; ss_ team, scene; double w[3]; double r; };
+		sv_<U> units;
+		std::map<uint64_t, std::pair<ss_, sv_<uint64_t>>> fogged;
+		if(!on.empty())
+			for(auto &p : m_entities){
+				const Entity &e = p.second;
+				const sv_<const Entity*> over = fog_units_over(e);
+				ss_ scene;
+				if(over.empty() || !scene_of(e, &scene) || !on.count(scene))
+					continue;
+				auto &fo = fogged[e.id];
+				fo.first = scene;
+				for(const Entity *o : over)
+					fo.second.push_back(o->id);
+				if(!e.has_pos || over[0] != &e)
+					continue;
+				U u;
+				u.id = e.id;
+				u.team = jstr(unit_instance(e)->params, "team");
+				u.scene = scene;
+				world_of(e, u.w);
+				u.r = vision_of(e);
+				units.push_back(u);
+			}
+		std::set<uint64_t> &ents = m_fog_ents[m_active];
+		ents.clear();
+		std::map<ss_, std::set<uint64_t>> fogged_in;
+		for(auto &f : fogged){
+			ents.insert(f.first);
+			fogged_in[f.second.first].insert(f.first);
+		}
+		{
+			std::map<main_context::SceneReference, std::unordered_set<uint32_t>> rn;
+			for(auto &f : fogged){
+				auto ei = m_entities.find(f.first);
+				auto si = m_host.scenes.find(f.second.first);
+				if(ei->second.node && si != m_host.scenes.end())
+					rn[si->second].insert(ei->second.node);
+			}
+			std::lock_guard<std::mutex> lock(m_fog_mutex);
+			for(const ss_ &s : on){
+				auto si = m_host.scenes.find(s);
+				if(si != m_host.scenes.end())
+					m_fog_ref_nodes[si->second].swap(rn[si->second]);
+			}
+		}
+		// Each peer's team: under the fog in a fog's scene, placed, not in the
+		// tools, not the server's camera, in a team
+		std::set<std::pair<ss_, ss_>> views; // (scene, team)
+		std::map<size_t, ss_> who; // "" none: sees all
+		for(auto &p : m_peers){
+			const Peer &pe = p.second;
+			const bool fs = on.count(pe.scene) && pe.player && !pe.editing &&
+					!pe.still && p.first != m_cam.peer;
+			const ss_ team = fs ? team_name(team_of_player(pe.player)) : ss_();
+			who[p.first] = team;
+			if(!team.empty())
+				views.insert(std::make_pair(pe.scene, team));
+		}
+		// What each (scene, team) does not see of the units: another team's
+		// beyond every sight of one of its own; and what is under those
+		std::map<std::pair<ss_, ss_>, std::set<uint64_t>> hidden;
+		for(const auto &v : views){
+			std::set<uint64_t> unseen;
+			for(const U &u : units){
+				if(u.scene != v.first || u.team == v.second)
+					continue;
+				bool seen = false;
+				for(const U &s : units){
+					if(s.team != v.second || s.scene != v.first || s.r <= 0)
+						continue;
+					const double dx = s.w[0] - u.w[0], dy = s.w[1] - u.w[1],
+							dz = s.w[2] - u.w[2];
+					if(dx * dx + dy * dy + dz * dz <= s.r * s.r){
+						seen = true;
+						break;
+					}
+				}
+				if(!seen)
+					unseen.insert(u.id);
+			}
+			std::set<uint64_t> &out = hidden[v];
+			if(!unseen.empty())
+				for(auto &f : fogged)
+					if(f.second.first == v.first)
+						for(uint64_t o : f.second.second)
+							if(unseen.count(o)){
+								out.insert(f.first);
+								break;
+							}
+		}
+		// Each peer's change: their filter's nodes, replicate asked again about
+		// those that changed, their per_player state of the ones seen again
+		for(auto &p : m_peers){
+			const size_t peer = p.first;
+			const ss_ &team = who[peer];
+			const bool in_fog = on.count(p.second.scene) != 0;
+			auto fi = m_fog_peers.find(peer);
+			if(!in_fog && fi == m_fog_peers.end())
+				continue;
+			FogPeer &f = m_fog_peers[peer];
+			// (new: what the filter kept from them so far, every fogged one)
+			if(fi == m_fog_peers.end())
+				f.hidden = fogged_in[p.second.scene];
+			std::set<uint64_t> now_hidden;
+			if(!team.empty())
+				now_hidden = hidden[std::make_pair(p.second.scene, team)];
+			const bool same = fi != m_fog_peers.end() &&
+					f.fogged == !team.empty() && f.scene == p.second.scene &&
+					f.hidden == now_hidden;
+			f.fogged = !team.empty();
+			f.scene = p.second.scene;
+			f.team = team;
+			if(same)
+				continue;
+			sv_<uint64_t> changed, shown;
+			std::set_symmetric_difference(f.hidden.begin(), f.hidden.end(),
+					now_hidden.begin(), now_hidden.end(), std::back_inserter(changed));
+			// (a track's keys go on from the last sent when seen again: the
+			// client's are in time order, the hidden span a jump)
+			for(uint64_t id : changed)
+				if(!now_hidden.count(id))
+					shown.push_back(id);
+			f.hidden.swap(now_hidden);
+			auto si = m_host.scenes.find(p.second.scene);
+			const main_context::SceneReference ref =
+					si == m_host.scenes.end() ? nullptr : si->second;
+			std::unordered_set<uint32_t> hn;
+			for(uint64_t id : f.hidden){
+				auto ei = m_entities.find(id);
+				if(ei != m_entities.end() && ei->second.node)
+					hn.insert(ei->second.node);
+			}
+			sv_<uint> nodes;
+			for(uint64_t id : changed){
+				auto ei = m_entities.find(id);
+				if(ei != m_entities.end() && ei->second.node)
+					nodes.push_back(ei->second.node);
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_fog_mutex);
+				auto &fn = m_fog_nodes[peer];
+				fn.first = ref;
+				fn.second.swap(hn);
+			}
+			if(ref && !nodes.empty())
+				replicate::access(m_server, [&](replicate::Interface *irep){
+					irep->refresh_peer_node_ids(ref, peer, nodes);
+				});
+			for(uint64_t id : shown){
+				auto ei = m_entities.find(id);
+				if(ei == m_entities.end())
+					continue;
+				for(size_t i = 0; i < ei->second.comps.size(); i++)
+					for(const ss_ &k : m_types[ei->second.comps[i].type].per_player)
+						send_mine(peer, ei->second, i, k);
+			}
+			log_v(MODULE, "[KIT_RTS] fog: peer %zu (team \"%s\"): %zu entities "
+					"hidden, %zu changed", peer, cs(team), f.hidden.size(),
+					changed.size());
+			if(!in_fog && f.hidden.empty())
+				fog_forget(peer);
+		}
+	}
+
+	// A peer out of a session (gone, or to another): nothing of theirs kept
+	void fog_forget(size_t peer)
+	{
+		m_fog_peers.erase(peer);
+		std::lock_guard<std::mutex> lock(m_fog_mutex);
+		m_fog_nodes.erase(peer);
 	}
 
 	// [KIT_SURVIVAL_TUNING] Fall damage: a landing's speed (move.lua's
@@ -32511,7 +32904,7 @@ struct Module: public interface::Module, public Interface
 	// or at == null for each where they are; except a peer (0 none: its
 	// client played it already). why: the trigger, for the log
 	void play_sound(const ss_ &name, const ss_ *scene, const double *at,
-			const ss_ &why, size_t except = 0)
+			const ss_ &why, size_t except = 0, uint64_t from = 0)
 	{
 		if(name.empty())
 			return;
@@ -32526,7 +32919,8 @@ struct Module: public interface::Module, public Interface
 		size_t n = 0;
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &o : m_peers)
-				if((!scene || o.second.scene == *scene) && o.first != except){
+				if((!scene || o.second.scene == *scene) && o.first != except &&
+						!(at && fog_hides(o.first, from))){
 					inetwork->send(o.first, "kit:sound", data);
 					n++;
 				}
@@ -33126,7 +33520,9 @@ struct Module: public interface::Module, public Interface
 		size_t n = 0;
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers){
-				if(in_scene && p.second.scene != scene)
+				// ([KIT_RTS] none at an entity the fog keeps from them)
+				if((in_scene && p.second.scene != scene) || fog_hides(p.first, e.id) ||
+						fog_hides(p.first, on->id))
 					continue;
 				const double dx = p.second.pos[0] - at[0], dy = p.second.pos[1] -
 						at[1], dz = p.second.pos[2] - at[2];
@@ -36114,8 +36510,10 @@ struct Module: public interface::Module, public Interface
 		if(target){
 			auto ti = m_entities.find(target);
 			ss_ ts;
+			// ([KIT_RTS] one the fog keeps from them is none to them)
 			if(ti == m_entities.end() || !ti->second.has_pos ||
-					!scene_of(ti->second, &ts) || ts != pe.scene)
+					!scene_of(ti->second, &ts) || ts != pe.scene ||
+					fog_hides(peer, target))
 				return refuse("no such target");
 		}
 		const ss_ team = team_name(team_of_player(pe.player));
@@ -36473,6 +36871,7 @@ struct Module: public interface::Module, public Interface
 		m_tool_use.erase(peer);
 		m_open_chest.erase(peer);
 		m_peers.erase(peer);
+		fog_forget(peer); // [KIT_RTS]
 		if(player)
 			unplace_player(player);
 		if(guest && gone)
