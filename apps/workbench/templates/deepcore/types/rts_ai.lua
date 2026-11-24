@@ -6,23 +6,33 @@
 --   factory and a refinery, a unit a factory, a building the HQ: the one
 --   missing is bought first): a refinery and two harvesters a refinery (four
 --   at most), a factory, attack units (4 + 8 x `aggression` tanks) and
---   `defence` tanks, a digger; money kept back: nothing is bought that would
---   leave under `reserve` (but the first refinery and harvester);
+--   `defence` tanks (one more while it has `rich` money), a digger; money
+--   kept back: nothing is bought that would leave under `reserve` (but the
+--   first refinery and harvester), while money comes in (none for `dry` s:
+--   the reserve spent too);
 --   activities in a random order each time: attack, defend, scout, dig.
 -- Its units are in two pools, attack and defence, assigned as they come (one
 -- in three to defence while it has fewer than it wants), all defenders let go
 -- now and then (`pool_time`) when there are more than its buildings call for.
--- Idle attackers, once there are a wave of them (fewer the more aggressive),
--- go for the enemy seen nearest our units (seen: within `sight` m of one of
--- ours: it does not see through the fog), else where one was last seen,
+-- Idle attackers, once there are a wave of them (fewer the more aggressive;
+-- any at all after `patience` s with no wave sent, or with no money coming
+-- in; none before `first_wave` s), go for the enemy seen nearest our units
+-- (seen: within `sight` m of one of ours: it does not see through the
+-- fog), else where one was last seen,
 -- else the enemy's base, along `route` (points "x y z, ..." from its base to
 -- the enemy's: a long way taken a point at a time); with no enemy seen for a
 -- while one goes as a scout to a random point of the map none of ours sees.
 -- Defenders go for an enemy seen within 16 m of our buildings. Its digger
--- digs towards a random spot round the base (more ore for the harvesters).
+-- digs to the ore in the rock nearest its base (a cell short of it: the ore
+-- the harvesters'), then a way towards the enemy's base, each goal kept
+-- until the digger is there or gets no nearer for `dig_patience` s (hard
+-- rock: given up, not tried again).
 -- It buys through its match ("build" "<Team> <what>") and orders its units
 -- with c:order, the way a player's orders go (kit/unit's on_order).
--- Knobs: aggression, reserve, defence, think, pool_time (params).
+-- An attacker shooting at one target for `aim_time` s (a wall or its own in
+-- the way) is free again, that target left alone a minute.
+-- Knobs: aggression, reserve, defence, think, pool_time, dry, patience,
+-- first_wave, rich, aim_time (params).
 -- simplified: one factory, one refinery; no retreat, no repair; buildings
 -- placed by its match (at random round its HQ)
 local COST = {harvester = 80, digger = 60, tank = 100, refinery = 150, factory = 200}
@@ -102,7 +112,10 @@ local function have(c, k, what, n, must)
 		end
 	end
 	local cost = COST[what] or 0
-	if k.money - cost < (must and 0 or c.params.reserve) then
+	-- (the reserve kept while money comes in: with none for `dry` s it is
+	-- spent)
+	local keep = (must or c.now - s.income_at > c.params.dry) and 0 or c.params.reserve
+	if k.money - cost < keep then
 		return false
 	end
 	k.money = k.money - cost
@@ -201,24 +214,42 @@ function ACT.attack(c, k)
 	local s, p = c.state, c.params
 	local free = {}
 	for _, u in ipairs(pool(c, k, "attack")) do
-		if idle(u) and tostring(u.id) ~= tostring(s.scout) then
+		local id, a = tostring(u.id), s.aims[tostring(u.id)]
+		if idle(u) and id ~= tostring(s.scout) then
+			free[#free + 1] = u
+		elseif (u.target or 0) == 0 then
+			s.aims[id] = nil
+		elseif not a or a[1] ~= u.target then
+			s.aims[id] = {u.target, c.now}
+		elseif c.now - a[2] > p.aim_time then
+			-- (at one target that long, still there: it does not hit it, a
+			-- wall or its own in the way; free, the target left a while)
+			s.shun[tostring(u.target)] = c.now + 60
+			s.aims[id] = nil
 			free[#free + 1] = u
 		end
 	end
 	local wave = math.max(2, math.floor(6 - 4 * p.aggression + 0.5))
-	if #free == 0 or (not s.attacking and #free < wave) then
+	-- (no wave for `patience` s, or no money coming in: what it has)
+	if c.now - s.wave_at > p.patience or c.now - s.income_at > p.dry then
+		wave = 1
+	end
+	-- (none before `first_wave` s of the match: the player's time to build)
+	if #free == 0 or c.now - s.started < p.first_wave or
+			(not s.attacking and #free < wave) then
 		if #pool(c, k, "attack") == 0 then
 			s.attacking = false
 		end
 		return
 	end
 	s.attacking = true
+	s.wave_at = c.now
 	local at = middle(free)
 	local best, bd = nil, 1e18
 	for _, e in ipairs(k.seen) do
 		for _, m in ipairs(k.mine) do
 			local d = d2(e.pos, m.pos)
-			if d < bd then
+			if d < bd and (s.shun[tostring(e.id)] or 0) < c.now then
 				best, bd = e, d
 			end
 		end
@@ -308,23 +339,100 @@ function ACT.scout(c, k)
 	end
 end
 
-function ACT.dig(c, k)
-	local p = c.params
-	for _, u in ipairs(k.by.digger or {}) do
-		if idle(u) and math.random(1, 4) == 1 then
-			local a = math.random() * 2 * math.pi
-			local r = 8 + math.random() * 10
-			local q = {math.floor(p.base[1] + math.cos(a) * r + 0.5), p.base[2],
-				math.floor(p.base[3] + math.sin(a) * r + 0.5)}
-			c:order({u.id}, {at = {q[1], q[2] - 0.5, q[3]}})
-			c:log("digs towards " .. q[1] .. "," .. q[3])
+-- The digger's next goal from where it is: beside the nearest ore round the
+-- base (`dig_reach` cells) with no open side at its level or the one over
+-- it (a tunnel's height), else a point of the way to the enemy's base; one
+-- tried before is not again. {x, z} and what it is, or nil
+local function dig_goal(c, from)
+	local p, s = c.params, c.state
+	local r = math.min(22, p.dig_reach)
+	local n = 2 * r + 1
+	local b = {math.floor(p.base[1] + 0.5), math.floor(from[2] + 0.5),
+		math.floor(p.base[3] + 0.5)}
+	local x0, z0 = b[1] - r, b[3] - r
+	local v = c:voxels_at({x0, b[2], z0}, {n, 2, n})
+	local function at(x, y, z)
+		if x < 0 or z < 0 or x >= n or z >= n then
+			return ""
+		end
+		return v[1 + x + n * (z + n * y)] or ""
+	end
+	local best, bd = nil, 1e18
+	for y = 0, 1 do
+		for z = 0, n - 1 do
+			for x = 0, n - 1 do
+				if at(x, y, z) == p.ore and at(x + 1, y, z) ~= "air" and
+						at(x - 1, y, z) ~= "air" and at(x, y, z + 1) ~= "air" and
+						at(x, y, z - 1) ~= "air" and at(x, 1 - y, z) ~= "air" then
+					local q = {x0 + x, z0 + z}
+					local d = (q[1] - b[1]) ^ 2 + (q[2] - b[3]) ^ 2
+					if d < bd and not s.tried[q[1] .. "," .. q[2]] then
+						best, bd = q, d
+					end
+				end
+			end
 		end
 	end
+	if best then
+		-- (a cell short of it, the last leg's way: the digger digs the
+		-- longer way first; the ore left for the harvesters)
+		local dx, dz = best[1] - math.floor(from[1] + 0.5), best[2] - math.floor(from[3] + 0.5)
+		local last = math.abs(dx) >= math.abs(dz) and (dz ~= 0 and 2 or 1) or (dx ~= 0 and 1 or 2)
+		local g = {best[1], best[2]}
+		local dv = last == 1 and dx or dz
+		g[last] = g[last] - (dv > 0 and 1 or dv < 0 and -1 or 0)
+		return g, best, "ore"
+	end
+	for _, f in ipairs({0.3, 0.55, 0.8, 1}) do
+		local q = {math.floor(p.base[1] + (p.enemy_base[1] - p.base[1]) * f + 0.5),
+			math.floor(p.base[3] + (p.enemy_base[3] - p.base[3]) * f + 0.5)}
+		if not s.tried[q[1] .. "," .. q[2]] then
+			return q, q, "the enemy"
+		end
+	end
+end
+
+-- Its digger keeps a goal until it is there or gets no nearer for
+-- `dig_patience` s (hard rock, a fall), then the next
+function ACT.dig(c, k)
+	local s, p = c.state, c.params
+	local u = (k.by.digger or {})[1]
+	if not u then
+		return
+	end
+	local g = s.dig
+	if g and g.id == u.id then
+		local d = math.sqrt((u.pos[1] - g.at[1]) ^ 2 + (u.pos[3] - g.at[2]) ^ 2)
+		if d <= 1.6 then
+			c:log("its digger is at " .. g.at[1] .. "," .. g.at[2])
+		elseif d < g.best - 0.7 then
+			g.best, g.since = d, c.now
+			return
+		elseif c.now - g.since <= p.dig_patience then
+			return
+		else
+			c:log("its digger gives up on " .. g.at[1] .. "," .. g.at[2])
+		end
+		s.tried[g.key] = true
+		s.dig = false
+	end
+	local at, mark, what = dig_goal(c, u.pos)
+	if not at then
+		return
+	end
+	local key = mark[1] .. "," .. mark[2]
+	s.dig = {id = u.id, at = at, key = key, best = 1e9, since = c.now}
+	c:order({u.id}, {at = {at[1], u.pos[2] - 0.5, at[2]}})
+	c:log("digs towards " .. at[1] .. "," .. at[2] .. " (" .. what .. ")")
 end
 
 local function think(c)
 	local s, p = c.state, c.params
 	local k = look(c)
+	if k.money > s.money then
+		s.income_at = c.now
+	end
+	s.money = k.money
 	if #k.seen > 0 then
 		s.seen_at = c.now
 		s.last_seen = k.seen[1].pos
@@ -336,7 +444,9 @@ local function think(c)
 			n_of(k, "harvester") == 0)
 	end
 	have(c, k, "factory", 1)
-	have(c, k, "tank", math.floor(4 + 8 * p.aggression + 0.5) + p.defence)
+	-- (and one more while it has `rich` money: what comes in spent)
+	local tanks = math.floor(4 + 8 * p.aggression + 0.5) + p.defence
+	have(c, k, "tank", k.money >= p.rich and math.max(tanks, n_of(k, "tank") + 1) or tanks)
 	have(c, k, "digger", 1)
 	for _, a in ipairs(shuffle({"attack", "defend", "scout", "dig"})) do
 		ACT[a](c, k)
@@ -356,6 +466,14 @@ return {
 			defence = "Tanks it keeps at home.",
 			think = "Seconds between its turns.",
 			pool_time = "Seconds between letting surplus defenders go.",
+			dry = "Seconds with no money coming in before it spends its reserve and attacks with what it has.",
+			patience = "Seconds with no attack sent before it attacks with what it has.",
+			first_wave = "Seconds of the match before its first attack.",
+			rich = "Money over which it buys a tank more than it wants.",
+			aim_time = "Seconds an attacker shoots at one target before it tries another.",
+			dig_reach = "Cells round its base it looks for ore in the rock for its digger.",
+			dig_patience = "Seconds its digger may get no nearer to its goal before it gives that one up.",
+			ore = "The ore voxel.",
 			sight = "How far its units see the enemy, m.",
 			base = "Its base.", enemy_base = "The enemy's base.",
 			route = "Points \"x y z, ...\" from its base to the enemy's: the long way, a point at a time.",
@@ -367,6 +485,7 @@ return {
 	no_position = true,
 	reads_units = true,
 	reads_teams = true,
+	world_voxels = true,
 	params = {
 		match = {type = "entity", default = 0},
 		team = {type = "string", default = "Red"},
@@ -376,6 +495,14 @@ return {
 		defence = {type = "number", default = 3, min = 0, max = 30},
 		think = {type = "number", default = 1.5, min = 0.2, max = 10},
 		pool_time = {type = "number", default = 20, min = 1, max = 600},
+		dry = {type = "number", default = 45, min = 5, max = 600},
+		patience = {type = "number", default = 150, min = 10, max = 3600},
+		first_wave = {type = "number", default = 180, min = 0, max = 3600},
+		rich = {type = "number", default = 400, min = 0, max = 100000},
+		aim_time = {type = "number", default = 30, min = 5, max = 600},
+		dig_reach = {type = "number", default = 22, min = 4, max = 22},
+		dig_patience = {type = "number", default = 25, min = 5, max = 300},
+		ore = {type = "voxel", default = "kit/ore"},
 		sight = {type = "number", default = 12, min = 1, max = 64},
 		base = {type = "position", default = {35, 4, 8}},
 		enemy_base = {type = "position", default = {-36, 4, -9}},
@@ -385,13 +512,18 @@ return {
 	},
 	state = {on = {default = false, shared = true}, pending = {default = {}},
 		pools = {default = {}}, pooled = {default = 0}, attacking = {default = false},
-		scout = {default = 0}, seen_at = {default = 0}, last_seen = {default = false}},
+		scout = {default = 0}, seen_at = {default = 0}, last_seen = {default = false},
+		money = {default = 0}, income_at = {default = 0}, wave_at = {default = 0},
+		dig = {default = false}, tried = {default = {}}, started = {default = 0},
+		aims = {default = {}}, shun = {default = {}}},
 	inputs = {start = "none", stop = "none"},
 	on_input = function(c, input)
 		local s = c.state
 		if input == "start" then
 			s.on, s.pending, s.pools, s.attacking = true, {}, {}, false
 			s.scout, s.seen_at, s.last_seen, s.pooled = 0, c.now, false, c.now
+			s.money, s.income_at, s.wave_at, s.dig, s.tried = 0, c.now, c.now, false, {}
+			s.started, s.aims, s.shun = c.now, {}, {}
 			c:log("plays " .. c.params.team)
 			c:after(c.params.think, "think")
 		elseif input == "stop" then
