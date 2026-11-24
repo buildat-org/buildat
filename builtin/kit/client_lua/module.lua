@@ -183,7 +183,9 @@ end
 -- sandbox); it returns a table of handlers, each given `e`, the entity as
 -- this client has it:
 --   on_add(e), on_state(e, key) (a shared state changed: e.state[key]),
---   on_update(e, dt) (each frame), on_use(e) (this player used it, before
+--   on_update(e, dt) (each frame; [KIT_ENT_PERF_2] with the table's
+--   skip_offscreen = true, not while the entity is out of the play camera's
+--   view: offscreen() below), on_use(e) (this player used it, before
 --   the server hears of it), on_remove(e); [KIT_PLANE] stage 4: a movement's
 --   draw(s, node, yaw, p) draws the players' bodies (move.lua's top)
 --   [KIT_CLIENT_REACT] (1) on_enter(e), on_leave(e): this player's own
@@ -266,9 +268,14 @@ local function value(n, key)
 end
 
 local function drop_look(n)
+	-- ([KIT_ENT_PERF_2] out of what it was merged into: merge.lua's)
+	if M.merge_drop then
+		M.merge_drop(n)
+	end
 	if n.look then
 		n.look:Remove()
 	end
+	n.mesh = nil
 	-- ([KIT_SIDE_SCENERY] (8) a parallax layer's copies of it, below)
 	for _, c in ipairs(n.par_copies and n.par_copies.nodes or {}) do
 		c:Remove()
@@ -322,6 +329,9 @@ function M.set_look_reach(d)
 			cull(n)
 			k = k + 1
 		end
+	end
+	if M.merge_reach then
+		M.merge_reach()
 	end
 	log:info("kit: looks drawn " .. (d and string.format("to %.0f m", d) or
 			"at any distance") .. " (" .. k .. " looks)")
@@ -469,31 +479,56 @@ local function v3(t)
 end
 
 -- A unit wedge (-0.5...0.5), its slope rising along +z to the full height
--- at its back
-local function wedge(node)
-	local cg = node:CreateComponent("CustomGeometry")
-	cg:SetNumGeometries(1)
-	cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+-- at its back; its triangles too (set_triangle_geometry's 12 numbers a vertex:
+-- [KIT_ENT_PERF_2] what merge.lua bakes)
+local WEDGE = {}
+do
 	local a, b = -0.5, 0.5
 	local function tri(p1, p2, p3, nrm)
 		for _, p in ipairs({p1, p2, p3}) do
-			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
-			cg:DefineNormal(nrm)
-			cg:DefineTexCoord(magic.Vector2(0, 0))
+			for _, v in ipairs({p[1], p[2], p[3], nrm[1], nrm[2], nrm[3], 1, 1, 1, 1, 0, 0}) do
+				WEDGE[#WEDGE + 1] = v
+			end
 		end
 	end
-	local slope = magic.Vector3(0, 1, -1):Normalized()
+	local s = math.sqrt(0.5)
+	local slope = {0, s, -s}
 	-- The slope, the bottom, the back, the two sides
 	tri({a, a, a}, {a, b, b}, {b, b, b}, slope)
 	tri({a, a, a}, {b, b, b}, {b, a, a}, slope)
-	tri({a, a, a}, {b, a, a}, {b, a, b}, magic.Vector3(0, -1, 0))
-	tri({a, a, a}, {b, a, b}, {a, a, b}, magic.Vector3(0, -1, 0))
-	tri({a, a, b}, {b, a, b}, {b, b, b}, magic.Vector3(0, 0, 1))
-	tri({a, a, b}, {b, b, b}, {a, b, b}, magic.Vector3(0, 0, 1))
-	tri({a, a, a}, {a, a, b}, {a, b, b}, magic.Vector3(-1, 0, 0))
-	tri({b, a, a}, {b, b, b}, {b, a, b}, magic.Vector3(1, 0, 0))
-	cg:Commit()
-	return cg
+	tri({a, a, a}, {b, a, a}, {b, a, b}, {0, -1, 0})
+	tri({a, a, a}, {b, a, b}, {a, a, b}, {0, -1, 0})
+	tri({a, a, b}, {b, a, b}, {b, b, b}, {0, 0, 1})
+	tri({a, a, b}, {b, b, b}, {a, b, b}, {0, 0, 1})
+	tri({a, a, a}, {a, a, b}, {a, b, b}, {-1, 0, 0})
+	tri({b, a, a}, {b, b, b}, {b, a, b}, {1, 0, 0})
+end
+local function wedge(node)
+	buildat.set_triangle_geometry(node, WEDGE)
+	return node:GetComponent("CustomGeometry"), WEDGE
+end
+-- [KIT_ENT_PERF_2] Models/Box.mdl's unit box as such triangles: each face its
+-- normal out, its corners' texture coordinates 0...1
+local BOX = {}
+do
+	for _, f in ipairs({{{1, 0, 0}, {0, 0, 1}}, {{-1, 0, 0}, {0, 0, -1}},
+			{{0, 1, 0}, {1, 0, 0}}, {{0, -1, 0}, {1, 0, 0}},
+			{{0, 0, 1}, {-1, 0, 0}}, {{0, 0, -1}, {1, 0, 0}}}) do
+		local nr, u = f[1], f[2]
+		-- v = normal x u, so u x v is the normal: wound as voxel_mesh's (cross(p2
+		-- - p1, p3 - p1) along the normal)
+		local v = {nr[2] * u[3] - nr[3] * u[2], nr[3] * u[1] - nr[1] * u[3],
+			nr[1] * u[2] - nr[2] * u[1]}
+		for _, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}}) do
+			for k = 1, 3 do
+				BOX[#BOX + 1] = nr[k] / 2 + u[k] * c[1] / 2 + v[k] * c[2] / 2
+			end
+			for _, x in ipairs({nr[1], nr[2], nr[3], 1, 1, 1, 1, (c[1] + 1) / 2,
+					(1 - c[2]) / 2}) do
+				BOX[#BOX + 1] = x
+			end
+		end
+	end
 end
 
 -- A look's material ([KIT] stage 4d): plain, metal, glass or glow
@@ -666,15 +701,17 @@ local function voxel_mesh(node, def, size, shape)
 				at(0, 0), at(1, 1), at(0, 1)}}
 		end
 	end
-	local cg = node:CreateComponent("CustomGeometry")
-	cg:SetNumGeometries(#faces)
-	local mats = {}
+	-- ([KIT_ENT_PERF_2] the faces' triangles handed over in one call, each a
+	-- list of set_triangle_geometry's: the parts merge.lua bakes)
+	local mats, lists, parts = {}, {}, {}
 	for g, f in ipairs(faces) do
 		local tile, nr, ext, vs = f[1], f[2], f[3], f[4]
 		local t = tex[tile] or tex[1] or select(2, next(tex))
 		local nx, ny = t.n and t.n.x or 1, t.n and t.n.y or 1
-		local nv = magic.Vector3(nr[1], nr[2], nr[3]):Normalized()
-		cg:BeginGeometry(g - 1, magic.TRIANGLE_LIST)
+		local nl = math.sqrt(nr[1] * nr[1] + nr[2] * nr[2] + nr[3] * nr[3])
+		local nv = {nr[1] / nl, nr[2] / nl, nr[3] / nl}
+		local list = {}
+		lists[g] = list
 		for q = 1, #vs, 3 do
 			local tri = {vs[q], vs[q + 1], vs[q + 2]}
 			-- Wound so it faces its normal: cross(p2 - p1, p3 - p1) along
@@ -690,15 +727,15 @@ local function voxel_mesh(node, def, size, shape)
 				tri[2], tri[3] = tri[3], tri[2]
 			end
 			for _, c in ipairs(tri) do
-				cg:DefineVertex(magic.Vector3(c[1], c[2], c[3]))
-				cg:DefineNormal(nv)
+				local u, v = c[4], c[5]
 				if nx > 1 or ny > 1 then
-					cg:DefineTexCoord(magic.Vector2(
-							(t.s.x + c[4] / ext[1]) / nx,
-							(t.s.y + c[5] / ext[2]) / ny))
-				else
-					cg:DefineTexCoord(magic.Vector2(c[4], c[5]))
+					u, v = (t.s.x + c[4] / ext[1]) / nx, (t.s.y + c[5] / ext[2]) / ny
 				end
+				local o = #list
+				list[o + 1], list[o + 2], list[o + 3] = c[1], c[2], c[3]
+				list[o + 4], list[o + 5], list[o + 6] = nv[1], nv[2], nv[3]
+				list[o + 7], list[o + 8], list[o + 9], list[o + 10] = 1, 1, 1, 1
+				list[o + 11], list[o + 12] = u, v
 			end
 		end
 		local m = magic.Material:new()
@@ -706,12 +743,19 @@ local function voxel_mesh(node, def, size, shape)
 		m:SetTexture(magic.TU_DIFFUSE, t.t)
 		m:SetShaderParameter("MatDiffColor", tint0)
 		m:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
-		cg:SetMaterial(g - 1, m)
 		mats[g] = m
+		-- (what makes the material: one baked with another of the same key shares it)
+		parts[g] = {list = list, mat = m, key = string.format("v|%s|%s|%s|%.4f,%.4f,%.4f",
+				look_tech, t.name, tostring(M.physical and M.physical()), tint0.r,
+				tint0.g, tint0.b)}
 	end
-	cg:Commit()
+	buildat.set_triangle_geometry(node, lists)
+	local cg = node:GetComponent("CustomGeometry")
+	for g, m in ipairs(mats) do
+		cg:SetMaterial(g - 1, m)
+	end
 	cg.castShadows = true
-	return cg, mats
+	return cg, mats, parts
 end
 
 -- [KIT_PLANE] stage 3: a polygon look's mesh in its own frame: its points (x, y)
@@ -993,6 +1037,12 @@ do
 		buildat.set_triangle_geometry(node, lists)
 		local cg = node:GetComponent("CustomGeometry")
 		cg.castShadows = true
+		-- ([KIT_ENT_PERF_2] merge.lua's parts: an untextured one's material the
+		-- look's own, its colour's, draw_look's)
+		local parts = {}
+		for i, l in ipairs(lists) do
+			parts[i] = {list = l}
+		end
 		if tiles then
 			local function tile(i)
 				return tiles[i] or tiles[6] or select(2, next(tiles))
@@ -1017,9 +1067,13 @@ do
 				m:SetShaderParameter("MatSpecColor", look.material == "metal" and
 						magic.Color(0.6, 0.6, 0.6, 30) or magic.Color(0.05, 0.05, 0.05))
 				cg:SetMaterial(i - 1, m)
+				parts[i].mat = m
+				parts[i].key = string.format("p|%s|%s|%s|%s|%.4f,%.4f,%.4f", tech,
+						(g == 2 and top or face).name, tostring(look.material),
+						tostring(M.physical and M.physical()), tint0.r, tint0.g, tint0.b)
 			end
 		end
-		return cg, face_tris, tiles ~= nil, band_tris
+		return cg, face_tris, tiles ~= nil, band_tris, parts
 	end
 end
 
@@ -1065,15 +1119,19 @@ local function draw_look(id, n, look)
 			local at = r and magic.Vector3(r[1], r[2], r[3]) or n.node.position
 			local q = r and magic.Quaternion(r[4], r[5], r[6], r[7]) or
 					n.node.rotation
-			local cg, nt, tex, bt = polygon_mesh(n.body, look, n, def, at, q)
+			local cg, nt, tex, bt, parts = polygon_mesh(n.body, look, n, def, at, q)
 			if not tex then
 				cg:SetMaterial(0, n.mat)
+				parts[1].body_col = true
 			end
+			n.mesh = parts
 			worn = tex
 			n.poly.tris, n.poly.band = nt, tex and bt or nil
 			n.poly.at = tex and {at.x, at.y, at.z, q.w, q.x, q.y, q.z} or nil
 		elseif def then
-			worn = voxel_mesh(n.body, def, look_box(look, false).size, look.shape)
+			local cg, _, parts = voxel_mesh(n.body, def, look_box(look, false).size,
+					look.shape)
+			worn, n.mesh = cg, parts
 		end
 		if wants then
 			log:info("kit: entity " .. id .. (worn and " wears " or
@@ -1082,16 +1140,24 @@ local function draw_look(id, n, look)
 		n.worn = worn
 		-- Not in the registry yet: drawn again once it is
 		n.wear_wanted = wants and not def and wants or nil
+		-- ([KIT_ENT_PERF_2] n.mesh: its triangles in the body's frame for
+		-- merge.lua, each part {list, mat, key} or body_col/edge_col: the look's
+		-- own material, of its colour. simplified: a sphere's none: never merged)
 		if worn or n.poly then
 			-- (drawn)
 		elseif look.shape == "wedge" then
-			wedge(n.body):SetMaterial(0, n.mat)
+			local cg = wedge(n.body)
+			cg:SetMaterial(0, n.mat)
+			-- ([KIT_ENT_PERF_2] as a box: merged, the two are one geometry)
+			cg.castShadows = true
+			n.mesh = {{list = WEDGE, body_col = true}}
 		else
 			local m = n.body:CreateComponent("StaticModel")
 			m.model = magic.cache:GetResource("Model", "Models/" ..
 					(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
 			m.material = n.mat
 			m.castShadows = true
+			n.mesh = look.shape ~= "sphere" and {{list = BOX, body_col = true}} or nil
 		end
 		-- [KIT_COLLECTIBLE] edge = "#rrggbb": a box's twelve edges as boards
 		-- of that colour (a crate's frame), in the body, so a when's scale
@@ -1104,6 +1170,10 @@ local function draw_look(id, n, look)
 			local w = math.min(s[1], s[2], s[3]) / 8
 			local out = w / 4
 			n.edge_mat = material(look.material)
+			local el = {}
+			if n.mesh then
+				n.mesh[#n.mesh + 1] = {list = el, edge_col = true}
+			end
 			for axis = 1, 3 do
 				for _, q in ipairs({{-1, -1}, {-1, 1}, {1, -1}, {1, 1}}) do
 					local pos, sc, k = {0, 0, 0}, {}, 0
@@ -1119,6 +1189,15 @@ local function draw_look(id, n, look)
 					local e = n.body:CreateChild("Edge")
 					e.position = v3(pos)
 					e.scale = v3(sc)
+					-- (in the body's frame: a box's normals stay its axes)
+					for o = 0, #BOX - 1, 12 do
+						for k = 1, 3 do
+							el[#el + 1] = pos[k] + sc[k] * BOX[o + k]
+						end
+						for k = 4, 12 do
+							el[#el + 1] = BOX[o + k]
+						end
+					end
 					local m = e:CreateComponent("StaticModel")
 					m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 					m.material = n.edge_mat
@@ -1228,12 +1307,26 @@ local function draw_look(id, n, look)
 		col = magic.Color(col.r, col.g, col.b, 0.4)
 	end
 	n.mat:SetShaderParameter("MatDiffColor", col)
+	-- ([KIT_ENT_PERF_2] the look's own materials' keys for merge.lua: what
+	-- makes them, its colour now)
+	local mk = string.format("m|%s|%.4f,%.4f,%.4f,%.4f", tostring(look.material),
+			col.r, col.g, col.b, col.a)
+	local ek = mk
 	if n.edge_mat then
 		local ec = color(look.edge, magic.Color(0.3, 0.2, 0.1))
 		if M.physical and M.physical() and look.material ~= "glow" then
 			ec = magic.Color(ec.r ^ 2.2, ec.g ^ 2.2, ec.b ^ 2.2, ec.a)
 		end
 		n.edge_mat:SetShaderParameter("MatDiffColor", ec)
+		ek = string.format("m|%s|%.4f,%.4f,%.4f,%.4f", tostring(look.material),
+				ec.r, ec.g, ec.b, ec.a)
+	end
+	for _, p in ipairs(n.mesh or {}) do
+		if p.body_col then
+			p.mat, p.key = n.mat, mk
+		elseif p.edge_col then
+			p.mat, p.key = n.edge_mat, ek
+		end
 	end
 	-- [KIT_LOOK_MATERIAL] (a voxel material is its own colours: col is
 	-- unused there)
@@ -1551,6 +1644,61 @@ local function still(id, n)
 			n.slide_to or n.wear_wanted or n.ghost or n.see_through or
 			n.attach_to or P.preview[id] or P.pose[id] or (pn and pn.slide_to))
 end
+-- [KIT_ENT_PERF_2] (kit_plan 4z37zzm) A client part with skip_offscreen = true
+-- (a field of its table, api.h): its on_update not called while its entity
+-- is out of the play camera's view (its look's box round its place, a metre
+-- spare) or past the looks' reach (M.look_reach); in edit mode or with no
+-- camera, called as ever. Its other handlers are called as ever.
+-- simplified: the camera of the frame before (controls.lua places it after)
+local VW = {frame = -1}
+local function offscreen(n)
+	if VW.frame ~= frame_no then
+		VW.frame, VW.ok = frame_no, false
+		local cn = not E.editing and O.camera
+		local cam = cn and cn:GetComponent("Camera")
+		if cam then
+			local m = cn.worldTransform
+			VW.m = {m.m00, m.m01, m.m02, m.m03, m.m10, m.m11, m.m12, m.m13, m.m20,
+				m.m21, m.m22, m.m23}
+			local zoom = math.max(1e-3, cam.zoom)
+			local a = cam.aspectRatio
+			a = (a and a > 0.1) and a or 2
+			VW.ortho = cam.orthographic
+			if VW.ortho then
+				VW.hy = cam.orthoSize / 2 / zoom
+				VW.hx = VW.hy * a
+			else
+				VW.ty = math.tan(math.rad(cam.fov) / 2) / zoom
+				VW.tx = VW.ty * a
+			end
+			VW.far = math.min(cam.farClip, M.look_reach or math.huge)
+			VW.ok = true
+		end
+	end
+	if not VW.ok then
+		return false
+	end
+	local p = n.at
+	if not p then
+		local np = n.node.position
+		p = {x = np.x, y = np.y, z = np.z}
+	end
+	local s = n.box and n.box.size or {0, 0, 0}
+	local r = math.sqrt(s[1] * s[1] + s[2] * s[2] + s[3] * s[3]) / 2 + 1
+	local m = VW.m
+	local dx, dy, dz = p.x - m[4], p.y - m[8], p.z - m[12]
+	local x = dx * m[1] + dy * m[5] + dz * m[9]
+	local y = dx * m[2] + dy * m[6] + dz * m[10]
+	local z = dx * m[3] + dy * m[7] + dz * m[11]
+	if z < -r or z - r > VW.far then
+		return true
+	end
+	if VW.ortho then
+		return math.abs(x) > VW.hx + r or math.abs(y) > VW.hy + r
+	end
+	return math.abs(x) > z * VW.tx + r * math.sqrt(1 + VW.tx * VW.tx) or
+			math.abs(y) > z * VW.ty + r * math.sqrt(1 + VW.ty * VW.ty)
+end
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
 	local lines = {}
@@ -1596,6 +1744,7 @@ local function update_play(_, data)
 	local busy = {}
 	for id, n in pairs(P.nodes) do
 		n.still = still(id, n)
+		M.merge_seen(n, n.still)
 		if n.still then
 			layers = layers or type(n.show.parallax) == "table"
 		else
@@ -1754,6 +1903,7 @@ local function update_play(_, data)
 			calm = false
 		end
 		n.calm = calm and (n.calm or 0) + 1 or 0
+		M.merge_busy(n, calm)
 		if n.text then
 			-- [KIT_INPUT_ACTIONS] {key:use}: this player's key for it
 			local v = shown(parse(n.node:GetVar("kit:" ..
@@ -1845,12 +1995,22 @@ local function update_play(_, data)
 					end
 				end
 			end
+			local off = nil
 			for _, part in ipairs(parts) do
-				call(n, part, "on_update", dt)
+				-- ([KIT_ENT_PERF_2] a part's skip_offscreen: not out of view)
+				if part.skip_offscreen == true and off == nil then
+					off = offscreen(n)
+				end
+				if not (off and part.skip_offscreen == true) then
+					call(n, part, "on_update", dt)
+				else
+					LK.skipped = (LK.skipped or 0) + 1
+				end
 			end
 		end
 	end
 	par_any = layers
+	M.merge_flush()
 	table.sort(lines, function(a, b) return a[1] < b[1] end)
 	local t = {}
 	for _, l in ipairs(lines) do
@@ -1902,9 +2062,11 @@ end
 magic.SubscribeToEvent("command_seq:kit_looks", function()
 	local f = math.max(1, LK.frames)
 	log:info(string.format("kit: looks: %d frames, %.1f read a frame of %.1f, " ..
-			"%.2f ms a frame; frames %.1f ms, the worst %.1f", LK.frames, LK.read / f,
-			LK.looks / f, LK.us / f / 1000, (LK.dt or 0) / f / 1000, (LK.worst or 0) / 1000))
+			"%.2f ms a frame; frames %.1f ms, the worst %.1f; %.1f on_update skipped a " ..
+			"frame (off screen)", LK.frames, LK.read / f, LK.looks / f, LK.us / f / 1000,
+			(LK.dt or 0) / f / 1000, (LK.worst or 0) / 1000, (LK.skipped or 0) / f))
 	LK.frames, LK.read, LK.looks, LK.us, LK.dt, LK.worst = 0, 0, 0, 0, 0, 0
+	LK.skipped = 0
 end)
 -- [KIT_ENT_PERF] (a check's: "event kit_look_where <id> ...": each entity's look as
 -- drawn, its node's place and turn read back (under the scene's root), one frame's)
@@ -3446,6 +3608,14 @@ do
 	assert(ok and type(install) == "function", "kit: environment.lua: " ..
 			tostring(err))
 	install({M = M, O = O, log = log})
+end
+
+-- ---- [KIT_ENT_PERF_2] Looks drawn merged: merge.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/merge.lua")
+	assert(ok and type(install) == "function", "kit: merge.lua: " ..
+			tostring(err))
+	install({M = M, P = P, log = log, parent_id = parent_id})
 end
 
 -- ---- The keys as named actions: input.lua ([KIT_INPUT_ACTIONS])

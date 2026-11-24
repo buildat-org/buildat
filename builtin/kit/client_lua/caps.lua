@@ -385,7 +385,8 @@ local function entity_caps()
 				slide = n.slide_at, hidden = n.hidden, seen = n.see_through}
 			n.caps_fp = f
 			local body = n.body
-			if body and body.enabled and n.box then
+			-- ([KIT_ENT_PERF_2] one merged hidden: merge.lua's draws it)
+			if body and (body.enabled or n.mg_in) and n.box then
 				local m = body.worldTransform
 				local lo, hi, pts = math.huge, -math.huge, {}
 				for _, sy in ipairs({0.5, -0.5}) do
