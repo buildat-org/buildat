@@ -16040,34 +16040,48 @@ struct Module: public interface::Module, public Interface
 				return v->getVoxelAt(q.getX(), q.getY(), q.getZ()).data;
 			};
 			sv_<pv::Vector3DInt32> done;
+			// [KIT_RTS] (4z37zzo) The sections not generated yet that the
+			// regions reach: generated here (base()'s volume, as
+			// put_sections does), as the generator's own arriving later
+			// would write over the cells (inside its section its volume
+			// wins). The cells go into the volume, written in after the
+			// loops
+			std::set<std::tuple<int, int, int>> fresh;
 			auto put = [&](const pv::Vector3DInt32 &q, uint32_t v) -> bool {
 				uint32_t old = 0;
+				const pv::Vector3DInt16 sp = section_of(w, q);
+				const auto sk = std::make_tuple(sp.getX(), sp.getY(), sp.getZ());
 				const bool have = loaded(w, q);
 				// (air where the generator makes air: nothing to write;
 				// [KIT_RTS] (4z37zzo) an underground World's is ground)
 				if(!have && (v == air || v == 0) && (base(q) == air ||
 						base(q) == 0))
 					return false;
-				if(have && voxel_id(w, q, old) && old == v)
+				if(have && !fresh.count(sk) && voxel_id(w, q, old) && old == v)
 					return false;
-				const pv::Vector3DInt16 sp = section_of(w, q);
 				if(sp.getY() < WORLD_SECTION_Y0 || sp.getY() > WORLD_SECTION_Y1)
 					return false;
-				// [KIT_RTS] (4z37zzo) A section not generated yet is generated
-				// here (base()'s volume, as put_sections does): the
-				// generator's own arriving later would write over the cells
-				// (inside its section its volume wins)
-				if(!m_w->wp.heightmap() && !w->is_section_generated(sp)){
+				if(!fresh.count(sk) && !m_w->wp.heightmap() &&
+						!w->is_section_generated(sp)){
 					base(q);
 					w->load_section_no_generate(sp);
 					if(w->is_section_loaded(sp)){
 						w->set_section_generated(sp);
-						w->set_volume(*gen[std::make_tuple(sp.getX(),
-								sp.getY(), sp.getZ())], true);
-						if(m_w->sky)
-							w->relight_region_later(
-									w->get_section_region_voxels(sp));
+						fresh.insert(sk);
 					}
+				}
+				if(fresh.count(sk)){
+					interface::VoxelVolume &vol = *gen[sk];
+					old = vol.getVoxelAt(q.getX(), q.getY(), q.getZ()).data;
+					if(old == v)
+						return false;
+					if(back)
+						back->cells.emplace(std::make_tuple(q.getX(), q.getY(),
+								q.getZ()), old);
+					vol.setVoxelAt(q.getX(), q.getY(), q.getZ(),
+							interface::VoxelInstance(v));
+					done.push_back(q);
+					return true;
 				}
 				if(!hm_section(w, q) && !loaded(w, q))
 					w->load_or_generate_section(sp);
@@ -16102,6 +16116,25 @@ struct Module: public interface::Module, public Interface
 					continue;
 				world::Region::unkey(c.first, x, y, z);
 				wrote += put(pv::Vector3DInt32(x, y, z), c.second);
+			}
+			// The fresh sections in: merged first, so that Kit's watch (a
+			// Running round's) copies the section as the start has it at
+			// the overwrite and not the empty one load_section_no_generate()
+			// made (Stop put that back: the ground dug by the game came
+			// back as air); the overwrite makes it edited (saved, kept)
+			for(const auto &k : fresh){
+				const pv::Vector3DInt16 sp(std::get<0>(k), std::get<1>(k),
+						std::get<2>(k));
+				const pv::Region r = w->get_section_region_voxels(sp);
+				w->merge_volume(*gen[k], true, &r);
+				w->set_volume(*gen[k], true);
+				if(m_w->sky)
+					w->relight_region_later(r);
+			}
+			for(const pv::Vector3DInt32 &q : done){
+				const pv::Vector3DInt16 sp = section_of(w, q);
+				if(fresh.count(std::make_tuple(sp.getX(), sp.getY(), sp.getZ())))
+					mark(w, ref, q, 'k', by);
 			}
 			symmetry::Config cf;
 			if(!done.empty() && sym_scene(ref, cf))
