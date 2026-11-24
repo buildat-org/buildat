@@ -629,6 +629,9 @@ struct Peer
 	// [KIT_JOIN_ORIGIN_POSITION] Joined, the join's runs (a spawner's
 	// teleport) not done yet: in no zone, its place the app's
 	bool spawning = false;
+	// [KIT_RTS] Through round_join(), its runs (a team's join among them) not
+	// done yet: under fog, while in no team, they see none of the fogged
+	bool joining = false;
 	// [KIT_LOBBY_OUT_OF_PLAY] In a kit/lobby's lobby or result (its
 	// out_of_play on), not editing: lobby_out_tick()'s
 	bool lobby_out = false;
@@ -18744,6 +18747,8 @@ struct Module: public interface::Module, public Interface
 				replicate_state(e, r.comp, k);
 			if(type == CHECKPOINT_TYPE && k == "last")
 				share_checkpoints(e, in.state.get("last"));
+			if(t.team && k == "members")
+				m_fog_due.insert(m_active); // [KIT_RTS] after the queue
 		}
 		// [KIT_TEAM_JOIN_LEAVES_OTHERS] A team joined: the player out of the
 		// scene's other teams (respawn_at takes the last one they are in)
@@ -26729,7 +26734,12 @@ struct Module: public interface::Module, public Interface
 		// [KIT_JOIN_ORIGIN_POSITION] the joins' runs done: placed
 		if(m_queue.empty())
 			for(auto &p : m_peers)
-				p.second.spawning = false;
+				p.second.spawning = p.second.joining = false;
+		// [KIT_RTS] a team joined or left in them: the fog's filter at once
+		if(m_fog_due.count(m_active)){
+			PhaseTimer t(*this, PH_FOG);
+			fog_tick();
+		}
 		// simplified: the runtime row is written after each tick that
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
@@ -27274,7 +27284,8 @@ struct Module: public interface::Module, public Interface
 		// [KIT_RTS] under fog of war (its scene's kit/game_rules' fog, in a team,
 		// not in the tools): the client darkens what its team's units do not see
 		auto fpi = m_fog_peers.find(peer);
-		if(fpi != m_fog_peers.end() && fpi->second.fogged)
+		if(fpi != m_fog_peers.end() && fpi->second.fogged &&
+				!fpi->second.team.empty())
 			c.set("fog", true);
 		auto bi = m_bodies.find(peer);
 		if(bi != m_bodies.end() && !bi->second.type.empty()){
@@ -31256,7 +31267,12 @@ struct Module: public interface::Module, public Interface
 	// for a unit made (fog_new_node() keeps it back meanwhile). replicate's
 	// filter answers from m_fog_nodes, under m_fog_mutex, on its own thread: a
 	// peer not worked out yet (just joined) gets none of the scene's fogged
-	// entities.
+	// entities, nor one in no team while its join's runs wait (Peer::joining:
+	// a team's join in on_join comes before they see all as a spectator). A
+	// team's members changed: worked out again after the tick's queue.
+	// simplified: a team joined later than the join's runs (a c:after, a
+	// lobby's button) follows a spectator's view of all; a hold until the
+	// scene says who plays is the upgrade
 	// simplified: a sphere through rock, no line of sight (a voxel walk from
 	// each unit at a low rate is the upgrade); O(seers x units) with squared
 	// distances (a grid bucket is the upgrade past a few hundred units)
@@ -31264,8 +31280,8 @@ struct Module: public interface::Module, public Interface
 	static constexpr double MAX_VISION = 64;
 	struct FogPeer
 	{
-		// Under fog (in a team, placed, not in the tools), in which scene, their
-		// team's name; the entities not sent to them
+		// Under fog (in a team, placed, not in the tools; or held, team ""), in
+		// which scene, their team's name; the entities not sent to them
 		bool fogged = false;
 		ss_ scene, team;
 		std::set<uint64_t> hidden;
@@ -31475,15 +31491,19 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		// Each peer's team: under the fog in a fog's scene, placed, not in the
-		// tools, not the server's camera, in a team
+		// tools, not the server's camera, in a team; held: in none yet, their
+		// join's runs not done (they see none of the fogged)
 		std::set<std::pair<ss_, ss_>> views; // (scene, team)
 		std::map<size_t, ss_> who; // "" none: sees all
+		std::set<size_t> held;
 		for(auto &p : m_peers){
 			const Peer &pe = p.second;
 			const bool fs = on.count(pe.scene) && pe.player && !pe.editing &&
 					!pe.still && p.first != m_cam.peer;
 			const ss_ team = fs ? team_name(team_of_player(pe.player)) : ss_();
 			who[p.first] = team;
+			if(fs && team.empty() && pe.joining && m_session.running)
+				held.insert(p.first);
 			if(!team.empty())
 				views.insert(std::make_pair(pe.scene, team));
 		}
@@ -31533,12 +31553,15 @@ struct Module: public interface::Module, public Interface
 			if(fi == m_fog_peers.end())
 				f.hidden = fogged_in[p.second.scene];
 			std::set<uint64_t> now_hidden;
+			const bool fogged = !team.empty() || held.count(peer);
 			if(!team.empty())
 				now_hidden = hidden[std::make_pair(p.second.scene, team)];
+			else if(fogged)
+				now_hidden = fogged_in[p.second.scene];
 			const bool same = fi != m_fog_peers.end() &&
-					f.fogged == !team.empty() && f.scene == p.second.scene &&
+					f.fogged == fogged && f.scene == p.second.scene &&
 					f.hidden == now_hidden;
-			f.fogged = !team.empty();
+			f.fogged = fogged;
 			f.scene = p.second.scene;
 			f.team = team;
 			if(same)
@@ -46644,6 +46667,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		const ss_ name = pi->second.name, scene = pi->second.scene;
 		const uint64_t pid = ensure_player(name);
+		pi->second.joining = true; // [KIT_RTS]
 		bool keep_inventory = false, keep_position = false;
 		between_plays(keep_inventory, keep_position);
 		if(m_session.round.insert(name).second){

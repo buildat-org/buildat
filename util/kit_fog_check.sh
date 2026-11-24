@@ -10,7 +10,9 @@
 # off; the player joins Blue (a check type's on_join), kit/controls' camera
 # "rts". One scripted client on a headless weston's Xwayland; the entities
 # it has by "event kit_rts_nodes":
-#   - at the start: Blue's 30 and 75, no Red one nor 70-74;
+#   - at the start: Blue's 30 and 75, no Red one nor 70-74, at each look
+#     from the join on; no Red one's kit:track ("a track for entity") before
+#     the order (the join's window: a teamless peer sees all);
 #   - the Blue units ordered next to Red (a box, a right click): Red 40 and
 #     its part 70 come; 69 does not;
 #   - ordered away again: 40-74 gone;
@@ -228,11 +230,17 @@ compose 1
 
 SL=$t/srv.log
 run fogboss "$SL"
+# (from the join on, each look: no Red one drawn; and no Red track ever came
+# before the order below, which is what a teamless pass at the join sent)
+red_tracks() { grep -aoE "a track for entity (4[0-9]|5[0-9]|6[0-9]|7[0-4])$" "$CL" | grep -o "[0-9]*$" | tr '\n' ' '; }
+wait_nodes '[ -z "$(red_in)" ] || fail "Red ones on the client at the start: $(red_in)"
+	has 39 && has 75' 20 || fail "Blue's units not all there: $NODES"
 wait_for_log "$CL" "kit: rts: fog on" 30 || fail "the client's fog not on ($CL)"
 wait_for_log "$CL" "kit: rts: fog: [0-9]+ sight circles" 30 || fail "no sight circles ($CL)"
-wait_nodes 'has 39 && has 75' 20 || fail "Blue's units not all there: $NODES"
+nodes
 for id in $(seq 10 39) 75; do has $id || fail "Blue's $id not on the client: $NODES"; done
 [ -z "$(red_in)" ] || fail "Red ones on the client at the start: $(red_in)"
+[ -z "$(red_tracks)" ] || fail "Red tracks reached the client at the start: $(red_tracks)($CL)"
 echo "start: Blue's 31 there, no Red one"
 printf 'frames 30\nscreenshot %s\n' "$t/fog_start.png" > "$C"
 # The Blue units next to Red: a box over the view, an order at (0, 0.5, 0)
