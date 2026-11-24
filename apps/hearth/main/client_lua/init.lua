@@ -1226,6 +1226,10 @@ show_topic = function(id)
 			end)
 		end)
 		if me.moderator then
+			-- The topic's settings: two rows of two under the bar (in the
+			-- bar they ran off the window's edge)
+			bar = row(w)
+			local bar2 = row(w)
 			button(bar, t.tracker and "Not a tracker" or "Make it a tracker",
 					function()
 				req("topic_tracker", {topic = id, on = not t.tracker}, redraw)
@@ -1240,7 +1244,7 @@ show_topic = function(id)
 							t.category == "servers" and "" or "servers"}, redraw)
 				end)
 				-- [LIVELY_MENU] Its threads on every launcher's Home
-				button(bar, t.category == "announcements" and
+				button(bar2, t.category == "announcements" and
 						"Not announcements" or "Announcements",
 						function()
 					req("topic_category", {topic = id, category =
@@ -1250,7 +1254,7 @@ show_topic = function(id)
 			end
 			-- [HEARTH_DEVLOG]; a Hearth older than that has no mark
 			if t.mod_threads ~= nil then
-				button(bar, t.mod_threads and "Anyone starts threads" or
+				button(bar2, t.mod_threads and "Anyone starts threads" or
 						"Moderators start threads", function()
 					req("topic_mod_threads", {topic = id,
 							on = not t.mod_threads}, redraw)
