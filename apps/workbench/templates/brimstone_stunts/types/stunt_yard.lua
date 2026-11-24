@@ -6,8 +6,9 @@
 -- (metres of loose gravel on the bend's outside, the wall moved out by it,
 -- tapering back along the straights either side, kept out between two
 -- bends' on one side when under JOIN m of wall is left), mud and an oil slick
--- across the line, the finish line 6 m ahead of the race's pole (the
--- local/stunt_race in its scene: its place), a checkpoint in the middle of
+-- across the line, the finish line (wall to wall, the run-off's too) 6 m
+-- ahead of the race's pole (the local/stunt_race in its scene: its place),
+-- a checkpoint in the middle of
 -- the straight into each corner whose `checkpoint` is 1 (in the lap's order
 -- from the finish, linked to that race's checkpoint), the yard's fence and
 -- junk scattered off the road by `seed`, kept clear of every hand-placed
@@ -889,7 +890,10 @@ return {
 		end
 		-- The finish line: white and black across the line 6 m ahead of the
 		-- race's pole (the line's point nearest it)
-		local start = 0
+		-- ([KIT_STUNTS] and across the run-off beside it out to the walls: a
+		-- car out of the bend onto it laps too; those tiles built last, after
+		-- the racing line, so what was built before keeps its ids)
+		local start, run_tiles = 0, {}
 		if race and race.pos then
 			local best
 			for k, p in ipairs(LINE) do
@@ -909,6 +913,33 @@ return {
 					poly("the finish line", {{bx, bz}, {bx + dx, bz + dz}, {bx + dx + 2 * nx, bz + dz + 2 * nz},
 						{bx + 2 * nx, bz + 2 * nz}}, Y_PATCH, D_PATCH, {color = (k + j) % 2 == 0 and
 						"#f2f2f2" or "#111111", floor = true, surface = "finish"})
+				end
+			end
+			-- (each 1 m row's run-off on a side: the narrower of its two ends',
+			-- so on a taper no tile goes into the wall)
+			local q = LINE[start % N + 1]
+			local pc = P[q.pi]
+			local function ro(side, d)
+				if pc.turn ~= 0 then
+					return pc.pts[1][side == 1 and 5 or 6]
+				end
+				d = math.max(0, math.min(pc.len, d))
+				return pc.off(side, d)
+			end
+			for _, side in ipairs({1, -1}) do
+				for j = 0, 1 do
+					local r = math.min(ro(side, q.d + j), ro(side, q.d + j + 1))
+					local k = side == 1 and 6 or -1
+					for a = 0, r - 0.05, 2 do
+						-- (across from W + a to W + a + w on the left, mirrored on the right)
+						local w = math.min(2, r - a)
+						local u0 = side == 1 and W + a or -W - a - w
+						local bx, bz = x + dx * j + nx * u0, z + dz * j + nz * u0
+						run_tiles[#run_tiles + 1] = {{{bx, bz}, {bx + dx, bz + dz},
+							{bx + dx + w * nx, bz + dz + w * nz}, {bx + w * nx, bz + w * nz}},
+							(k + j) % 2 == 0 and "#f2f2f2" or "#111111"}
+						k = k + side
+					end
 				end
 			end
 		else
@@ -1014,6 +1045,10 @@ return {
 		-- (4z37i (4)) The racing line: the race's bots drive along it
 		c:child{type = "kit/path", name = "the racing line", pos = {0, Y_ROAD, 0},
 			params = {points = racing_line(LINE, W)}}
+		for _, t in ipairs(run_tiles) do
+			poly("the finish line", t[1], Y_PATCH, D_PATCH, {color = t[2], floor = true,
+				surface = "finish"})
+		end
 		local kinds = {}
 		for _, f in ipairs(F) do
 			kinds[#kinds + 1] = string.format("%s at %.0f,%.0f", f.kind, fx(f, f.len / 2), f.zc)

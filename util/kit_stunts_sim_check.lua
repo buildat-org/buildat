@@ -356,3 +356,29 @@ for k, cp in ipairs(cps) do
 end
 print(string.format("ok: put back at each of the %d checkpoints after a wreck, it drives off its " ..
 	"floor there", #cps))
+
+-- Across the finish line with the lap open, at 20 m/s along it (+z, x -100
+-- its middle): a lap on the road and on the bend's run-off out to its wall
+-- (the corners' default: 4 m of run-off on the left there, the wall at -110).
+-- (alpha.71's playtest: two crossings at x -108 and -105.5 counted none, the
+-- line the road's width only)
+for _, x in ipairs({-100, -105.5, -107, -108.6}) do
+	local p = defaults()
+	local s = {pos = {x, 0.5, -24}, yaw = 0, vars = {lap_open = true}}
+	local inp = {{f = 1, r = 0, jump = 0}}
+	MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+	s.c[4] = 20
+	local laps = 0
+	for _ = 1, p.rate do
+		MV.steps(car, s, inp, 1 / p.rate, p.substeps, yw, p)
+		for _, e in ipairs(s.events or {}) do
+			local name = type(e) == "table" and e[1] or e
+			assert(name ~= "smash" and name ~= "crash", string.format("across the line at x %.1f: %s",
+				x, name))
+			laps = laps + (name == "lap" and 1 or 0)
+		end
+	end
+	assert(s.pos[3] > -10 and laps == 1, string.format("across the finish line at x %.1f (now " ..
+		"%.1f,%.1f): %d laps", x, s.pos[1], s.pos[3], laps))
+end
+print("ok: across the finish line on the road and on the run-off out to its wall, a lap each")
