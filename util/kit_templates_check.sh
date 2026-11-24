@@ -75,6 +75,17 @@ for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships
 			assert "/" not in v or v in known, (name, r["name"], v)
 		key = re.sub(r"\W+", "_", scene(r) + "_" + r["name"])
 		print("%s_%s=%d" % (pre, key, r["id"]))
+# Every template's string params within kit.cpp's MAX_STRING (256 bytes): a
+# longer one fails the whole template's load (Airships and Ship did from
+# alpha.62, their help texts grown by {key:...}). simplified: by the value,
+# not the param's type; a song is its own type, longer by design
+import glob
+for f in glob.glob(here + "/apps/workbench/templates/*/composition.json"):
+	for r in json.load(open(f))["entities"]:
+		for c in r.get("components", []):
+			for k, v in c.get("params", {}).items():
+				assert not isinstance(v, str) or k == "song" or len(v.encode()) <= 256, \
+						(f, r["id"], k, len(v.encode()))
 PY
 . "$t/ids.sh"
 echo "ok: the templates' files"
