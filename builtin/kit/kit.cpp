@@ -2922,6 +2922,10 @@ struct Module: public interface::Module, public Interface
 		// s.pose last set on its node ("kit_mpose")
 		bool car = false;
 		ss_ mpose_sent;
+		// [KIT_ENT_PERF] a native "path" movement's (native_path()): the cells
+		// round it as last read, when (us)
+		creatures::Grid near;
+		int64_t near_us = 0;
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
@@ -18722,6 +18726,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &pm = fx.get("propose");
 		if(pm.is_object() || pm.is_false())
 			propose_fx(e, type, pm);
+		// [KIT_ENT_PERF] c:fire
+		const json::Value &fires = fx.get("fire");
+		for(unsigned i = 0; i < fires.size(); i++)
+			fire_fx(e, type, r.by, fires.at(i));
 		// [KIT_GUIDE_BOTS] c:use (a bot's)
 		if(fx.get("use").is_number() && m_types[type].decl.get("bot").is_true())
 			bot_use(e.id, (uint64_t)std::max(0.0, fx.get("use").as_number()));
@@ -26328,6 +26336,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!m_session.running){
 			m_projectiles.clear(); // [KIT_TOOLS_2]
+			m_fire_at.clear(); // [KIT_ENT_PERF]
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
 			for(const Write &w : writes)
@@ -28274,6 +28283,21 @@ struct Module: public interface::Module, public Interface
 		std::vector<uint64_t> unseat;
 		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
 		std::map<ss_, std::pair<double, bool>> planes;
+		// [KIT_ENT_PERF] each scene's native units as the tick begins (native_path())
+		std::map<ss_, sv_<NativeUnit>> natives;
+		for(auto &dp : m_drives){
+			const Drive &d = dp.second;
+			const json::Value &sp = d.state.get("pos");
+			if(!native(d) || !pos_ok(sp))
+				continue;
+			NativeUnit u;
+			u.id = dp.first;
+			for(unsigned k = 0; k < 3; k++)
+				u.p[k] = sp.at(k).as_number();
+			u.r = num(d.params, "width", 0.8, 0.1, 3) / 2;
+			u.h = num(d.params, "height", 0.9, 0.1, 4);
+			natives[d.scene].push_back(u);
+		}
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -28353,71 +28377,76 @@ struct Module: public interface::Module, public Interface
 				d.state.set("vars", bb->vars.deepcopy());
 			else if(bb && !d.state.get("vars").is_undefined())
 				d.state.del_key("vars");
-			ss_ o = "Sreturn {type=";
-			lua_lit(json::Value(d.type), o);
-			o += ",params=";
-			lua_lit(d.params, o);
-			o += ",state=";
-			lua_lit(d.state, o);
-			o += ",dt=";
-			lua_lit(json::Value(dt), o);
-			o += ",sub="+itos((int64_t)num(d.params, "substeps", 1, 1, 8));
-			o += ",inputs={";
-			// [KIT_MOVE_DRAW] i.speed: a driving bot's c:speed factor, else 1
-			ss_ spd = "1";
-			if(bb){
-				spd.clear();
-				lua_lit(json::Value(bb->speed), spd);
-			}
-			for(int k = 0; k < n; k++)
-				o += in.substr(0, in.size() - 1)+",t="+
-						itos((int64_t)std::floor((d.t + k * dt) * 1000))+",speed="+spd+"},";
-			o += "},world=";
-			double v2 = 0;
-			const json::Value &sv = d.state.get("vel");
-			for(unsigned k = 0; k < 3 && sv.is_array() && k < sv.size(); k++)
-				if(sv.at(k).is_number())
-					v2 += sv.at(k).as_number() * sv.at(k).as_number();
-			const double reach = std::min(16.0, (std::sqrt(v2) + 10) * n / rate);
-			// [KIT_LEFTOVERS_1116] a creature (a bot too) held to kit/controls'
-			// plane as the players' bodies are (move.lua's W:hold after each
-			// step); a vehicle not
-			double plane = NAN;
-			bool level = false;
-			if(d.creature){
-				auto pi = planes.find(d.scene);
-				if(pi == planes.end()){
-					bool hz;
-					const double pz = plane_of(d.scene, &hz);
-					pi = planes.insert(std::make_pair(d.scene, std::make_pair(pz,
-							hz))).first;
+			// [KIT_ENT_PERF] a native one's steps here (not held, on no deck)
+			if(native(d) && !held && !d.deck)
+				native_path(d, e, n, dt, natives[d.scene]);
+			else {
+				ss_ o = "Sreturn {type=";
+				lua_lit(json::Value(d.type), o);
+				o += ",params=";
+				lua_lit(d.params, o);
+				o += ",state=";
+				lua_lit(d.state, o);
+				o += ",dt=";
+				lua_lit(json::Value(dt), o);
+				o += ",sub="+itos((int64_t)num(d.params, "substeps", 1, 1, 8));
+				o += ",inputs={";
+				// [KIT_MOVE_DRAW] i.speed: a driving bot's c:speed factor, else 1
+				ss_ spd = "1";
+				if(bb){
+					spd.clear();
+					lua_lit(json::Value(bb->speed), spd);
 				}
-				plane = pi->second.first;
-				level = pi->second.second;
+				for(int k = 0; k < n; k++)
+					o += in.substr(0, in.size() - 1)+",t="+
+							itos((int64_t)std::floor((d.t + k * dt) * 1000))+",speed="+spd+"},";
+				o += "},world=";
+				double v2 = 0;
+				const json::Value &sv = d.state.get("vel");
+				for(unsigned k = 0; k < 3 && sv.is_array() && k < sv.size(); k++)
+					if(sv.at(k).is_number())
+						v2 += sv.at(k).as_number() * sv.at(k).as_number();
+				const double reach = std::min(16.0, (std::sqrt(v2) + 10) * n / rate);
+				// [KIT_LEFTOVERS_1116] a creature (a bot too) held to kit/controls'
+				// plane as the players' bodies are (move.lua's W:hold after each
+				// step); a vehicle not
+				double plane = NAN;
+				bool level = false;
+				if(d.creature){
+					auto pi = planes.find(d.scene);
+					if(pi == planes.end()){
+						bool hz;
+						const double pz = plane_of(d.scene, &hz);
+						pi = planes.insert(std::make_pair(d.scene, std::make_pair(pz,
+								hz))).first;
+					}
+					plane = pi->second.first;
+					level = pi->second.second;
+				}
+				// [KIT_BOT_DRIVE] ([KIT_TOP_DOWN] (8)) a driving bot meets the others'
+				// bodies as a player's does ([KIT_3D_GAINS_1] (4z38) a steered creature's
+				// movement asking too: a barrel the cars knock about; they meet it not)
+				ss_ others;
+				if((bb || d.creature) && level &&
+						m_types[d.type].decl.get("movement").get("bodies").is_true())
+					bodies_lit(others, d.scene, 0, e.id, pos, r + reach);
+				if(d.deck)
+					deck_snapshot(o, d, e, pos, r, h, reach);
+				else
+					snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level, others);
+				o += "}";
+				ss_ answer, why;
+				bool runaway = false;
+				int64_t used = 0;
+				const bool ok = box_call(o, answer, why, &runaway, &used);
+				spent += used;
+				if(!ok){
+					log_w(MODULE, "Entity %s's %s: %s", cs(itos(e.id)), cs(d.type), cs(why));
+					d.failed = true;
+					continue;
+				}
+				d.state = json::load_string(answer.c_str());
 			}
-			// [KIT_BOT_DRIVE] ([KIT_TOP_DOWN] (8)) a driving bot meets the others'
-			// bodies as a player's does ([KIT_3D_GAINS_1] (4z38) a steered creature's
-			// movement asking too: a barrel the cars knock about; they meet it not)
-			ss_ others;
-			if((bb || d.creature) && level &&
-					m_types[d.type].decl.get("movement").get("bodies").is_true())
-				bodies_lit(others, d.scene, 0, e.id, pos, r + reach);
-			if(d.deck)
-				deck_snapshot(o, d, e, pos, r, h, reach);
-			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level, others);
-			o += "}";
-			ss_ answer, why;
-			bool runaway = false;
-			int64_t used = 0;
-			const bool ok = box_call(o, answer, why, &runaway, &used);
-			spent += used;
-			if(!ok){
-				log_w(MODULE, "Entity %s's %s: %s", cs(itos(e.id)), cs(d.type), cs(why));
-				d.failed = true;
-				continue;
-			}
-			d.state = json::load_string(answer.c_str());
 			d.t += n * dt;
 			// [KIT_BOT_DRIVE] its steps' events as a player's (by "bot:<id>"),
 			// its s.pose for the others' draw hook
@@ -28809,6 +28838,160 @@ struct Module: public interface::Module, public Interface
 					wps.size(), expanded, got ? "" : " (towards it)");
 		}
 		return budget * nodes / PATH_NODES_TICK;
+	}
+
+	// [KIT_ENT_PERF] A movement saying `native = "path"` (kit/unit_walker), stepped
+	// here with no box call: kit/creature_walker's step done in C++. Towards the
+	// state's path at speed (times speed_k), up to it at `acceleration`; a jump
+	// (jump_height) where the next point is higher, `gravity`; its body (width x
+	// height) against the cells round it (read_grid(): the voxels and the solid
+	// looks), and pushed out of the other native units' bodies (units: {id, x, y,
+	// z, r, h} of its scene, as the tick began).
+	// simplified: cells as whole boxes (a slab is a cell: no step_height or
+	// slope_limit), no swim or kit/controls plane, the cells read again every
+	// NEAR_US or as it nears their edge (a door shut since is met late),
+	// separation by position against every unit of the scene (O(n^2): a grid of
+	// buckets past a few hundred)
+	static constexpr int64_t NEAR_US = 500000;
+	bool native(const Drive &d)
+	{
+		return d.creature && !d.car &&
+				jstr(m_types[d.type].decl.get("movement"), "native") == "path";
+	}
+	struct NativeUnit
+	{
+		uint64_t id;
+		double p[3], r, h;
+	};
+	void native_path(Drive &d, const Entity &e, int n, double dt,
+			const sv_<NativeUnit> &units)
+	{
+		static constexpr double PI = 3.14159265358979323846;
+		json::Value &st = d.state;
+		const json::Value &pv = st.get("pos");
+		if(!pos_ok(pv))
+			return;
+		double p[3] = {pv.at(0u).as_number(), pv.at(1u).as_number(), pv.at(2u).as_number()};
+		double v[3] = {0, 0, 0};
+		const json::Value &vv = st.get("vel");
+		for(unsigned k = 0; k < 3 && vv.is_array() && k < vv.size(); k++)
+			if(vv.at(k).is_number() && std::isfinite(vv.at(k).as_number()))
+				v[k] = vv.at(k).as_number();
+		const double r = num(d.params, "width", 0.8, 0.1, 3) / 2,
+				h = num(d.params, "height", 0.9, 0.1, 4),
+				speed = num(d.params, "speed", 3, 0, 20) * num(st, "speed_k", 1, 0.1, 3),
+				acc = num(d.params, "acceleration", 30, 1, 500),
+				g = num(d.params, "gravity", 20, 0, 100),
+				jump_v = std::sqrt(2 * g * num(d.params, "jump_height", 1.25, 0, 4));
+		bool ground = st.get("ground").is_true();
+		double yaw = row_num(st, "yaw");
+		std::vector<std::array<double, 3>> path;
+		const json::Value &pa = st.get("path");
+		for(unsigned i = 0; pa.is_array() && i < pa.size(); i++)
+			if(pos_ok(pa.at(i)) && pa.at(i).size() == 3)
+				path.push_back({{pa.at(i).at(0u).as_number(), pa.at(i).at(1u).as_number(),
+						pa.at(i).at(2u).as_number()}});
+		const size_t path_n = path.size();
+		// The cells round it: again past NEAR_US or 3 cells from their edge
+		creatures::Grid &gr = d.near;
+		const int cx = (int)std::floor(p[0] + 0.5), cy = (int)std::floor(p[1] + 0.5),
+				cz = (int)std::floor(p[2] + 0.5);
+		const int64_t now = now_us();
+		if(!d.near_us || now - d.near_us > NEAR_US || cx < gr.x0 + 3 || cz < gr.z0 + 3 ||
+				cx >= gr.x0 + gr.nx - 3 || cz >= gr.z0 + gr.nz - 3 || cy < gr.y0 + 3 ||
+				cy + h + 3 >= gr.y0 + gr.ny){
+			gr.x0 = cx - 8, gr.z0 = cz - 8, gr.y0 = cy - 5;
+			gr.nx = gr.nz = 17;
+			gr.ny = (int)std::ceil(h) + 11;
+			read_grid(scene_of(e), gr, e.id);
+			d.near_us = now;
+		}
+		// Its body at (x, y, z) in a cell that is not air (unknown: not loaded)
+		auto blocked = [&](double x, double y, double z){
+			const double E = 1e-4;
+			for(int yy = (int)std::floor(y + 0.5 + E); yy <= (int)std::floor(y + h + 0.5 - E); yy++)
+			for(int zz = (int)std::floor(z - r + 0.5 + E); zz <= (int)std::floor(z + r + 0.5 - E); zz++)
+			for(int xx = (int)std::floor(x - r + 0.5 + E); xx <= (int)std::floor(x + r + 0.5 - E); xx++)
+				if(gr.at(xx, yy, zz) != creatures::AIR)
+					return true;
+			return false;
+		};
+		for(int s = 0; s < n; s++){
+			// Its way: kit/creature_walker's
+			double wx = 0, wz = 0;
+			bool jump = false;
+			while(!path.empty()){
+				const std::array<double, 3> &q = path.front();
+				const double dx = q[0] - p[0], dz = q[2] - p[2];
+				const double dd = std::sqrt(dx * dx + dz * dz);
+				if(dd < 0.3 && p[1] > q[1] - 0.3){
+					path.erase(path.begin());
+					continue;
+				}
+				double sp = speed;
+				if(path.size() == 1 && dd < sp * 0.25)
+					sp = dd * 4;
+				wx = dx / dd * sp, wz = dz / dd * sp;
+				jump = q[1] > p[1] + 0.3 && dd < 1.5 && ground;
+				yaw = std::fmod(std::atan2(dx, dz) * 180 / PI + 360, 360);
+				break;
+			}
+			// Up to that at its acceleration
+			const double ax = wx - v[0], az = wz - v[2], al = std::sqrt(ax * ax + az * az);
+			const double f = al > acc * dt ? acc * dt / al : 1;
+			v[0] += ax * f, v[2] += az * f;
+			if(jump)
+				v[1] = jump_v;
+			v[1] = std::max(-50.0, v[1] - g * dt);
+			// Out of the others' bodies, half the overlap a step (they do the rest)
+			double push[2] = {0, 0};
+			for(const NativeUnit &u : units){
+				if(u.id == e.id || u.p[1] > p[1] + h || u.p[1] + u.h < p[1])
+					continue;
+				const double dx = p[0] - u.p[0], dz = p[2] - u.p[2], m = r + u.r;
+				const double d2 = dx * dx + dz * dz;
+				if(d2 >= m * m)
+					continue;
+				const double dl = std::sqrt(d2);
+				const double o = (m - dl) * 0.5;
+				if(dl > 1e-6)
+					push[0] += dx / dl * o, push[1] += dz / dl * o;
+				else
+					push[0] += (e.id < u.id ? o : -o); // (on the same spot: apart along x)
+			}
+			// Along x, then z, stopped by a cell (a step up is a cell: a jump)
+			for(int k : {0, 2}){
+				const double to = p[k] + v[k] * dt + push[k / 2];
+				double q[3] = {p[0], p[1], p[2]};
+				q[k] = to;
+				if(!blocked(q[0], q[1], q[2]))
+					p[k] = to;
+				else
+					v[k] = 0;
+			}
+			// Along y: landing on a cell's top, a head against one
+			const double ty = p[1] + v[1] * dt;
+			if(!blocked(p[0], ty, p[2]))
+				p[1] = ty;
+			else if(v[1] < 0){
+				const double top = std::floor(ty + 0.5) + 0.5;
+				if(top > ty && top <= p[1] + 1e-6 && !blocked(p[0], top, p[2]))
+					p[1] = top;
+				v[1] = 0;
+			} else
+				v[1] = 0;
+			ground = v[1] <= 0 && blocked(p[0], p[1] - 0.02, p[2]);
+		}
+		st.set("pos", point(p));
+		st.set("vel", point(v));
+		st.set("yaw", yaw);
+		st.set("ground", ground);
+		if(path.size() != path_n){
+			json::Value np = json::array();
+			for(const std::array<double, 3> &q : path)
+				np.append(point(q.data()));
+			st.set("path", np);
+		}
 	}
 
 	// c:propose_move's goal checked: {to = {x, y, z}, range, speed}; false: taken back
@@ -31437,6 +31620,9 @@ struct Module: public interface::Module, public Interface
 		uint64_t ship = 0;
 		// [KIT_GUIDE_STATIONS] a bot's (its seat's gun; peer 0): the bot
 		uint64_t bot = 0;
+		// [KIT_ENT_PERF] an entity's (c:fire; peer 0): it, its run's by
+		uint64_t unit = 0;
+		ss_ by;
 	};
 	std::vector<Projectile> m_projectiles;
 	uint64_t m_next_shot = 1;
@@ -34330,7 +34516,14 @@ struct Module: public interface::Module, public Interface
 			const json::Value &sheet, double amount, const double from[3])
 	{
 		auto bi = m_entities.find(bot);
-		if(bi == m_entities.end() || !m_entities.count(id))
+		if(bi != m_entities.end())
+			strike_as(bot_name(bi->second), "bot:"+itos(bot), id, item, sheet, amount, from);
+	}
+	// ([KIT_ENT_PERF] and an entity's, c:fire's: the hit's unit its id)
+	void strike_as(const ss_ &name, const ss_ &by, uint64_t id, const ss_ &item,
+			const json::Value &sheet, double amount, const double from[3], uint64_t unit = 0)
+	{
+		if(!m_entities.count(id))
 			return;
 		json::Value hit = json::object();
 		hit.set("amount", amount);
@@ -34338,11 +34531,73 @@ struct Module: public interface::Module, public Interface
 		hit.set("item", item);
 		hit.set("crit", false);
 		hit.set("from", point(from));
-		log_i(MODULE, "%s hits entity %s with %s: %g %s", cs(bot_name(bi->second)),
+		if(unit)
+			hit.set("unit", (int64_t)unit);
+		log_i(MODULE, "%s hits entity %s with %s: %g %s", cs(name),
 				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")));
 		m_striking = item;
-		apply_hit(id, hit, "bot:"+itos(bot));
+		apply_hit(id, hit, by);
 		m_striking.clear();
+	}
+
+	// [KIT_ENT_PERF] c:fire{item, at | dir, from}: a shot of a ranged item of
+	// shot "projectile" (its sheet's speed, damage, gravity, lifetime, pellets
+	// and spread) from the entity's place (and `from`, {0, 0.5, 0} by default,
+	// off it along the world's axes), towards `at` or along `dir`; at most one a
+	// cooldown (the item's) an entity. It hits as a bot's does (strike_as: no
+	// knockback or hit rules), the hit's `unit` the shooter's id, its by the
+	// run's; the shooter is not hit by its own. Running only.
+	// simplified: projectiles only (a hitscan item refused), no magazine, ammo or
+	// wear; the shooter gone, its shots go with it
+	std::map<uint64_t, int64_t> m_fire_at;
+	void fire_fx(const Entity &e, const ss_ &type, const ss_ &by, const json::Value &f)
+	{
+		const ss_ item = f.at(0u).is_string() ? f.at(0u).as_string() : ss_();
+		auto ti = m_item_types.find(item);
+		const json::Value &at = f.at(1u), &dir = f.at(2u), &off = f.at(3u);
+		double from[3];
+		world_of(e, from);
+		for(unsigned k = 0; k < 3; k++)
+			from[k] += pos_ok(off) ? off.at(k).as_number() : k == 1 ? 0.5 : 0;
+		double d[3] = {0, 0, 0}, len = 0;
+		for(unsigned k = 0; k < 3; k++){
+			d[k] = pos_ok(at) ? at.at(k).as_number() - from[k] : pos_ok(dir) ?
+					dir.at(k).as_number() : 0;
+			len += d[k] * d[k];
+		}
+		len = std::sqrt(len);
+		const char *why = !m_session.running ? "the server is Stopped" :
+				!e.has_pos ? "its entity is not placed" :
+				ti == m_item_types.end() ? "no such item" :
+				jstr(ti->second, "use") != "ranged" || jstr(ti->second, "shot") != "projectile" ?
+				"not a ranged item of shot \"projectile\"" :
+				!(len > 1e-6) ? "no direction" : nullptr;
+		const int64_t now = now_us();
+		auto fi = m_fire_at.find(e.id);
+		if(!why && fi != m_fire_at.end() && now < fi->second)
+			return; // (its cooldown: quietly, as a held trigger)
+		if(why){
+			log_w(MODULE, "Entity %s's %s: fire %s refused: %s", cs(itos(e.id)), cs(type),
+					cs(item), why);
+			return;
+		}
+		const json::Value &sheet = ti->second;
+		m_fire_at[e.id] = now + (int64_t)(sheet.get("cooldown").as_number() * 1e6);
+		for(double &c : d)
+			c /= len;
+		ss_ scene;
+		scene_of(e, &scene);
+		const ss_ who = "Entity "+itos(e.id);
+		const double spread = sheet.get("spread").as_number() * 3.14159265358979323846 / 180;
+		for(int64_t i = 0; i < json::jint(sheet, "pellets", 1); i++){
+			double pd[3];
+			spread_dir(d, spread, pd);
+			if(!launch(0, who, item, sheet, from, pd, sheet.get("speed").as_number(),
+					sheet.get("damage").as_number(), e.id, scene))
+				break;
+			m_projectiles.back().unit = e.id;
+			m_projectiles.back().by = by;
+		}
 	}
 
 	// Each tick, Running: the projectiles step on the game's clock (a
@@ -34355,13 +34610,15 @@ struct Module: public interface::Module, public Interface
 		for(size_t i = 0; i < m_projectiles.size(); ){
 			Projectile pr = m_projectiles[i];
 			auto pi = m_peers.find(pr.peer);
-			// ([KIT_GUIDE_STATIONS] a bot's: the bot, its scene and name)
-			auto mi = pr.bot ? m_entities.find(pr.bot) : pi == m_peers.end() ?
+			// ([KIT_GUIDE_STATIONS] a bot's: the bot, its scene and name;
+			// [KIT_ENT_PERF] an entity's (c:fire) so)
+			const uint64_t owner = pr.unit ? pr.unit : pr.bot;
+			auto mi = owner ? m_entities.find(owner) : pi == m_peers.end() ?
 					m_entities.end() : m_entities.find(pi->second.player);
 			bool ended = mi == m_entities.end() || (pr.bot && !is_bot(mi->second)),
 					hit = false;
 			ss_ scene;
-			if(!ended && pr.bot)
+			if(!ended && owner)
 				scene_of(mi->second, &scene);
 			else if(!ended)
 				scene = pi->second.scene;
@@ -34371,12 +34628,12 @@ struct Module: public interface::Module, public Interface
 				m_projectiles[i++].at_us = now;
 				continue;
 			}
-			const ss_ name = ended ? ss_() : pr.bot ? bot_name(mi->second) :
-					pi->second.name;
+			const ss_ name = ended ? ss_() : pr.unit ? "Entity "+itos(pr.unit) :
+					pr.bot ? bot_name(mi->second) : pi->second.name;
 			const main_context::SceneReference sref = ended ?
 					main_context::SceneReference() : scene_of(mi->second);
 			const uint64_t me = ended ? 0 : mi->first;
-			const ss_ by = (pr.bot ? "bot:" : "player:")+itos(me);
+			const ss_ by = pr.unit ? pr.by : (pr.bot ? "bot:" : "player:")+itos(me);
 			double left = (std::min(now, pr.until_us) - pr.at_us) / 1e6;
 			while(!ended && left > 1e-6){
 				const double dt = std::min(0.05, left);
@@ -34421,7 +34678,9 @@ struct Module: public interface::Module, public Interface
 				} else if(id){
 					log_i(MODULE, "%s's projectile %s hits entity %s",
 							cs(name), cs(itos(pr.id)), cs(itos(id)));
-					if(pr.bot)
+					if(pr.unit)
+						strike_as(name, by, id, pr.item, pr.sheet, pr.damage, pr.pos, pr.unit);
+					else if(pr.bot)
 						bot_strike(pr.bot, id, pr.item, pr.sheet, pr.damage, pr.pos);
 					else
 						strike(pr.peer, id, pr.item, pr.sheet, pr.damage, head,
