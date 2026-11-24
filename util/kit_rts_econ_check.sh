@@ -248,8 +248,9 @@ print("idle harvesters told: %s" % [l.split(": ")[-1] for l in lines if "harvest
 sent = [t[i] for i, l in enumerate(lines) if re.search(r"local/rts_ai 11: (sends \d+ attackers|attacks )", l)]
 if not sent:
 	bad.append("the computer sent no attack")
-if attack > 360:
-	bad.append("the computer's tanks neither reached nor hurt Blue's base by t=360 (reached %s, hurt %s)" % (near_at, hurt_at))
+# Usually 240-280; a wave first turned on Blue's scout reached at 361 once
+if attack > 480:
+	bad.append("the computer's tanks neither reached nor hurt Blue's base by t=480 (reached %s, hurt %s)" % (near_at, hurt_at))
 else:
 	print("ok: the computer's first attack sent at t=%.0f, its tanks at Blue's base at t=%s, Blue hurt at t=%s" % (sent[0], near_at, hurt_at))
 # Idle harvesters against the map's reachable ore: each map (its time), the

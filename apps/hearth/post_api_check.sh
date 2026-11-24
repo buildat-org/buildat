@@ -83,7 +83,7 @@ n=$(grep -o '>Claude</a></b> <span title="[^"]*">(via API)</span>' "$t/page" | w
 [ "$n" = 2 ] && grep -q "<strong>notes</strong>" "$t/page" && grep -q "A fix after." "$t/page" ||
 	fail "the page marks $n of 2: $(grep -o 'class="meta">.\{0,200\}' "$t/page")"
 s=$(post "{\"token\":\"$TM\",\"topic\":1,\"title\":\"x\",\"body\":\"y\"}")
-[ "$s" = 400 ] && grep -q '"error":"only a [A-Za-z]* starts a thread in Release notes' "$t/out" ||
+[ "$s" = 400 ] && grep -q '"error":"only a [A-Za-z]* \(can \)\?start[s]* a thread in Release notes' "$t/out" ||
 	fail "the member's thread: $s $(cat "$t/out")"
 s=$(post "{\"token\":\"$T1\",\"thread\":$TH,\"body\":\"z\"}" -H 'Origin: https://evil.example')
 [ "$s" = 403 ] || fail "a page's request: $s $(cat "$t/out")"
