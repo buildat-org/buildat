@@ -6277,6 +6277,17 @@ struct Module: public interface::Module, public Interface
 			s->get("was", m_made_by);
 		}
 		load_local_types();
+		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
+		// export beside its composition, before the rows load
+		// ([KIT_RTS] (4z37zzo) and before the composition: its params may
+		// name the export's prefabs and items)
+		json::Value edits;
+		if(first && host.opens_in_edit){
+			const ss_ dir = host.composition_path.substr(0,
+					host.composition_path.rfind('/'));
+			edits = import_export(dir);
+			take_game(dir);
+		}
 		json::json_error_t err;
 		err.line = -1;
 		const json::Value c = json::load_string(authored.c_str(), &err);
@@ -6298,15 +6309,6 @@ struct Module: public interface::Module, public Interface
 		if(!m_migrated_objects.empty())
 			m_runtime_dirty = true;
 		clear_migrated();
-		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
-		// export beside its composition, before the rows load
-		json::Value edits;
-		if(first && host.opens_in_edit){
-			const ss_ dir = host.composition_path.substr(0,
-					host.composition_path.rfind('/'));
-			edits = import_export(dir);
-			take_game(dir);
-		}
 		// The palette: every type of Kit's and of the app's that loads
 		for(const ss_ &author : {ss_("kit"), m_author}){
 			const ss_ dir = author_path(author);
