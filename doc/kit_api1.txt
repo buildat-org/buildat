@@ -253,6 +253,7 @@ server handler on_inventory
 server handler on_item
 server handler on_join
 server handler on_leave
+server handler on_order
 server handler on_params
 server handler on_reload
 server handler on_remove
@@ -341,6 +342,7 @@ server type_field state
 server type_field takes_text
 server type_field team
 server type_field ui
+server type_field unit
 server type_field usable
 server type_field use_range
 server type_field use_when
@@ -709,10 +711,11 @@ type kit/controls | version 1
 type kit/controls handlers | on_input
 type kit/controls param angle | {"default": 60, "kind": "number", "max": 90, "min": 10}
 type kit/controls param blur | {"default": 0, "kind": "number", "max": 1, "min": 0}
-type kit/controls param camera | {"choices": ["first_person", "chase", "top_down", "side"], "default": "first_person", "kind": "string"}
+type kit/controls param camera | {"choices": ["first_person", "chase", "top_down", "side", "rts"], "default": "first_person", "kind": "string"}
 type kit/controls param camera_frame | {"choices": ["world", "object", "body"], "default": "world", "kind": "string"}
 type kit/controls param chase_follow | {"default": 0, "kind": "number", "max": 5, "min": 0}
 type kit/controls param chase_pitch | {"default": 15, "kind": "number", "max": 80, "min": -10}
+type kit/controls param cut | {"default": 0, "kind": "number", "max": 100, "min": 0}
 type kit/controls param dead_zone | {"default": 0, "kind": "number", "max": 20, "min": 0}
 type kit/controls param distance | {"default": 6, "kind": "number", "max": 60, "min": 1}
 type kit/controls param edit_view | {"choices": ["auto", "2d", "3d"], "default": "auto", "kind": "string"}
@@ -848,6 +851,7 @@ type kit/environment param cloud_height | {"default": 120, "kind": "number", "ma
 type kit/environment param cloud_wind_dir | {"default": 180, "kind": "number", "max": 360, "min": 0}
 type kit/environment param cloud_wind_speed | {"default": 2, "kind": "number", "max": 100, "min": 0}
 type kit/environment param day_minutes | {"default": 0, "kind": "number", "max": 1440, "min": 0}
+type kit/environment param fill | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/environment param fog_end | {"default": 200, "kind": "number", "max": 2000, "min": 1}
 type kit/environment param fog_start | {"default": 120, "kind": "number", "max": 2000, "min": 0}
 type kit/environment param gravity | {"default": 1, "kind": "number", "max": 10, "min": 0}
@@ -1871,6 +1875,12 @@ type kit/ui_view input unfollow | none
 type kit/ui_view state queue
 type kit/ui_view state shown | shared
 type kit/ui_view state value | shared
+type kit/unit | version 1
+type kit/unit handlers | on_order on_timer
+type kit/unit param range | {"default": 10, "kind": "number", "max": 64, "min": 0.5}
+type kit/unit param team | {"default": "", "kind": "string"}
+type kit/unit param weapon | {"default": "", "kind": "string"}
+type kit/unit state target
 type kit/unit_walker | version 1
 type kit/unit_walker handlers | step
 type kit/unit_walker param acceleration | {"default": 30, "kind": "number", "max": 500, "min": 1}

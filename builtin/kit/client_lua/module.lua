@@ -2194,17 +2194,43 @@ end)
 -- (water, blended) and its "masked" one (leaves and plants, cut out),
 -- with the tint, and the sky light when the World has it; under physical
 -- lighting ([KIT_LIGHTING], environment.lua) its albedo decoded
+-- [KIT_RTS] The depth cut (KitVoxel.glsl's KITCUT): the chunks' materials
+-- by their node's id, each given the cut's y (CUT.off: none) and, with a
+-- cut, no culling (a cut wall's back shows). simplified: a chunk gone keeps
+-- its entry until its id is used again (a World's chunks are bounded)
+local CUT = {y = nil, off = 1e4, mats = {}}
+local function cut_material(m)
+	m:SetShaderParameter("KitCut", CUT.y or CUT.off)
+	m.cullMode = CUT.y and magic.CULL_NONE or magic.CULL_CCW
+end
 function M.voxel_look(node)
 	local sky = "Sky" .. (M.physical and M.physical() and "Phys" or "")
+	local mats = {}
 	for child, kind in pairs({[""] = "", alpha = "Alpha",
 			masked = "Masked"}) do
 		local n = child == "" and node or node:GetChild(child)
 		local cg = n and n:GetComponent("CustomGeometry")
 		local i = 0
 		while cg and cg:GetMaterial(i) do
-			cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource(
+			local m = cg:GetMaterial(i)
+			m:SetTechnique(0, magic.cache:GetResource(
 					"Technique", "kit/KitVoxel" .. sky .. kind .. ".xml"))
+			cut_material(m)
+			mats[#mats + 1] = m
 			i = i + 1
+		end
+	end
+	CUT.mats[node:GetID()] = mats
+end
+-- The cut at world y (nil: none) on every chunk drawn
+function M.set_cut(y)
+	if y == CUT.y then
+		return
+	end
+	CUT.y = y
+	for _, mats in pairs(CUT.mats) do
+		for _, m in ipairs(mats) do
+			cut_material(m)
 		end
 	end
 end
@@ -3457,6 +3483,14 @@ do
 			tostring(err))
 	install({M = M, E = E, O = O, P = P, log = log, STYLE = STYLE,
 		value = value, material = material})
+end
+
+-- ---- [KIT_RTS] The rts camera, the selection and the orders: rts.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/rts.lua")
+	assert(ok and type(install) == "function", "kit: rts.lua: " ..
+			tostring(err))
+	install({M = M, E = E, O = O, P = P, log = log, material = material})
 end
 
 -- ---- [KIT_TOOLS_1] The hands, the hotbar, the hit: hands.lua

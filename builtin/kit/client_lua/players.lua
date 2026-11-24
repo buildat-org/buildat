@@ -423,7 +423,8 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					ps:match("^(%S+) (%S+) (%S+) (%S+) ?(.*)$")
 			local flags = tonumber(pflags) or 0
 			-- In a seat or out of play (waiting to respawn): not drawn
-			local hidden = flags % 8 >= 2 and id ~= P.you
+			-- ([KIT_RTS] 16: a camera alone, never)
+			local hidden = (flags % 8 >= 2 or flags >= 16) and id ~= P.you
 			local b = bodies[id]
 			if not hidden then
 				seen[id] = true
@@ -536,7 +537,8 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 				show_body(b, false)
 				if not b.hidden then
 					log:info("kit: player " .. id .. "'s body hidden (" ..
-							(flags % 4 >= 2 and "in a seat" or "out of play") .. ")")
+							(flags >= 16 and "a camera alone" or
+							flags % 4 >= 2 and "in a seat" or "out of play") .. ")")
 				end
 				b.hidden = true
 				if b.mnode then

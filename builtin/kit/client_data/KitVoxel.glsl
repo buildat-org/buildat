@@ -61,6 +61,15 @@
 //       (KitFar*.xml, postopaque after the sky, no depth write): at the far
 //       plane (the sky's z = w), so the depth test passes only where the
 //       world drew nothing, and no fog.
+//   KITCUT  ([KIT_RTS]) the World's voxels' (KitVoxel{,Sky}{,Phys}{,Alpha,
+//       Masked}.xml): the rts camera's depth cut, the material's KitCut (a
+//       world y; module.lua's voxel_look and set_cut): nothing above it is
+//       drawn, and a face's back (a wall opened by the cut, its material
+//       culling none then) is drawn dark, lit as its front.
+//       simplified: the discard is in every chunk's shader, cut or not (an
+//       early depth test lost where a GPU skips it for that); technique
+//       variants picked while a cut is on would keep it. No cap over a cut
+//       solid: its inside reads hollow.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -108,6 +117,9 @@ varying vec4 vWorldPos;
     #if defined(LIGHTMAP) || defined(AO)
         varying vec2 vTexCoord2;
     #endif
+#endif
+#if defined(KITCUT) && defined(COMPILEPS)
+    uniform float cKitCut;
 #endif
 
 void VS()
@@ -285,6 +297,10 @@ vec4 KitWater(vec3 lit, float a, vec3 normal, vec3 spec)
 
 void PS()
 {
+    #ifdef KITCUT
+        if (vWorldPos.y > cKitCut)
+            discard;
+    #endif
     // Get material diffuse albedo
     #ifdef DIFFMAP
         vec4 diffInput = texture2D(sDiffMap, vTexCoord.xy);
@@ -363,6 +379,14 @@ void PS()
             geomNormal) * nn);
     #else
         vec3 normal = normalize(vNormal);
+    #endif
+
+    #ifdef KITCUT
+        // A face's back, seen through the cut: lit as its front, darker
+        if (dot(normal, cCameraPosPS - vWorldPos.xyz) < 0.0) {
+            normal = -normal;
+            diffColor.rgb *= 0.4;
+        }
     #endif
 
     #ifdef KITSPOTS

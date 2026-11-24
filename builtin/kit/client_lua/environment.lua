@@ -494,11 +494,40 @@ end
 -- ground. None under cartoon nor fast_physical, and none once the clouds
 -- took the light.
 -- Only where Kit draws the app's view: another app's own sun stays its own
+-- [KIT_RTS] kit/environment's fill, for a world with no sky (the sun and the
+-- moon off: underground): the light from nearly straight above at fill times
+-- noon's sun (physical: noon's terms), with no shadow, and noon's ambient --
+-- its floors bright, its walls by the ambient, the voxels' corner shade (their
+-- AO, the World's sky light off) on both. Cheap: the one light and the zone.
+-- true: it is on
+local function fill_light(v)
+	local f = tonumber(env.d.fill) or 0
+	env.filled = f > 0 and not v.sun and not v.moon
+	if not env.filled then
+		return
+	end
+	env.sun.direction = magic.Vector3(-0.3, -1, -0.15)
+	if not M.physical() then
+		env.zone.ambientColor = hex_colour(env.d.ambient, 1) or env.orig.ambient
+		env.light.brightness = 0.8 * f
+		env.light.color = env.orig.colour
+		return
+	end
+	local sr = sky_render()
+	local z, h = hue_of_hour(sr.PHYS, 1, 1)
+	z, h = sr.sky_radiance(z, h, 1)
+	local t = sr.terms(1, sr.dome(z, h))
+	env.zone.ambientColor = magic.Color(t.ambient.r, t.ambient.g, t.ambient.b)
+	env.light.brightness = t.sun * f / math.pi
+	env.light.color = magic.Color(t.sun_color.r, t.sun_color.g, t.sun_color.b)
+end
+
 local function body_shadows()
 	if not LIT.views.play then
 		return
 	end
-	local on = M.physical() and not fast() and env.light.brightness > 0
+	local on = M.physical() and not fast() and env.light.brightness > 0 and
+			not env.filled
 	if on and not LIT.shadows_set then
 		LIT.shadows_set = true
 		sky_render().cast_shadows(magic, env.light)
@@ -570,6 +599,7 @@ local function phys_light(v)
 				1 - 0.8 * v.cover))
 		dome:set_indoors(enc, 1)
 	end
+	fill_light(v)
 	body_shadows()
 	sky_log(LIT.mode, s)
 end
@@ -671,6 +701,7 @@ local function env_light()
 		dome.set_param("CloudColor", c.r * k, c.g * k, c.b * k)
 		dome:set_indoors({r = 0.39, g = 0.39, b = 0.39}, 0.35 + 0.65 * day)
 	end
+	fill_light(v)
 	body_shadows()
 	sky_log("cartoon", s)
 end
