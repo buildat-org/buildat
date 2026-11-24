@@ -1183,6 +1183,8 @@ local function draw_look(id, n, look)
 		local r = type(look.rotation) == "table" and look.rotation or {}
 		n.look_rot = magic.Quaternion(tonumber(r[1]) or 0,
 				tonumber(r[2]) or 0, tonumber(r[3]) or 0)
+		local lr = n.look_rot
+		n.look_rq = {lr.w, lr.x, lr.y, lr.z}
 		n.at, n.at_q = nil, nil
 	end
 	-- A swing turns the body round its hinge: the middle of its thickness
@@ -1400,26 +1402,43 @@ end
 local function same_q(a, b)
 	return math.abs(a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z) > 1 - 1e-6
 end
+-- ([KIT_ENT_PERF] a node's turn written through one Quaternion kept for it, its
+-- numbers set: a new one is ~8 us in the sandbox)
+local TURN = magic.Quaternion(1, 0, 0, 0)
+local function set_turn(node, w, x, y, z)
+	TURN.w, TURN.x, TURN.y, TURN.z = w, x, y, z
+	node.rotation = TURN
+end
 
 -- [KIT_NESTING] The way an entity's looks are carried by those it is
 -- under ("kit_parent", the entity it is under) as their looks slide
 -- (kit/mover): its node is where the slide ends (the server's), the look
 -- where the parent's is on the way
+-- ([KIT_ENT_PERF] the numbers dx, dy, dz; a node's kit_parent read again only
+-- once the server has changed it, n.vgen: a GetVar is ~5 us)
+local function parent_id(n)
+	if n.pid_gen ~= n.vgen or not n.pid then
+		n.pid, n.pid_gen = n.node:GetVar("kit_parent"):GetInt(), n.vgen
+	end
+	return n.pid
+end
 local function carried(n)
-	local d = magic.Vector3(0, 0, 0)
-	local pid = n.node:GetVar("kit_parent"):GetInt()
-	n.pid = pid
+	local d = nil
+	local pid = parent_id(n)
 	for _ = 1, 16 do
 		local pn = pid ~= 0 and P.nodes[pid]
 		if not pn then
 			break
 		end
 		if pn.slide_at and pn.slide_to and pn.look then
-			d = d + pn.look.rotation * (pn.slide_at - pn.slide_to)
+			d = (d or magic.Vector3(0, 0, 0)) + pn.look.rotation * (pn.slide_at - pn.slide_to)
 		end
-		pid = pn.node:GetVar("kit_parent"):GetInt()
+		pid = parent_id(pn)
 	end
-	return d
+	if not d then
+		return 0, 0, 0
+	end
+	return d.x, d.y, d.z
 end
 
 -- [KIT_SIDE_SCENERY] (8) The kit/parallax layer an entity is under: the
@@ -1525,7 +1544,10 @@ local function still(id, n)
 		end
 	end
 	local pn = n.pid and n.pid ~= 0 and P.nodes[n.pid]
-	return not (n.text or show.hud ~= nil or look.hidden or n.rest or n.vanish or
+	-- ([KIT_ENT_PERF] a moving one is still while parked: its links have not
+	-- moved it this frame, controls.lua's place_moving)
+	local moving = n.rest and not (n.parked and n.moved == P.moved_frame)
+	return not (n.text or show.hud ~= nil or look.hidden or moving or n.vanish or
 			n.slide_to or n.wear_wanted or n.ghost or n.see_through or
 			n.attach_to or P.preview[id] or P.pose[id] or (pn and pn.slide_to))
 end
@@ -1672,43 +1694,59 @@ local function update_play(_, data)
 		end
 		-- Where it is, turned by its entity's turn ([KIT] stage 4e2) over its
 		-- look's own, or where an editor's drag has it meanwhile
+		-- ([KIT_ENT_PERF] in plain numbers: n.at {x, y, z} and n.at_q {w, x, y, z}
+		-- tables, the look's place and turn written from them; one moving_tick
+		-- moved this frame (n.moved) its numbers, not read back: placing a moving
+		-- node was ~190 us of sandbox values a frame)
 		if n.look then
-			local p = n.node.position
-			local nr = n.node.rotation
-			local r = {p.x, p.y, p.z, nr.w, nr.x, nr.y, nr.z}
-			local was = n.raw or {}
-			for i = 1, 7 do
-				if r[i] ~= was[i] then
-					n.raw, n.gen, calm = r, (n.gen or 0) + 1, false
-					break
-				end
+			local x, y, z, qw, qx, qy, qz
+			if n.moved and n.moved == P.moved_frame then
+				x, y, z, qw, qx, qy, qz = n.sx, n.sy, n.sz, n.sw, n.sa, n.sb, n.sc
+			else
+				local p, nr = n.node.position, n.node.rotation
+				x, y, z, qw, qx, qy, qz = p.x, p.y, p.z, nr.w, nr.x, nr.y, nr.z
 			end
-			local q = magic.Quaternion(r[4], r[5], r[6], r[7])
+			local was = n.raw
+			if not was or was[1] ~= x or was[2] ~= y or was[3] ~= z or was[4] ~= qw or
+					was[5] ~= qx or was[6] ~= qy or was[7] ~= qz then
+				n.raw, n.gen, calm = {x, y, z, qw, qx, qy, qz}, (n.gen or 0) + 1, false
+			end
 			local pv = P.preview[id]
 			-- An editor's preview: where its drag has it, until the server's
 			-- node is there (or its time is up)
-			if pv and pv.till and (buildat.get_time_us() > pv.till or
-					((p - magic.Vector3(pv[1], pv[2], pv[3])):Length() < 0.01 and
-					same_q(q, pv_q(pv)))) then
-				P.preview[id] = nil
-				pv = nil
+			if pv and pv.till then
+				local dx, dy, dz = x - pv[1], y - pv[2], z - pv[3]
+				if buildat.get_time_us() > pv.till or (dx * dx + dy * dy + dz * dz < 1e-4 and
+						same_q({w = qw, x = qx, y = qy, z = qz}, pv_q(pv))) then
+					P.preview[id] = nil
+					pv = nil
+				end
 			end
 			-- A vehicle this client drives: where it predicts it
 			-- (controls.lua, [KIT] stage 4h)
 			pv = pv or P.pose[id]
 			if pv then
-				p = magic.Vector3(pv[1], pv[2], pv[3])
-				q = pv_q(pv)
+				x, y, z = pv[1], pv[2], pv[3]
+				local q = pv_q(pv)
+				qw, qx, qy, qz = q.w, q.x, q.y, q.z
 			else
-				p = p + carried(n)
+				local dx, dy, dz = carried(n)
+				x, y, z = x + dx, y + dy, z + dz
 			end
-			if not n.at or (n.at - p):Length() > 1e-4 or
-					not same_q(q, n.at_q) then
-				n.at, n.at_q = magic.Vector3(p.x, p.y, p.z), q
+			local at, aq = n.at, n.at_q
+			local dx, dy, dz = at and x - at.x, at and y - at.y, at and z - at.z
+			if not at or dx * dx + dy * dy + dz * dz > 1e-8 or
+					math.abs(qw * aq.w + qx * aq.x + qy * aq.y + qz * aq.z) <= 1 - 1e-6 then
+				n.at, n.at_q = {x = x, y = y, z = z}, {w = qw, x = qx, y = qy, z = qz}
 				-- (as numbers, for the editor's pick: no sandbox reads)
-				n.at_xyz = {p.x, p.y, p.z}
+				n.at_xyz = {x, y, z}
 				n.look.position = n.at
-				n.look.rotation = q * n.look_rot
+				-- (its turn over the look's own, n.look_rq)
+				local r = n.look_rq
+				set_turn(n.look, qw * r[1] - qx * r[2] - qy * r[3] - qz * r[4],
+						qw * r[2] + qx * r[1] + qy * r[4] - qz * r[3],
+						qw * r[3] - qx * r[4] + qy * r[1] + qz * r[2],
+						qw * r[4] + qx * r[3] - qy * r[2] + qz * r[1])
 				calm = false
 			end
 		end
@@ -1867,6 +1905,22 @@ magic.SubscribeToEvent("command_seq:kit_looks", function()
 			"%.2f ms a frame; frames %.1f ms, the worst %.1f", LK.frames, LK.read / f,
 			LK.looks / f, LK.us / f / 1000, (LK.dt or 0) / f / 1000, (LK.worst or 0) / 1000))
 	LK.frames, LK.read, LK.looks, LK.us, LK.dt, LK.worst = 0, 0, 0, 0, 0, 0
+end)
+-- [KIT_ENT_PERF] (a check's: "event kit_look_where <id> ...": each entity's look as
+-- drawn, its node's place and turn read back (under the scene's root), one frame's)
+magic.SubscribeToEvent("command_seq:kit_look_where", function(_, data)
+	local parts = {}
+	for id in data:GetString("Param"):gmatch("%d+") do
+		local n = P.nodes[tonumber(id)]
+		if n and n.look then
+			local p, q = n.look.position, n.look.rotation
+			parts[#parts + 1] = string.format("%s %.5f,%.5f,%.5f %.7f,%.7f,%.7f,%.7f", id,
+					p.x, p.y, p.z, q.w, q.x, q.y, q.z)
+		else
+			parts[#parts + 1] = id .. " none"
+		end
+	end
+	log:info("kit: looks where: " .. table.concat(parts, "; "))
 end)
 
 -- [KIT_CLIENT_REACT] (1) Zones on this client: its own predicted body

@@ -315,7 +315,11 @@ local function world(skip)
 			local on = show.look.state and K.value(n, show.look.state) == true
 			local links = M.links_of(id, n)
 			local r = links and n.rest
-			if r then
+			-- ([KIT_ENT_PERF] a moving look no step meets is left out: posed each step it
+			-- was 5.5-8.2 ms a step at 100 moving units, to no box; the steps are the same)
+			if r and not MV.box_solid(show.look, on == true) then
+				-- (left out)
+			elseif r then
 				-- [KIT_MOVING_OBJECTS] As each step's time has it, from where it rests
 				-- ([RACER_FEEL] (1) the angles as the server's Turn::angles has them)
 				local qy, qp, qr = MV.turn_angles(r[4], r[5], r[6], r[7])
@@ -924,22 +928,7 @@ function M.object_target(origin, dir, len)
 	local c = {ob.x + R[1] * cell[1] + R[2] * cell[2] + R[3] * cell[3],
 		ob.y + R[4] * cell[1] + R[5] * cell[2] + R[6] * cell[3],
 		ob.z + R[7] * cell[1] + R[8] * cell[2] + R[9] * cell[3]}
-	-- The rotation matrix (row-major, frame to world) as a quaternion
-	local w, x, y, z
-	local tr = R[1] + R[5] + R[9]
-	if tr > 0 then
-		local s = math.sqrt(tr + 1) * 2
-		w, x, y, z = s / 4, (R[8] - R[6]) / s, (R[3] - R[7]) / s, (R[4] - R[2]) / s
-	elseif R[1] > R[5] and R[1] > R[9] then
-		local s = math.sqrt(1 + R[1] - R[5] - R[9]) * 2
-		w, x, y, z = (R[8] - R[6]) / s, s / 4, (R[2] + R[4]) / s, (R[3] + R[7]) / s
-	elseif R[5] > R[9] then
-		local s = math.sqrt(1 + R[5] - R[1] - R[9]) * 2
-		w, x, y, z = (R[3] - R[7]) / s, (R[2] + R[4]) / s, s / 4, (R[6] + R[8]) / s
-	else
-		local s = math.sqrt(1 + R[9] - R[1] - R[5]) * 2
-		w, x, y, z = (R[4] - R[2]) / s, (R[3] + R[7]) / s, (R[6] + R[8]) / s, s / 4
-	end
+	local w, x, y, z = MV.matrix_quat(R)
 	return {id = ob.id, t = t, cell = cell, normal = n, dir = ld,
 		centre = magic.Vector3(c[1], c[2], c[3]), rot = magic.Quaternion(w, x, y, z)}
 end
@@ -1008,15 +997,13 @@ local function links_kept(id, n)
 	return n.lk
 end
 
--- A link's change at the draw's time, once a frame
+-- A link's change at the draw's time, once a frame: where its origin is (xt, yt,
+-- zt) and the world's turn it makes round it, l.D (move.lua's link_at's) and as a
+-- quaternion (qw, qx, qy, qz). ([KIT_ENT_PERF] plain numbers: a Quaternion made or
+-- multiplied in the sandbox is ~8 us, and placing a moving node took some 20)
 local function link_now(l)
 	if l.now_t ~= C.draw_t then
-		local xt, yt, zt, _, wp, wy, wr, ky, kp, kr = MV.link_at(l, C.draw_t)
-		if not l.q0 then
-			l.q0 = magic.Quaternion(tonumber(l[5]) or 0, tonumber(l[4]) or 0, tonumber(l[6]) or 0)
-			local q = l.q0
-			l.q0i = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
-		end
+		local xt, yt, zt, D, wp, wy, wr, ky, kp, kr = MV.link_at(l, C.draw_t)
 		l.now_t = C.draw_t
 		-- ([KIT_3D_GAINS_1] (4z38) l.ver: a new one only as it moves; place_moving
 		-- leaves a node be while none of its links has)
@@ -1027,29 +1014,45 @@ local function link_now(l)
 			return l
 		end
 		l.was, l.ver = {xt, yt, zt, wp, wy, wr, ky, kp, kr}, (l.ver or 0) + 1
-		l.xt, l.yt, l.zt = xt, yt, zt
-		if ky then
-			-- [KIT_VEHICLE_MOVEMENTS] steered: its parent's frame, its track's turn there
-			local f = l[7].frame
-			l.qf = l.qf or magic.Quaternion(tonumber(f[5]) or 0, tonumber(f[4]) or 0,
-					tonumber(f[6]) or 0)
-			l.d = l.qf * magic.Quaternion(kp, ky, kr) * magic.Quaternion(wp, wy, wr) * l.q0i
-		else
-			l.d = l.q0 * magic.Quaternion(wp, wy, wr) * l.q0i
-		end
+		-- ([KIT_VEHICLE_MOVEMENTS] steered: its parent's frame, its track's turn there,
+		-- all in D)
+		l.xt, l.yt, l.zt, l.D = xt, yt, zt, D
+		l.qw, l.qx, l.qy, l.qz = MV.matrix_quat(D)
 	end
 	return l
 end
 
--- A place at rest, as the links have it now: a Vector3
-local function moved_point(links, x, y, z)
-	local p = magic.Vector3(x, y, z)
+-- A place at rest, as the links have it now
+local function moved_xyz(links, x, y, z)
 	for _, l in ipairs(links) do
 		link_now(l)
-		p = l.d * magic.Vector3(p.x - l[1], p.y - l[2], p.z - l[3]) +
-				magic.Vector3(l.xt, l.yt, l.zt)
+		local D, dx, dy, dz = l.D, x - l[1], y - l[2], z - l[3]
+		x = l.xt + D[1] * dx + D[2] * dy + D[3] * dz
+		y = l.yt + D[4] * dx + D[5] * dy + D[6] * dz
+		z = l.zt + D[7] * dx + D[8] * dy + D[9] * dz
 	end
-	return p
+	return x, y, z
+end
+local function moved_point(links, x, y, z)
+	return magic.Vector3(moved_xyz(links, x, y, z))
+end
+
+-- ([KIT_ENT_PERF] a node's turn written through one Quaternion kept for it, its
+-- numbers set: a new one is ~8 us in the sandbox)
+local TURN = magic.Quaternion(1, 0, 0, 0)
+local function set_turn(node, w, x, y, z)
+	TURN.w, TURN.x, TURN.y, TURN.z = w, x, y, z
+	node.rotation = TURN
+end
+-- (a read float against the double written: other than it, past a float's error)
+local function differs(a, b)
+	local d = a - b
+	return (d < 0 and -d or d) > 1e-6 * ((b < 0 and -b or b) + 1)
+end
+local function rest_moved(rec, p, q)
+	return not rec.sx or differs(p.x, rec.sx) or differs(p.y, rec.sy) or
+			differs(p.z, rec.sz) or differs(q.w, rec.sw) or differs(q.x, rec.sa) or
+			differs(q.y, rec.sb) or differs(q.z, rec.sc)
 end
 
 -- A node (rec: what is kept of it: n, or a row's) where its links have it now. What
@@ -1058,13 +1061,25 @@ end
 -- simplified: a node the server moves during play under a moving object (a kit/mover
 -- on a deck) comes through the client's SmoothedTransform, whose blend reads as a new
 -- rest here. The way out is a rest in a variable as a body has it, or a client that
--- can take the smoothing off a node (no binding for it yet)
-local function place_moving(rec, node, links)
-	local p, q = node.position, node.rotation
+-- can take the smoothing off a node (no binding for it yet).
+-- [KIT_ENT_PERF] The node is read (~4 us a property) only as the server has changed
+-- it (P.changed, nid its node's id; each frame without replicate.take_changed) and
+-- for READ_ON frames after each read that found it set or changed, as its
+-- SmoothedTransform blends it. What was written is kept as numbers (rec.sx... and
+-- rec.moved, the frame's P.moved_frame) for module.lua's draw, not read back
+local READ_ON = 3
+local function place_moving(rec, node, links, nid)
 	local same = rec.rest and rec.lk == links
-	if not rec.rest or p.x ~= rec.sx or p.y ~= rec.sy or p.z ~= rec.sz or q.w ~= rec.sw or
-			q.x ~= rec.sa or q.y ~= rec.sb or q.z ~= rec.sc then
-		rec.rest, same = {p.x, p.y, p.z, q.w, q.x, q.y, q.z}, false
+	local ch = P.changed and P.changed[nid]
+	local set = false
+	if not (rec.rest and P.changed) or ch or (rec.reread or 0) > 0 then
+		local p, q = node.position, node.rotation
+		if not rec.rest or rest_moved(rec, p, q) then
+			rec.rest, same, set = {p.x, p.y, p.z, q.w, q.x, q.y, q.z}, false, true
+			rec.reread = READ_ON
+		else
+			rec.reread = ch and READ_ON or (rec.reread or 1) - 1
+		end
 	end
 	-- (where it was put, while neither its rest nor a link has moved since: a
 	-- barrel at rest, a deck stopped)
@@ -1074,37 +1089,44 @@ local function place_moving(rec, node, links)
 		same = same and rec.vers[i] == l.ver
 		rec.vers[i] = l.ver
 	end
+	-- (rec.parked: nothing moved it this frame, for module.lua's still())
+	rec.moved, rec.parked = P.moved_frame, same
 	if same then
 		return
 	end
 	rec.lk = links
 	local r = rec.rest
-	local at = moved_point(links, r[1], r[2], r[3])
-	local turn = magic.Quaternion(r[4], r[5], r[6], r[7])
+	local x, y, z = moved_xyz(links, r[1], r[2], r[3])
+	-- (each link's turn over it: l.q * turn)
+	local w, a, b, c = r[4], r[5], r[6], r[7]
 	for _, l in ipairs(links) do
-		turn = l.d * turn
+		local lw, lx, ly, lz = l.qw, l.qx, l.qy, l.qz
+		w, a, b, c = lw * w - lx * a - ly * b - lz * c, lw * a + lx * w + ly * c - lz * b,
+				lw * b - lx * c + ly * w + lz * a, lw * c + lx * b - ly * a + lz * w
 	end
-	node.position = at
-	node.rotation = turn
-	p, q = node.position, node.rotation
-	rec.sx, rec.sy, rec.sz = p.x, p.y, p.z
-	rec.sw, rec.sa, rec.sb, rec.sc = q.w, q.x, q.y, q.z
+	-- ([VECTOR_NAMES] a table where a Vector3 goes: no sandbox value made; the turn
+	-- only as it changes, a unit going straight keeping it to the bit)
+	node.position = {x = x, y = y, z = z}
+	if set or w ~= rec.sw or a ~= rec.sa or b ~= rec.sb or c ~= rec.sc then
+		set_turn(node, w, a, b, c)
+	end
+	rec.sx, rec.sy, rec.sz, rec.sw, rec.sa, rec.sb, rec.sc = x, y, z, w, a, b, c
 end
 
 -- No longer moved: at rest, unless the server has since set it
 local function place_rest(rec, node)
 	local p, q = node.position, node.rotation
 	local r = rec.rest
-	if p.x == rec.sx and p.y == rec.sy and p.z == rec.sz and q.w == rec.sw and
-			q.x == rec.sa and q.y == rec.sb and q.z == rec.sc then
-		node.position = magic.Vector3(r[1], r[2], r[3])
-		node.rotation = magic.Quaternion(r[4], r[5], r[6], r[7])
+	if not rest_moved(rec, p, q) then
+		node.position = {x = r[1], y = r[2], z = r[3]}
+		set_turn(node, r[4], r[5], r[6], r[7])
 	end
-	rec.rest = nil
+	rec.rest, rec.moved, rec.parked = nil, nil, nil
 end
 
 -- Each frame, first: the time everything is drawn at; each moved node there
 function M.moving_tick()
+	P.moved_frame = (P.moved_frame or 0) + 1
 	if not next(C.links) and not next(C.gone_nodes or {}) and not C.were_moving then
 		C.draw_t = nil
 		return
@@ -1150,12 +1172,13 @@ function M.moving_tick()
 			end
 			if n.body_rest then
 				local r = n.body_rest
-				n.node.position = moved_point(links, r.x, r.y, r.z)
+				local x, y, z = moved_xyz(links, r.x, r.y, r.z)
+				n.node.position = {x = x, y = y, z = z}
 			end
 		else
 			n.body_rest, n.body_rest_s = nil, nil
 			if links then
-				place_moving(n, n.node, links)
+				place_moving(n, n.node, links, n.nid)
 			elseif n.rest then
 				place_rest(n, n.node)
 			end
@@ -1167,7 +1190,7 @@ function M.moving_tick()
 	for _, o in ipairs(C.moving_nodes) do
 		local node = replicate.main_scene:GetNode(o.node)
 		if node then
-			place_moving(o, node, o.links)
+			place_moving(o, node, o.links, o.node)
 		end
 	end
 	for id, o in pairs(C.gone_nodes or {}) do

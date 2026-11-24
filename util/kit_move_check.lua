@@ -920,4 +920,61 @@ do
 	print(string.format("ok: the world's index of %d boxes and %d prisms: %d asks the same as a scan",
 			#boxes, #polys, asks))
 end
+-- [KIT_ENT_PERF] A moving node placed in plain numbers (controls.lua's link_now and
+-- place_moving): link_at's D as a quaternion (matrix_quat) is the turn the client drew
+-- by Urho3D's quaternions before (q0 * wave * q0^-1; steered, frame * track * wave *
+-- q0^-1); box_solid says whether look_box gives a box
+do
+	-- Urho3D's Quaternion(pitch, yaw, roll) and its product
+	local function euler(x, y, z)
+		local d = math.pi / 360
+		local sx, cx, sy, cy = math.sin(x * d), math.cos(x * d), math.sin(y * d), math.cos(y * d)
+		local sz, cz = math.sin(z * d), math.cos(z * d)
+		return {cy * cx * cz + sy * sx * sz, cy * sx * cz + sy * cx * sz,
+			sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz}
+	end
+	local function mul(a, b)
+		return {a[1] * b[1] - a[2] * b[2] - a[3] * b[3] - a[4] * b[4],
+			a[1] * b[2] + a[2] * b[1] + a[3] * b[4] - a[4] * b[3],
+			a[1] * b[3] - a[2] * b[4] + a[3] * b[1] + a[4] * b[2],
+			a[1] * b[4] + a[2] * b[3] - a[3] * b[2] + a[4] * b[1]}
+	end
+	local function inv(q)
+		return {q[1], -q[2], -q[3], -q[4]}
+	end
+	local function same_turn(what, q, w, x, y, z)
+		local dot = q[1] * w + q[2] * x + q[3] * y + q[4] * z
+		assert(math.abs(math.abs(dot) - 1) < 1e-9, what .. ": " .. dot)
+	end
+	math.randomseed(7)
+	local r = function(k) return (math.random() - 0.5) * k end
+	for _ = 1, 300 do
+		local yaw, pitch, roll = r(720), r(360), r(360)
+		local l = {r(50), r(50), r(50), yaw, pitch, roll, {wave_pitch = r(40), wave_pitch_period = 3,
+			wave_yaw = r(40), wave_yaw_period = 5, wave_roll = r(40), wave_roll_period = 2,
+			pivot = {r(4), r(4), r(4)}}}
+		local t = math.random() * 10
+		local _, _, _, D, wp, wy, wr = MV.link_at(l, t)
+		local q0 = euler(pitch, yaw, roll)
+		local want = mul(mul(q0, euler(wp, wy, wr)), inv(q0))
+		same_turn("a wave's turn", want, MV.matrix_quat(D))
+		MV.tracks[5] = {{0, r(9), r(9), r(9), r(720), r(170), r(360)},
+			{20000, r(9), r(9), r(9), r(720), r(170), r(360)}}
+		local f = {r(50), r(50), r(50), r(720), r(360), r(360)}
+		local ls = {l[1], l[2], l[3], yaw, pitch, roll, {track = 5, frame = f, wave_roll = r(30),
+			wave_roll_period = 4}}
+		local _, _, _, Ds, wp2, wy2, wr2, ky, kp, kr = MV.link_at(ls, t)
+		want = mul(mul(mul(euler(f[5], f[4], f[6]), euler(kp, ky, kr)), euler(wp2, wy2, wr2)), inv(q0))
+		same_turn("a steered one's turn", want, MV.matrix_quat(Ds))
+	end
+	MV.tracks = {}
+	for _, look in ipairs({{solid = true}, {solid = false}, {}, {shape = "polygon", solid = true},
+			{solid = true, when = {solid = false}}, {when = {solid = true}}, {solid = true, when = {}}}) do
+		for _, on in ipairs({false, true}) do
+			assert(MV.box_solid(look, on) == (MV.look_box(look, on, {0, 0, 0}, 0) ~= nil),
+					"box_solid as look_box")
+		end
+	end
+end
+
 print("kit_move_check: ok")

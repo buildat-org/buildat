@@ -632,10 +632,22 @@ local function box_info(look)
 	return {solid = true, friction = f < 0 and 0 or f > 10 and 10 or f, surface = s}
 end
 
+-- ([KIT_ENT_PERF] whether look_box gives a box at all: a look a step never
+-- meets is left out of a moving world, not posed each step for nothing)
+function M.box_solid(look, on)
+	if type(look) ~= "table" or look.shape == "polygon" then
+		return false
+	end
+	local w = on and type(look.when) == "table" and look.when or {}
+	if w.solid ~= nil then
+		return w.solid == true
+	end
+	return look.solid == true
+end
 function M.look_box(look, on, pos, yaw, pitch, roll)
 	-- ([KIT_MOVING_OBJECTS] or yaw the entity's turn as a matrix)
 	-- ([KIT_PLANE] stage 3: a polygon is no box: M.look_poly)
-	if type(look) ~= "table" or look.shape == "polygon" then
+	if not M.box_solid(look, on) then
 		return nil
 	end
 	local size, off = {}, {0, 0, 0}
@@ -654,13 +666,6 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 		end
 	end
 	local w = on and type(look.when) == "table" and look.when or {}
-	local solid = look.solid == true
-	if w.solid ~= nil then
-		solid = w.solid == true
-	end
-	if not solid then
-		return nil
-	end
 	-- [KIT] stage 4l: moved by when.offset while on (kit/mover).
 	-- simplified: where the state has it at once, not along its slide
 	if type(w.offset) == "table" then
@@ -3945,6 +3950,22 @@ function M.quat_matrix(w, x, y, z)
 	return {1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
 		2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
 		2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)}
+end
+-- And back: a rotation matrix (rows, frame to world) as w, x, y, z
+function M.matrix_quat(R)
+	local tr = R[1] + R[5] + R[9]
+	if tr > 0 then
+		local s = sqrt(tr + 1) * 2
+		return s / 4, (R[8] - R[6]) / s, (R[3] - R[7]) / s, (R[4] - R[2]) / s
+	elseif R[1] > R[5] and R[1] > R[9] then
+		local s = sqrt(1 + R[1] - R[5] - R[9]) * 2
+		return (R[8] - R[6]) / s, s / 4, (R[2] + R[4]) / s, (R[3] + R[7]) / s
+	elseif R[5] > R[9] then
+		local s = sqrt(1 + R[5] - R[1] - R[9]) * 2
+		return (R[3] - R[7]) / s, (R[2] + R[4]) / s, s / 4, (R[6] + R[8]) / s
+	end
+	local s = sqrt(1 + R[9] - R[1] - R[5]) * 2
+	return (R[4] - R[2]) / s, (R[3] + R[7]) / s, (R[6] + R[8]) / s, s / 4
 end
 
 local function bound(z)
