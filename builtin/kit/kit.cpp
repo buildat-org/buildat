@@ -25375,6 +25375,19 @@ struct Module: public interface::Module, public Interface
 	} m_meter;
 	const bool m_meter_on = getenv("BUILDAT_KIT_METER") &&
 			getenv("BUILDAT_KIT_METER")[0] == '1';
+	// [KIT_ENT_PERF] the tick's phases on the meter's "phases:" line: wall ms a
+	// tick each (the player's own steps step_bodies, the drives' step_drives)
+	enum Phase { PH_SYNC, PH_BODIES, PH_MINDS, PH_DRIVES, PH_TRACKS, PH_SHOTS,
+		PH_QUEUE, PH_N };
+	int64_t m_phase_us[PH_N] = {};
+	struct PhaseTimer
+	{
+		int64_t *at;
+		int64_t t0;
+		PhaseTimer(Module &m, Phase p): at(m.m_meter_on ? &m.m_phase_us[p] : nullptr),
+				t0(at ? interface::os::time_us() : 0){}
+		~PhaseTimer(){ if(at) *at += interface::os::time_us() - t0; }
+	};
 
 	void meter_tick(int64_t t0)
 	{
@@ -25406,6 +25419,17 @@ struct Module: public interface::Module, public Interface
 				m.gap_max / 1e3, m.own_sum / 1e3 / m.n, m.own_max / 1e3,
 				m.pct_sum / m.n, m.pct_max, m_bodies.size(), m_drives.size(),
 				m_peers.size());
+		static const char *const names[PH_N] = {"sync_motions", "step_bodies", "minds",
+				"step_drives", "send_tracks", "projectiles", "queue_rest"};
+		ss_ ph;
+		for(int k = 0; k < PH_N; k++){
+			char b[64];
+			snprintf(b, sizeof b, "%s%s %.2f", k ? ", " : "", names[k],
+					m_phase_us[k] / 1e3 / m.n);
+			ph += b;
+			m_phase_us[k] = 0;
+		}
+		log_i(MODULE, "phases: ms a tick: %s", ph.c_str());
 		m = Meter();
 		m.since = now;
 		m.last = t0;
@@ -26275,13 +26299,14 @@ struct Module: public interface::Module, public Interface
 		// tick's budget
 		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
 				TICK_SLICES : 0;
-		sync_motions();
-		int64_t spent = step_bodies(budget);
-		spent += minds_tick(budget - spent); // [KIT_CREATURES_8A]
-		spent += step_drives(budget - spent);
+		int64_t spent;
+		{ PhaseTimer t(*this, PH_SYNC); sync_motions(); }
+		{ PhaseTimer t(*this, PH_BODIES); spent = step_bodies(budget); }
+		{ PhaseTimer t(*this, PH_MINDS); spent += minds_tick(budget - spent); } // [KIT_CREATURES_8A]
+		{ PhaseTimer t(*this, PH_DRIVES); spent += step_drives(budget - spent); }
 		m_meter.spent += spent;
 		m_meter.budget = budget;
-		send_tracks();
+		{ PhaseTimer t(*this, PH_TRACKS); send_tracks(); }
 		free_bodies_tick();
 		own_tick(); // [KIT_AIRSHIPS]
 		if(m_session.running)
@@ -26349,12 +26374,13 @@ struct Module: public interface::Module, public Interface
 		run_timers();
 		// [KIT_TOOLS_2] reloads due, projectiles in flight
 		reloads_tick();
-		projectiles_tick();
+		{ PhaseTimer t(*this, PH_SHOTS); projectiles_tick(); }
 		actions_held();
 		check_zones();
 		check_regions();
 		// The queue, in order, within the tick's budget
 		const int64_t steps = spent;
+		PhaseTimer queue_t(*this, PH_QUEUE);
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
 			m_queue.pop_front();
@@ -27714,6 +27740,25 @@ struct Module: public interface::Module, public Interface
 		return std::sqrt(d2) / 2 + std::sqrt(o2);
 	}
 
+	// [KIT_ENT_PERF] Whether a step can meet a look, as move.lua's M.look_box and
+	// M.look_poly have it: solid by its state (on: its when's solid, if it has
+	// one, over its own), or a polygon's floor. One they make nothing of meets
+	// nothing, sent or not
+	static bool look_met(const json::Value &look, bool on)
+	{
+		bool solid = look.get("solid").is_true();
+		const json::Value &wh = look.get("when");
+		if(on && wh.is_object()){
+			const json::Value &ws = wh.get("solid");
+			if(!ws.is_undefined() && !ws.is_null())
+				solid = ws.is_true();
+		}
+		if(jstr(look, "shape") != "polygon")
+			return solid;
+		const json::Value &pts = look.get("points");
+		return (pts.is_array() || pts.is_object()) && (solid || look.get("floor").is_true());
+	}
+
 	// The world round a body for a step: its cells, the solid looks near
 	// it and a heightmap's samples (move.lua's snapshot)
 	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
@@ -27934,6 +27979,11 @@ struct Module: public interface::Module, public Interface
 				}
 				const ss_ key = jstr(look, "state");
 				const bool on = !key.empty() && in.state.get(key).is_true();
+				// [KIT_ENT_PERF] one no step can meet left out: its text, and for
+				// one that moves its re-posing at each input in the box (a unit's
+				// parts with collision off: 17 kB a request at 25 movers)
+				if(!look_met(look, on))
+					break;
 				o += "{";
 				lua_lit(look, o);
 				o += on ? ",true,{" : ",false,{";
