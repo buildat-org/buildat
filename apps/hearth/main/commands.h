@@ -1214,6 +1214,75 @@
 			});
 			return list;
 		}
+		// [HEARTH_POST_API] The admin's API tokens (main.cpp's post_api()):
+		// the accounts that have one, {name, level, created, used}
+		if(cmd == "api_tokens"){
+			if(!admin)
+				throw Exception("only the "+level_name(LV_ADMIN)+" sees the API tokens");
+			json::Value list = json::array();
+			Q t(m_db, "SELECT account, created, used FROM api_tokens "
+					"ORDER BY account");
+			while(t.step()){
+				json::Value v = json::object();
+				v.set("name", t.s(0));
+				v.set("level", (int64_t)accounts::level(m_server, t.s(0)));
+				v.set("created", t.i(1));
+				v.set("used", t.i(2));
+				list.append(v);
+			}
+			return list;
+		}
+		// {name, level}: a new token for the account, replacing its old one,
+		// shown this once -> {name, token, created_account}. An account that
+		// does not exist is made, with a random password no one is shown, at
+		// `level` (LV_MEMBER without one); one that exists keeps its level
+		// unless `level` is given
+		if(cmd == "api_token"){
+			if(!admin)
+				throw Exception("only the "+level_name(LV_ADMIN)+" makes API tokens");
+			const ss_ who = jstr(q, "name");
+			need(text_ok(who, NAME_MAX, false, "the name"));
+			const int64_t to = jint(q, "level");
+			if(to != 0 && to != LV_MEMBER && to != LV_HELPER && to != LV_MODERATOR)
+				throw Exception("a token's account is a "+level_name(LV_MEMBER)+
+						", a "+level_name(LV_HELPER)+" or a "+
+						level_name(LV_MODERATOR));
+			ss_ why;
+			bool made = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				if(!a->exists(who)){
+					why = a->create_account(who, interface::sha256::hex(
+							interface::bignum::random_bytes(32)));
+					made = why.empty();
+				}
+				if(why.empty() && (made || to != 0))
+					why = a->set_level(who, to ? (int)to : LV_MEMBER, name);
+			});
+			need(why);
+			const ss_ token = "hrt_"+interface::sha256::hex(
+					interface::bignum::random_bytes(32));
+			Q i(m_db, "INSERT OR REPLACE INTO api_tokens(account, hash, created, "
+					"used) VALUES(?, ?, ?, 0)");
+			i.b(who).b(token_hash(token)).b(now_s()).step();
+			log_i(MODULE, "%s made an API token for %s%s", cs(name), cs(who),
+					made ? ", a new account" : "");
+			json::Value v = json::object();
+			v.set("name", who);
+			v.set("token", token);
+			v.set("created_account", made);
+			return v;
+		}
+		if(cmd == "api_token_revoke"){
+			if(!admin)
+				throw Exception("only the "+level_name(LV_ADMIN)+" revokes API tokens");
+			Q d(m_db, "DELETE FROM api_tokens WHERE account = ?");
+			d.b(jstr(q, "name")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no API token for "+jstr(q, "name"));
+			log_i(MODULE, "%s revoked the API token of %s", cs(name),
+					cs(jstr(q, "name")));
+			return json::Value(true);
+		}
 		throw Exception("no such command: "+cmd);
 	}
 // vim: set noet ts=4 sw=4:

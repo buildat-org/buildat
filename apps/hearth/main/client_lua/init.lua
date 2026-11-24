@@ -883,7 +883,7 @@ local show_home, show_topic, show_thread, show_notifications, show_following
 local show_search, show_account, show_compose, show_report, show_link
 local show_queue, show_settings, show_tracker_link, show_topic_edit
 local show_place, show_server, show_discussed, read_on
-local show_delete, show_ban
+local show_delete, show_ban, show_token
 
 local function mark_name(mk)
 	return (mk[1] == "●" and "medium" or mk[1] == "•" and "small" or "none") ..
@@ -1376,7 +1376,9 @@ show_thread = function(id, at, missing)
 				new_line = true
 				boxes.new = v:header("New since you were here", nil, "main")
 			end
+			-- [HEARTH_POST_API] a script's, by the account's token
 			local head = (is_answer and "This answered it -- " or "") .. m.author ..
+					(m.api and " (via API)" or "") ..
 					" · " .. ago(m.created) .. (m.edited ~= 0 and " · edited" or "")
 			-- [HEARTH_LINES_CODE] the page's own markup, as the web shows it
 			-- [HEARTH_POST_STYLE] its pictures where it has them; a file
@@ -2403,6 +2405,7 @@ show_settings = function()
 	req("tracker_domains", nil, function(domains)
 		admins("release_sources", function(sources)
 			admins("file_settings", function(files)
+			admins("api_tokens", function(tokens)
 				local w = open("Settings")
 				local v = list()
 				v:header("Topics")
@@ -2469,10 +2472,65 @@ show_settings = function()
 					req("delete_file", {file = tonumber(fe:GetText()) or 0},
 							function() say("Deleted.") end)
 				end)
+				-- [HEARTH_POST_API] A script posts as the account by its
+				-- token; the admin makes it without logging in as it
+				if me.admin then
+					v:header("API tokens (a script posts as the account: " ..
+							"POST /api/v1/post)")
+					local function made(r)
+						go(function() show_token(r) end)
+					end
+					for _, k in ipairs(tokens) do
+						local r = row(v.list)
+						text(r, k.name .. " · " .. accounts.level_name(k.level) ..
+								" · made " .. ago(k.created) .. " · " ..
+								(k.used ~= 0 and "used " .. ago(k.used) or
+								"never used"), nil, W - 240)
+						button(r, "New token", function()
+							req("api_token", {name = k.name}, made)
+						end)
+						button(r, "Revoke", function()
+							req("api_token_revoke", {name = k.name}, redraw)
+						end)
+					end
+					local r = row(v.list)
+					local ne = edit(r, nil, false, nil, 160)
+					local ln = accounts.level_name
+					local lv = choice(r, "", {{0, "its level as it is"},
+							{10, ln(10)}, {20, ln(20)}, {30, ln(30)}}, 1)
+					button(r, "Make", function()
+						req("api_token", {name = ne:GetText(), level = lv()}, made)
+					end)
+					text(v.list, "A new account is made as a " .. ln(10) ..
+							" unless a level is picked; its password is " ..
+							"random and shown to no one.", DIM, W - 8)
+				end
 				v:fit()
+			end)
 			end)
 		end)
 	end)
+end
+
+-- [HEARTH_POST_API] A token just made, shown this once
+show_token = function(r)
+	open_thread = nil
+	local w = open("API token for " .. r.name)
+	text(w, (r.created_account and "The account " .. r.name .. " was made. " or
+			"") .. "The token is shown only now; Hearth keeps its hash. A new " ..
+			"token replaces it.", DIM, W)
+	local tr = row(w)
+	local e = edit(tr, nil, false, nil, W - 80)
+	e:SetText(r.token)
+	-- Its "hrt_" in sight, not its end
+	e.cursorPosition = 0
+	button(tr, "Copy", function()
+		magic.ui:SetClipboardText(r.token)
+		say("Copied.")
+	end)
+	text(w, "curl -X POST -H 'Content-Type: application/json' -d " ..
+			"'{\"token\":\"...\",\"topic\":<id>,\"title\":\"...\",\"body\":" ..
+			"\"...\"}' <this Hearth>/api/v1/post", DIM, W)
 end
 
 -- A topic's name and what it is about; a new one's parent (one level of
