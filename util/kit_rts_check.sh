@@ -28,7 +28,8 @@
 #   8. the recorder's perf with 60 units in view (a check type's 60 of
 #      Blue's tanks in the middle cavern, the cut on, made with the tools on
 #      in the round: try); with Firefox and web/, a short web run on the
-#      same save: its lobby, a match, the units in view, its perf.
+#      same save: its lobby, a match, the units in view (the frame about as
+#      bright as the native's), its perf.
 # Screenshots (KEEP_TMP=1): $t/lobby.png, $t/start.png, $t/cut.png,
 # $t/factory.png, $t/vault.png, $t/ai.png, $t/many.png, $t/web/*.png
 #   util/kit_rts_check.sh
@@ -454,6 +455,21 @@ J
 	"$here/util/web_drive.sh" firefox workbench "$t/steps.json" "$w" ||
 		fail "the web drive ($w)"
 	grep -aq "match started: computer" "$w/server.log" || fail "no web match ($w/server.log)"
+	# The web's 60 tanks as bright as the native's (the views differ: the
+	# frames' middles' means): under physical the meter took a mostly unseen
+	# frame's 12x gain and the room read white (web 121 against native 29;
+	# the native here is cartoon, a software GL)
+	python3 -I - "$t/many.png" "$w/many.png" <<'PY' || fail "the web's room not as bright as the native's ($w/many.png, $t/many.png)"
+import sys
+from PIL import Image, ImageStat
+def mid(f):
+    im = Image.open(f).convert("L")
+    w, h = im.size
+    return ImageStat.Stat(im.crop((w // 5, h * 3 // 20, w * 4 // 5, h * 17 // 20))).mean[0]
+n, b = mid(sys.argv[1]), mid(sys.argv[2])
+assert n / 2 - 4 < b < n * 2 + 8, (n, b)
+print("ok: the web's frame as bright as the native's: %.0f, native %.0f" % (b, n))
+PY
 	perf "$w/user/apps/workbench/saves/$name/save.sqlite" web >> "$t/perf" ||
 		fail "no web perf ($w)"
 	web=$(tail -1 "$t/perf")

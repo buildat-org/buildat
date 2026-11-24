@@ -164,7 +164,7 @@ local function lit_path(view)
 		rp:Append(magic.cache:GetResource("XMLFile", "kit/KitTextPass.xml"))
 	end
 	view.vp.renderPath = rp
-	LIT.grey = nil
+	LIT.grey, LIT.key = nil, nil
 end
 
 -- [KIT_PHYS_HEIGHTMAP_PALE] A heightmap's ground decoded to linear under
@@ -486,6 +486,19 @@ local function sky_bodies(dome, v, tx, height, tz, day)
 	return s
 end
 
+-- The meter's range on the views held at key k (nil: sky_render's)
+local function meter_key(k)
+	if k == LIT.key then
+		return
+	end
+	LIT.key = k
+	local r = k and {k, k} or sky_render().EXPOSURE.lum_range
+	for _, view in pairs(LIT.views) do
+		view.vp.renderPath:SetShaderParameter("AutoExposureLumRange",
+				magic.Vector2(r[1], r[2]))
+	end
+end
+
 -- physical's light of the hour: the sun (or the moon) and the ambient by
 -- voxel_light's terms, the fog the horizon's radiance, the dome
 -- [KIT_PHYS_SHADOWS] Under physical the sun (or the moon) casts shadows
@@ -500,10 +513,19 @@ end
 -- its floors bright, its walls by the ambient, the voxels' corner shade (their
 -- AO, the World's sky light off) on both. Cheap: the one light and the zone.
 -- true: it is on
+-- [KIT_RTS] Under physical the meter is held at a lit day's key (sky_render's
+-- lum_range top) while the fill is on: the light is the same everywhere, and
+-- a metered frame that is mostly unseen rock (fog of war's x0.1, a cut's dark
+-- backs) took the 12x gain and washed the lit room out to white (Deepcore,
+-- 4z37zzo). simplified: the cap's key for any fill; a fill's own key (its
+-- light on a grey floor) is the way if one reads too dark or too bright
 local function fill_light(v)
 	local f = tonumber(env.d.fill) or 0
 	env.filled = f > 0 and not v.sun and not v.moon
 	if not env.filled then
+		if M.physical() then
+			meter_key(nil)
+		end
 		return
 	end
 	env.sun.direction = magic.Vector3(-0.3, -1, -0.15)
@@ -520,6 +542,7 @@ local function fill_light(v)
 	env.zone.ambientColor = magic.Color(t.ambient.r, t.ambient.g, t.ambient.b)
 	env.light.brightness = t.sun * f / math.pi
 	env.light.color = magic.Color(t.sun_color.r, t.sun_color.g, t.sun_color.b)
+	meter_key(sr.EXPOSURE.lum_range[2])
 end
 
 local function body_shadows()
