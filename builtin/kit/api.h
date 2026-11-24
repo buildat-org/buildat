@@ -2145,7 +2145,13 @@ namespace interface
 // kit/team's; a team sees its own units and every unit within one of its
 // units' sight. A peer in no team, a builder in the tools and the server's
 // camera see everything. Worked out 5 times a second, and for
-// a unit made before its node is sent. What a peer does not see is never
+// a unit made before its node is sent. A team's members changed (a join, a
+// leave): worked out again within the tick, before anything more is sent. A
+// player joining a fog's scene (at their join, a scene move, Play) sees no
+// fogged entity until the join's runs are done (the scene's on_join, a
+// kit/team's join it sends): then their team's view, or all in no team.
+// simplified: a team joined later (a c:after, a button) comes after a
+// spectator's view of all. What a peer does not see is never
 // sent to them: no node, no kit:track, no kit:effect or positional
 // kit:sound at it, no per_player state; it is not in kit:controls' steered
 // list or free objects, and a kit:order at it is refused ("no such target").
