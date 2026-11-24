@@ -179,6 +179,9 @@ namespace interface
 //                               the scene's, or under a deck the deck's boxes in its
 //                               parent's frame. movement = {timed = true} is no
 //                               steered one (kit/course: a function of the time).
+//                               [KIT_ENT_PERF] movement.native = "path" on a
+//                               steered creature's: stepped in C++, not by its
+//                               step (Units, by Creatures below; kit/unit_walker).
 //                               Stock: kit/sea_vessel, kit/airship, kit/car,
 //                               kit/turret, kit/course
 //   params   = {name = {type = "voxel"|"number"|"string"|"bool"|"entity"|
@@ -2046,6 +2049,26 @@ namespace interface
 // sleeps: no steps, no timers (they are pushed on by its sleep), and goes
 // on where it was when the section is back. The pathfinder's cells: the
 // World's voxels and the solid looks (kit/part's, a shut door's).
+// [KIT_ENT_PERF] Units: a steered movement declaring `native = "path"`
+// (kit/unit_walker) is stepped by the server itself, no box call: its
+// state's path walked as kit/creature_walker's step walks it (its params
+// speed, width, height, jump_height, acceleration, gravity, rate), its body
+// against the pathfinder's cells round it, and pushed out of the other
+// native units' bodies in its scene. Its step runs instead where the
+// server cannot (held, on a moving deck). Any other value of `native` is
+// reserved: the step runs. simplified: whole cells (no slopes, step_height
+// or swim); a door shut is met up to half a second late.
+// c:fire{item = name, at = {x, y, z} | dir = {x, y, z}, from = {x, y, z}}:
+// a shot of a ranged item of shot "projectile" from the run's own entity
+// (from: off its place along the world's axes, {0, 0.5, 0} by default)
+// towards `at` or along `dir`: the item's speed, damage, gravity,
+// lifetime, pellets and spread; one a cooldown (the item's) an entity, a
+// call before it passed ignored; 8 a run. Its hit is as a bot's (no
+// knockback or hit rules): modify_hit and on_hit read hit.unit, the
+// shooter's id, and by the run's by; the shooter is not hit by its own
+// shots, which go with it. Refused (logged) while Stopped, unplaced, or
+// for an item that is not a ranged projectile one. simplified: no
+// magazine, ammo or wear; hitscan items refused.
 // [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
 // acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
 // <id>"): its own goal state as a player's, a goal's zone entered, and

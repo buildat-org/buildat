@@ -145,6 +145,7 @@ server c:effect | (t)
 server c:emit | (output, value, by)
 server c:event | (kind)
 server c:explode | (t)
+server c:fire | (t)
 server c:generate | (id, params) [experimental]
 server c:has | (item, n, ext)
 server c:hurt | (player, amount)
@@ -415,6 +416,7 @@ move movement.click
 move movement.eye
 move movement.h
 move movement.help
+move movement.native
 move movement.own_height
 move movement.pose
 move movement.r
@@ -1869,6 +1871,15 @@ type kit/ui_view input unfollow | none
 type kit/ui_view state queue
 type kit/ui_view state shown | shared
 type kit/ui_view state value | shared
+type kit/unit_walker | version 1
+type kit/unit_walker handlers | step
+type kit/unit_walker param acceleration | {"default": 30, "kind": "number", "max": 500, "min": 1}
+type kit/unit_walker param gravity | {"default": 20, "kind": "number", "max": 100, "min": 0}
+type kit/unit_walker param height | {"default": 0.9, "kind": "number", "max": 4, "min": 0.1}
+type kit/unit_walker param jump_height | {"default": 1.25, "kind": "number", "max": 4, "min": 0}
+type kit/unit_walker param rate | {"default": 20, "kind": "number", "max": 120, "min": 10}
+type kit/unit_walker param speed | {"default": 3, "kind": "number", "max": 20, "min": 0}
+type kit/unit_walker param width | {"default": 0.8, "kind": "number", "max": 3, "min": 0.1}
 type kit/voxel_replace | version 2
 type kit/voxel_replace handlers | migrate on_input on_start
 type kit/voxel_replace param enabled | {"default": false, "kind": "bool"}
