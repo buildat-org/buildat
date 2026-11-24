@@ -18356,6 +18356,7 @@ struct Module: public interface::Module, public Interface
 	// One run; what it spent of the meter
 	int64_t run(const Run &r)
 	{
+		m_scan_gen++; // [KIT_ENT_PERF] what it changes: the scans' lists made again
 		auto it = m_entities.find(r.entity);
 		if(it == m_entities.end() || r.comp >= it->second.comps.size())
 			return 0;
@@ -26275,6 +26276,7 @@ struct Module: public interface::Module, public Interface
 	// (MAX_SESSIONS of them at most), not a share of one
 	void tick_round(std::deque<Write> &writes)
 	{
+		m_scan_gen++; // [KIT_ENT_PERF] (packets, edits between ticks)
 		pause_tick(); // [KIT_PAUSE_ALONE]
 		for(auto &w : m_worlds){
 			WorldScope ws(m_w, &w.second);
@@ -27759,6 +27761,94 @@ struct Module: public interface::Module, public Interface
 		return (pts.is_array() || pts.is_object()) && (solid || look.get("floor").is_true());
 	}
 
+	// [KIT_ENT_PERF] Whether a look's declaration (decl) on an instance can make one
+	// look_met() takes in some state: its solid, its when's or its floor true or a
+	// parameter that is; anything else unusual counted as can
+	static bool look_may_meet(const Instance &in, const json::Value &decl)
+	{
+		if(!decl.is_object())
+			return true;
+		auto may = [&](const json::Value &v){
+			return v.is_true() || (v.is_string() && v.as_string().compare(0, 6, "param:") == 0 &&
+					in.params.get(v.as_string().substr(6)).is_true());
+		};
+		const json::Value &wh = decl.get("when");
+		return may(decl.get("solid")) || may(decl.get("floor")) || wh.is_string() ||
+				(wh.is_object() && may(wh.get("solid")));
+	}
+
+	// [KIT_ENT_PERF] The entities a step or the pathfinder may meet, made once and
+	// read by every drive's and body's snapshot and each search's grid_looks: the
+	// placed ones, no player, with a look that may meet (look_may_meet), each with
+	// its looks (look_of, in its components' order), its scene, and where it is if
+	// nothing in a tick moves it (fixed: no motion on it or above it, no player
+	// above it). Made again after a run (it may change any of it), in each tick and
+	// session (m_scan_gen). A scan of every entity for each drive was 0.3 ms a
+	// drive at 500 entities; the looks of a unit's parts with collision off are
+	// none of these
+	struct Solid
+	{
+		uint64_t id = 0;
+		ss_ scene;
+		main_context::SceneReference ref = nullptr;
+		bool fixed = false, poly = false, parallax = false;
+		double w[3] = {0, 0, 0};
+		Turn wq;
+		sv_<std::pair<size_t, json::Value>> looks;
+	};
+	sv_<Solid> m_solids;
+	uint64_t m_scan_gen = 1, m_solids_gen = 0;
+	const sv_<Solid>& solids()
+	{
+		if(m_solids_gen == m_scan_gen)
+			return m_solids;
+		m_solids_gen = m_scan_gen;
+		m_solids.clear();
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || e.kind == "player")
+				continue;
+			bool may = false;
+			for(const Instance &in : e.comps){
+				auto ti = m_types.find(in.type);
+				if(ti != m_types.end() && !ti->second.decl.get("look").is_undefined() &&
+						look_may_meet(in, ti->second.decl.get("look")))
+					may = true;
+			}
+			if(!may)
+				continue;
+			Solid s;
+			s.id = e.id;
+			s.ref = scene_of(e, &s.scene);
+			s.parallax = under_parallax(e);
+			for(size_t i = 0; i < e.comps.size(); i++){
+				const json::Value &d = m_types[e.comps[i].type].decl.get("look");
+				if(d.is_undefined())
+					continue;
+				s.poly = s.poly || jstr(d, "shape") == "polygon";
+				s.looks.push_back(std::make_pair(i, look_of(e.comps[i], d)));
+			}
+			s.fixed = !moves(e);
+			int depth = 0;
+			for(auto pi = m_entities.find(e.parent); s.fixed && pi != m_entities.end() &&
+					depth++ <= MAX_NEST + 2; pi = m_entities.find(pi->second.parent))
+				s.fixed = pi->second.kind != "player";
+			if(s.fixed)
+				world_of(e, s.w, &s.wq);
+			m_solids.push_back(std::move(s));
+		}
+		return m_solids;
+	}
+	// Where a Solid's entity is now (its world_of())
+	void solid_at(const Solid &s, const Entity &e, double w[3], Turn &wq)
+	{
+		if(!s.fixed)
+			return world_of(e, w, &wq);
+		for(int k = 0; k < 3; k++)
+			w[k] = s.w[k];
+		wq = s.wq;
+	}
+
 	// The world round a body for a step: its cells, the solid looks near
 	// it and a heightmap's samples (move.lua's snapshot)
 	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
@@ -27919,9 +28009,13 @@ struct Module: public interface::Module, public Interface
 		lua_lit(classes, o);
 		// The solid looks near it (the seat held none)
 		o += ",looks={";
-		for(auto &p : m_entities){
-			const Entity &e = p.second;
-			if(!e.has_pos || e.kind == "player" || (own && under_or(e, own)))
+		// ([KIT_ENT_PERF] those that may meet: solids())
+		for(const Solid &so : solids()){
+			auto ei = m_entities.find(so.id);
+			if(ei == m_entities.end() || so.ref != scene || !scene || so.parallax)
+				continue;
+			const Entity &e = ei->second;
+			if(own && under_or(e, own))
 				continue;
 			// [KIT_NESTING] where it is in the world; what rides on the
 			// vehicle stepping none either
@@ -27933,33 +28027,23 @@ struct Module: public interface::Module, public Interface
 			// its points reach (look_reach)
 			double w[3];
 			Turn wq;
-			world_of(e, w, &wq);
+			solid_at(so, e, w, wq);
 			const double near[3] = {std::fabs(w[0] - pos[0]) - R - 8,
 					std::fabs(w[1] - pos[1]) - ny - 8, std::fabs(w[2] - pos[2]) - R - 8};
 			const double far = std::max(near[0], std::max(near[1], near[2]));
-			if(far > 64){
-				bool poly = false;
-				for(const Instance &in : e.comps)
-					poly = poly || jstr(m_types[in.type].decl.get("look"),
-							"shape") == "polygon";
-				if(!poly || far > MAX_POLYGON_EXTENT * 1.5 + 32)
-					continue;
-			}
+			if(far > 64 && (!so.poly || far > MAX_POLYGON_EXTENT * 1.5 + 32))
+				continue;
 			// [KIT_MOVING_OBJECTS] one that moves: at rest, what moves it with it
-			const json::Value links = links_of(e);
+			// ([KIT_SIDE_SCENERY] (8) one under a parallax layer never met:
+			// not in solids())
+			const json::Value links = so.fixed ? json::array() : links_of(e);
 			if(links.size()){
 				AtRest rest(m_at_rest);
 				world_of(e, w, &wq);
 			}
-			ss_ es;
-			// ([KIT_SIDE_SCENERY] (8) under a parallax layer: never met)
-			if(scene_of(e, &es) != scene || !scene || under_parallax(e))
-				continue;
-			for(const Instance &in : e.comps){
-				const json::Value &d = m_types[in.type].decl.get("look");
-				if(d.is_undefined())
-					continue;
-				const json::Value look = look_of(in, d);
+			for(const auto &sl : so.looks){
+				const Instance &in = e.comps[sl.first];
+				const json::Value &look = sl.second;
 				const double lr = look_reach(look);
 				if(near[0] > lr || near[1] > lr || near[2] > lr)
 					continue;
@@ -28519,27 +28603,25 @@ struct Module: public interface::Module, public Interface
 	// yaw only; what moves (a link) is where it rests
 	void grid_looks(main_context::SceneReference ref, creatures::Grid &g, uint64_t self)
 	{
-		for(auto &p : m_entities){
-			const Entity &e = p.second;
-			if(!e.has_pos || e.kind == "player" || e.id == self || scene_of(e) != ref)
+		// ([KIT_ENT_PERF] those that may meet: solids(); a scan of every entity
+		// was 5-6 ms a search at 1000 entities)
+		for(const Solid &so : solids()){
+			auto ei = m_entities.find(so.id);
+			if(ei == m_entities.end() || so.id == self || so.ref != ref || so.parallax)
 				continue;
+			const Entity &e = ei->second;
 			double w[3];
 			Turn wq;
-			world_of(e, w, &wq);
+			solid_at(so, e, w, wq);
 			// ([KIT_SIDE_SCENERY] a polygon's box as far as its points reach)
-			bool poly = false;
-			for(const Instance &in : e.comps)
-				poly = poly || jstr(m_types[in.type].decl.get("look"), "shape") ==
-						"polygon";
+			const bool poly = so.poly;
 			const double m = poly ? MAX_POLYGON_EXTENT + 8 : 40;
 			if(w[0] < g.x0 - m || w[0] > g.x0 + g.nx + m || w[2] < g.z0 - m ||
-					w[2] > g.z0 + g.nz + m || under_parallax(e))
+					w[2] > g.z0 + g.nz + m)
 				continue;
-			for(const Instance &in : e.comps){
-				const json::Value &d = m_types[in.type].decl.get("look");
-				if(d.is_undefined())
-					continue;
-				const json::Value look = look_of(in, d);
+			for(const auto &sl : so.looks){
+				const Instance &in = e.comps[sl.first];
+				const json::Value &look = sl.second;
 				const ss_ key = jstr(look, "state");
 				const json::Value &wh = look.get("when");
 				bool solid = look.get("solid").is_true();
@@ -33854,15 +33936,62 @@ struct Module: public interface::Module, public Interface
 	// a cell round it. 0 for none; t its distance, head a player's head.
 	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] ship: a shot from that ship's gun passes
 	// its crew (aboard())
+	// [KIT_ENT_PERF] The placed entities with a health type ({id, where}), made once
+	// (m_scan_gen: again after a run, in each tick and session); ray_target's. Its
+	// scan of every entity was 43 us a ray at 1000 entities
+	struct Healthy
+	{
+		uint64_t id;
+		double w[3];
+	};
+	sv_<Healthy> m_healthy;
+	uint64_t m_healthy_gen = 0;
+	const sv_<Healthy>& healthy()
+	{
+		if(m_healthy_gen == m_scan_gen)
+			return m_healthy;
+		m_healthy_gen = m_scan_gen;
+		m_healthy.clear();
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			bool health = false;
+			for(const Instance &in : e.comps)
+				health = health || m_types[in.type].health;
+			if(!health || !e.has_pos)
+				continue;
+			Healthy h;
+			h.id = e.id;
+			world_of(e, h.w);
+			m_healthy.push_back(h);
+		}
+		return m_healthy;
+	}
+
 	uint64_t ray_target(const ss_ &scene, const double o[3],
 			const double d[3], double max, uint64_t skip, double &t,
 			bool &head, uint64_t ship = 0)
 	{
 		uint64_t best = 0;
-		for(auto &e : m_entities){
-			const Entity &en = e.second;
-			if(e.first == skip || !en.has_pos)
+		// ([KIT_ENT_PERF] healthy(); one whose place as listed is further than
+		// HEALTHY_SLACK from the ray's segment is not looked at. simplified: the
+		// list's places are this tick's or the last's: a body past 120 m/s
+		// between them is missed)
+		static constexpr double HEALTHY_SLACK = 4 + 1.2;
+		for(const Healthy &h : healthy()){
+			if(h.id == skip)
 				continue;
+			double a = 0, q2 = 0;
+			for(int k = 0; k < 3; k++)
+				a += (h.w[k] - o[k]) * d[k];
+			a = std::max(0.0, std::min(max, a));
+			for(int k = 0; k < 3; k++)
+				q2 += (h.w[k] - o[k] - d[k] * a) * (h.w[k] - o[k] - d[k] * a);
+			if(q2 > HEALTHY_SLACK * HEALTHY_SLACK)
+				continue;
+			auto ei = m_entities.find(h.id);
+			if(ei == m_entities.end())
+				continue;
+			const Entity &en = ei->second;
 			bool health = false;
 			for(const Instance &in : en.comps)
 				health = health || (m_types[in.type].health &&
@@ -33870,10 +33999,10 @@ struct Module: public interface::Module, public Interface
 			ss_ es;
 			if(!health || !scene_of(en, &es) || es != scene)
 				continue;
-			if(ship && (en.kind == "player" || is_bot(en)) && aboard(e.first, ship))
+			if(ship && (en.kind == "player" || is_bot(en)) && aboard(h.id, ship))
 				continue;
 			// ([KIT_LOBBY_OUT_OF_PLAY] one in a lobby is passed through)
-			if(en.kind == "player" && lobby_out(e.first))
+			if(en.kind == "player" && lobby_out(h.id))
 				continue;
 			double w[3], et = 0;
 			world_of(en, w);
@@ -33885,7 +34014,7 @@ struct Module: public interface::Module, public Interface
 					w[2] + r};
 			if(!ray_box(o, d, lo, hi, et) || et > max)
 				continue;
-			best = e.first;
+			best = h.id;
 			max = t = et;
 			head = player && o[1] + d[1] * et > w[1] + 0.9;
 		}
@@ -48571,6 +48700,7 @@ struct Module: public interface::Module, public Interface
 	void swap_ctx(Ctx &c)
 	{
 		using std::swap;
+		m_scan_gen++; // [KIT_ENT_PERF] another session's entities
 		swap(m_entities, c.entities);
 		swap(m_queue, c.queue);
 		swap(m_peers, c.peers);
