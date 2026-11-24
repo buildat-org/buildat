@@ -5428,9 +5428,35 @@ local function sel_key()
 end
 
 local build_inspector
--- The selected entity's last log lines, under a title (show_log's)
+-- The selected entity's last log lines, under a title (show_log's).
+-- [KIT_LOG_PANE] The title folds it to itself, as the Palette's does (the
+-- user: it got in the way); kept on this machine for every game
+S.log_folded = buildat.storage_read and
+		buildat.storage_read("kit_editor_log") == "minimized" or nil
 local function log_rows(b, lines)
-	text(b, "Log of " .. S.primary .. ":", DIM)
+	local hb, ht = button(b, "Log of " .. S.primary, function()
+		S.log_folded = not S.log_folded or nil
+		log:info("kit editor: the log " .. (S.log_folded and "minimized" or
+				"shown"))
+		if buildat.storage_write then
+			buildat.storage_write("kit_editor_log",
+					S.log_folded and "minimized" or "visible")
+		end
+		if NT.sh.on() then
+			build_inspector()
+		else
+			show_log()
+		end
+	end)
+	hb:SetName("log fold")
+	local m = text(hb, S.log_folded and "▲" or "▼")
+	m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+	m:SetPosition(-6, 0)
+	ht:SetPosition(-(m.width + 16) / 2, 0)
+	hb.minWidth = hb.minWidth + m.width + 16
+	if S.log_folded then
+		return
+	end
 	for i = math.max(1, #lines - 7), #lines do
 		text(b, tostring(lines[i]))
 	end
