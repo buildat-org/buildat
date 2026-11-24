@@ -360,6 +360,19 @@ namespace interface
 //                               mode), its collision and the entities
 //                               under it as ever; a type's own
 //                               "own_look" parameter is refused
+//                               [KIT_ENT_PERF_2] and merge_parts (off
+//                               by default): on, its look and those of
+//                               the entities under it (to the next one
+//                               with it on) drawn as one model moving
+//                               with it, a draw a material where it was
+//                               one a part (units of the same parts
+//                               drawn instanced); a part that moves
+//                               apart, changes, is hidden, faded or has
+//                               a client part is drawn on its own till
+//                               it is in step again (a scan each 30
+//                               frames). Looks that stay still are
+//                               merged by region of themselves, with
+//                               no parameter (client_lua/merge.lua)
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   ui = {kind = "text"|"bar"|"button"|"panel", anchor =, x =, y =,
 //         ...}  -- ([KIT_UI_COMPONENTS], stage 4m) drawn on the
@@ -538,7 +551,7 @@ namespace interface
 // package's type with one still loads, each warned of in the log. The
 // prefix kit_ is Kit's: every name Kit adds after API 1 on e (client
 // parts), s and i (movements' steps), w, an inventory call's ext and the
-// parameters it injects (use, own_look) starts kit_, so a game's own
+// parameters it injects (use, own_look, merge_parts) starts kit_, so a game's own
 // names, which never do, never meet a later Kit's. Kit's rules for its
 // own names:
 // - A bool parameter "active from the start" is `enabled`; no parameter
@@ -772,6 +785,11 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT_ENT_PERF_2] A part's table's skip_offscreen = true: its on_update
+//   is not called while its entity (its place, its look's box and a metre
+//   round it) is out of the play camera's view or past the looks' reach;
+//   in edit mode always called. For what only shows (a wheel's spin, a
+//   flag's wave), not for what a game needs each frame.
 //   [KIT_CLIENT_REACT] (3) **What a client part reaches**: its handlers'
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
