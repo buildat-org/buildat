@@ -1831,6 +1831,10 @@ end
 function M.my_team()
 	return C.ctl and type(C.ctl.team) == "string" and C.ctl.team or ""
 end
+-- [KIT_RTS] under fog of war (kit:controls' fog): rts.lua darkens
+function M.fog_on()
+	return C.ctl ~= nil and C.ctl.fog == true
+end
 function M.steps_sent()
 	return C.seq
 end

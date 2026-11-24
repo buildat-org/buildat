@@ -70,6 +70,13 @@
 //       early depth test lost where a GPU skips it for that); technique
 //       variants picked while a cut is on would keep it. No cap over a cut
 //       solid: its inside reads hollow.
+//   KITFOG  ([KIT_RTS]) fog of war's darkening, the World's voxels'
+//       (KitVoxelSky{,Phys}{,Alpha,Masked}Fog.xml, picked by module.lua's
+//       set_fog only while kit:controls says fog): a fragment outside every
+//       circle KitFog0..15 (x, z, radius, 0: the render path's scene
+//       commands' parameters, rts.lua's, its team's units' sight merged to
+//       16) has its albedo darkened, a 1.5 m soft edge. 16 fixed checks (a
+//       constant bound: GLSL ES 2); an unused circle has radius 0.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -120,6 +127,41 @@ varying vec4 vWorldPos;
 #endif
 #if defined(KITCUT) && defined(COMPILEPS)
     uniform float cKitCut;
+#endif
+#if defined(KITFOG) && defined(COMPILEPS)
+    uniform vec4 cKitFog0;
+    uniform vec4 cKitFog1;
+    uniform vec4 cKitFog2;
+    uniform vec4 cKitFog3;
+    uniform vec4 cKitFog4;
+    uniform vec4 cKitFog5;
+    uniform vec4 cKitFog6;
+    uniform vec4 cKitFog7;
+    uniform vec4 cKitFog8;
+    uniform vec4 cKitFog9;
+    uniform vec4 cKitFog10;
+    uniform vec4 cKitFog11;
+    uniform vec4 cKitFog12;
+    uniform vec4 cKitFog13;
+    uniform vec4 cKitFog14;
+    uniform vec4 cKitFog15;
+    // 1 inside circle c, 0 beyond its edge
+    float KitFogIn(vec4 c, vec2 p)
+    {
+        return clamp((c.z - length(p - c.xy)) / 1.5 + 1.0, 0.0, 1.0) *
+            step(0.001, c.z);
+    }
+    float KitFogSeen(vec2 p)
+    {
+        float s = max(KitFogIn(cKitFog0, p), KitFogIn(cKitFog1, p));
+        s = max(s, max(KitFogIn(cKitFog2, p), KitFogIn(cKitFog3, p)));
+        s = max(s, max(KitFogIn(cKitFog4, p), KitFogIn(cKitFog5, p)));
+        s = max(s, max(KitFogIn(cKitFog6, p), KitFogIn(cKitFog7, p)));
+        s = max(s, max(KitFogIn(cKitFog8, p), KitFogIn(cKitFog9, p)));
+        s = max(s, max(KitFogIn(cKitFog10, p), KitFogIn(cKitFog11, p)));
+        s = max(s, max(KitFogIn(cKitFog12, p), KitFogIn(cKitFog13, p)));
+        return max(s, max(KitFogIn(cKitFog14, p), KitFogIn(cKitFog15, p)));
+    }
 #endif
 
 void VS()
@@ -348,6 +390,15 @@ void PS()
         // lit bed through it is most of water's look there
         #ifndef KITWATER
             diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
+        #endif
+    #endif
+
+    #ifdef KITFOG
+        // Unseen: about a third as bright on the screen either way
+        #ifdef KITLINEAR
+            diffColor.rgb *= mix(0.1, 1.0, KitFogSeen(vWorldPos.xz));
+        #else
+            diffColor.rgb *= mix(0.35, 1.0, KitFogSeen(vWorldPos.xz));
         #endif
     #endif
 

@@ -506,6 +506,128 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	end
 end)
 
+-- ---- [KIT_RTS] Fog of war's darkening (kit:controls' fog: the server sends
+-- this client only what its team's units see): its team's units' sight
+-- (show.unit.sight) as circles in x, z, merged to FOG_MAX, handed every
+-- FOG_EVERY s to the chunks' KITFOG (KitVoxel.glsl) through the view's scene
+-- commands (one value for every material), module.lua's set_fog the
+-- techniques. simplified: circles, not spheres (a deep tunnel under a unit
+-- reads seen); merged by a grid of growing cells, each group's circle the
+-- one round its members' (more than they see, never less)
+
+local FOG_MAX, FOG_EVERY = 16, 0.2
+local FOG = {on = false, t = 0, rp = nil, n = -1}
+
+local function fog_circles()
+	local my, pts, g = M.my_team(), {}, 1
+	for _, n in pairs(P.nodes) do
+		local u = type(n.show) == "table" and n.show.unit
+		local r = type(u) == "table" and u.team == my and my ~= "" and
+				tonumber(u.sight) or 0
+		if r > 0 then
+			local p = unit_point(n) or n.node.position
+			pts[#pts + 1] = {p.x, p.z, r}
+			g = math.max(g, r)
+		end
+	end
+	while true do
+		local cells, out = {}, {}
+		for _, q in ipairs(pts) do
+			local k = math.floor(q[1] / g) .. "," .. math.floor(q[2] / g)
+			local c = cells[k]
+			if not c then
+				c = {n = 0, x = 0, z = 0}
+				cells[k] = c
+				out[#out + 1] = c
+			end
+			c.n, c.x, c.z = c.n + 1, c.x + q[1], c.z + q[2]
+			c[#c + 1] = q
+		end
+		if #out <= FOG_MAX then
+			for _, c in ipairs(out) do
+				c.x, c.z, c.r = c.x / c.n, c.z / c.n, 0
+				for _, q in ipairs(c) do
+					c.r = math.max(c.r, math.sqrt((q[1] - c.x) ^ 2 +
+							(q[2] - c.z) ^ 2) + q[3])
+				end
+			end
+			return out
+		end
+		g = g * 2
+	end
+end
+
+local function fog_path()
+	return (O.viewport and O.viewport() and O.viewport().renderPath) or
+			(M.play_path and M.play_path())
+end
+
+local function fog_params(rp, circles)
+	for i = 0, rp:GetNumCommands() - 1 do
+		local c = rp:GetCommand(i)
+		if c ~= nil and (c.type == magic.CMD_SCENEPASS or
+				c.type == magic.CMD_FORWARDLIGHTS) then
+			for k = 1, FOG_MAX do
+				local f = circles and circles[k]
+				if not circles then
+					c:RemoveShaderParameter("KitFog" .. (k - 1))
+				else
+					c:SetShaderParameter("KitFog" .. (k - 1), f and
+							magic.Color(f.x, f.z, f.r, 0) or magic.Color(0, 0, 0, 0))
+				end
+			end
+		end
+	end
+end
+
+magic.SubscribeToEvent("Update", function(_, ev)
+	local on = M.fog_on()
+	if not on and not FOG.on then
+		return
+	end
+	FOG.t = FOG.t + ev:GetFloat("TimeStep")
+	if on == FOG.on and FOG.t < FOG_EVERY then
+		return
+	end
+	FOG.t = 0
+	if on ~= FOG.on then
+		FOG.on = on
+		M.set_fog(on)
+		log:info("kit: rts: fog " .. (on and "on" or "off"))
+		if not on then
+			if FOG.rp then
+				fog_params(FOG.rp, nil)
+			end
+			FOG.rp, FOG.n = nil, -1
+			return
+		end
+	end
+	local rp = fog_path()
+	if not rp then
+		return
+	end
+	if FOG.rp and FOG.rp ~= rp then
+		fog_params(FOG.rp, nil)
+	end
+	FOG.rp = rp
+	local circles = fog_circles()
+	fog_params(rp, circles)
+	if #circles ~= FOG.n then
+		FOG.n = #circles
+		log:info("kit: rts: fog: " .. #circles .. " sight circles")
+	end
+end)
+
+-- For a drive: "event kit_rts_nodes" logs the entities this client has
+magic.SubscribeToEvent("command_seq:kit_rts_nodes", function()
+	local ids = {}
+	for id in pairs(P.nodes) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	log:info("kit: rts: nodes " .. #ids .. ": " .. table.concat(ids, " "))
+end)
+
 -- For a drive: "event kit_rts_focus <x> <y> <z>" turns the camera round
 -- that point
 magic.SubscribeToEvent("command_seq:kit_rts_focus", function(_, data)
