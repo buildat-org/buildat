@@ -415,6 +415,9 @@ struct Type
 	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
 	// state members and score); it reads every team (reads_teams = true)
 	bool team = false, teams = false;
+	// [KIT_RTS] A unit a player commands (unit = true: its param team, the
+	// orders' on_order; kit/unit)
+	bool unit = false;
 	// [KIT_CTF] It reads its scene's regions (reads_regions = true:
 	// c:region_at)
 	bool regions = false;
@@ -1813,6 +1816,8 @@ struct Module: public interface::Module, public Interface
 		// [KIT] stage 4h: a body's inputs, a seat left
 		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
 		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
+		// [KIT_RTS] a player's order to their units
+		sub(m_server, "network:packet_received/kit:order", &Module::on_order);
 		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
 		sub(m_server, "network:packet_received/kit:ui_text", &Module::on_ui_text);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
@@ -2088,7 +2093,7 @@ struct Module: public interface::Module, public Interface
 				"placeable", "player", "reads_players", "reads_regions",
 				"reads_teams", "reads_voxels", "region", "right_use", "root",
 				"seat", "senses", "sight", "single", "space", "spawn",
-				"spawn_spots", "state", "takes_text", "team", "ui", "usable",
+				"spawn_spots", "state", "takes_text", "team", "ui", "unit", "usable",
 				"use_range", "use_when", "version", "volume", "voxel_box",
 				"world", "world_region", "zone"};
 		return F;
@@ -2102,7 +2107,7 @@ struct Module: public interface::Module, public Interface
 				"on_daytime",
 				"on_died", "on_enter", "on_event", "on_fall", "on_give", "on_hit",
 				"on_input", "on_inventory", "on_item", "on_join", "on_leave",
-				"on_params", "on_reload", "on_remove", "on_session_end",
+				"on_order", "on_params", "on_reload", "on_remove", "on_session_end",
 				"on_session_start", "on_start", "on_timer", "on_tool", "on_ui",
 				"on_use", "on_voxel", "plan", "step"};
 		return H;
@@ -2215,6 +2220,7 @@ struct Module: public interface::Module, public Interface
 		t.health = t.decl.get("health").is_true();
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
+		t.unit = t.decl.get("unit").is_true();
 		t.teams = t.decl.get("reads_teams").is_true();
 		t.regions = t.decl.get("reads_regions").is_true();
 		t.events = jstr(t.decl, "events");
@@ -13742,6 +13748,17 @@ struct Module: public interface::Module, public Interface
 		return nullptr;
 	}
 
+	// [KIT_RTS] A team entity's name (its team type's name param)
+	ss_ team_name(uint64_t team)
+	{
+		auto it = m_entities.find(team);
+		if(it != m_entities.end())
+			for(const Instance &in : it->second.comps)
+				if(m_types[in.type].team)
+					return jstr(in.params, "name");
+		return "";
+	}
+
 	// The team a player is in (0: none)
 	uint64_t team_of_player(uint64_t player)
 	{
@@ -17408,6 +17425,13 @@ struct Module: public interface::Module, public Interface
 			// members, shared) tint on their bodies
 			if(ty.team && show.get("team_color").is_undefined())
 				show.set("team_color", jstr(in.params, "color"));
+			// [KIT_RTS] a unit: whose it is (its team's name; "": anyone's),
+			// for a client's selection
+			if(ty.unit && in.disabled.empty() && show.get("unit").is_undefined()){
+				json::Value u = json::object();
+				u.set("team", jstr(in.params, "team"));
+				show.set("unit", u);
+			}
 			// (a seat: taken by a use, [KIT] stage 4h)
 			// ([KIT_USE_ACCESS] "locked": its use is nobody's, a click
 			// told so)
@@ -25149,9 +25173,11 @@ struct Module: public interface::Module, public Interface
 					// ground on a join and at a session's end) is in no zone
 					auto bi = m_bodies.find(pp.first);
 					// ([KIT_LOBBY_OUT_OF_PLAY] nor one in a lobby)
+					// ([KIT_RTS] nor a camera alone)
 					const bool inside = met && !peer.spawning && !peer.lobby_out &&
 							(!m_host.controls || (bi != m_bodies.end() &&
-							bi->second.put)) && zone_meets(z, shapes[pp.first]);
+							bi->second.put && !bi->second.camera)) &&
+							zone_meets(z, shapes[pp.first]);
 					if(inside != (in.inside.count(itos(peer.player)) > 0))
 						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
 								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
@@ -26553,8 +26579,18 @@ struct Module: public interface::Module, public Interface
 		// plane is none); [KIT_TOP_DOWN] plane_h: a level plane's y (plane_of())
 		double plane_z = NAN;
 		bool plane_h = false;
+		// [KIT_RTS] kit/controls' camera "rts": a camera alone, no body (no
+		// movement stepped, not drawn, not hit, in no zone)
+		bool camera = false;
 	};
 	static constexpr int64_t SETTLE_US = 500000;
+	// [KIT_RTS] Whether a player is a camera alone (Body::camera)
+	bool camera_only(uint64_t player)
+	{
+		const size_t p = player ? peer_of_player(player) : 0;
+		auto bi = p ? m_bodies.find(p) : m_bodies.end();
+		return bi != m_bodies.end() && bi->second.camera;
+	}
 	// [KIT_BODY_VARS] The state's `vars` the body's own (a step's change to them
 	// undone; none: no key), state_json with it
 	void with_vars(Body &b)
@@ -26876,9 +26912,11 @@ struct Module: public interface::Module, public Interface
 			}
 		b.ride = 0;
 		// [KIT_SCENE_TREE] the nearest kit/controls' movement, its parameters
-		// the nearest copy's of it
-		type = scene_holds(scene) ? ss_() :
-				jstr(controls_params(scene, player), "movement", "kit/walker");
+		// the nearest copy's of it ([KIT_RTS] none for a camera "rts")
+		const json::Value cp = controls_params(scene, player);
+		b.camera = jstr(cp, "camera") == "rts";
+		type = scene_holds(scene) || b.camera ? ss_() :
+				jstr(cp, "movement", "kit/walker");
 		if(!is_movement(type)){
 			type = "";
 			params = json::object();
@@ -26954,6 +26992,9 @@ struct Module: public interface::Module, public Interface
 				sig.set(it.key(), *it);
 			}
 		c.set("signals", sig);
+		// [KIT_RTS] the name of their team (kit/unit's team), "" none
+		if(const uint64_t tm = team_of_player(pe.player))
+			c.set("team", team_name(tm));
 		auto bi = m_bodies.find(peer);
 		if(bi != m_bodies.end() && !bi->second.type.empty()){
 			Body &b = bi->second;
@@ -27677,9 +27718,11 @@ struct Module: public interface::Module, public Interface
 			return;
 		// ([KIT_CLIENT_REACT] (9) 8: out of play, the body kept drawn on its own
 		// client, a kit/lobby's keep_own_body; hidden from the rest as 4 is)
+		// ([KIT_RTS] 16: a camera alone, drawn by no client)
 		const int flags = (b.dig != 0 ? 1 : 0) | (b.seat ? 2 : 0) |
 				(out_of_play(pi->second.player) ? 4 : 0) |
-				(pi->second.lobby_out && pi->second.lobby_keep ? 8 : 0);
+				(pi->second.lobby_out && pi->second.lobby_keep ? 8 : 0) |
+				(b.camera ? 16 : 0);
 		char buf[64];
 		snprintf(buf, sizeof buf, "%.0f %.0f %.0f %d ", b.look_yaw,
 				b.look_pitch, std::fmod(b.swings, 1000000), flags);
@@ -32747,7 +32790,7 @@ struct Module: public interface::Module, public Interface
 		// ([KIT_GUIDE_BOTS_2] a bot as a player)
 		if(t.kind != "player" && !is_bot(t))
 			return allows(peer, "damage", c.getX(), c.getY(), c.getZ(), &why);
-		if(lobby_out(t.id)){
+		if(lobby_out(t.id) || camera_only(t.id)){
 			why = "Out of play";
 			return false;
 		}
@@ -34205,7 +34248,7 @@ struct Module: public interface::Module, public Interface
 			if(ship && (en.kind == "player" || is_bot(en)) && aboard(h.id, ship))
 				continue;
 			// ([KIT_LOBBY_OUT_OF_PLAY] one in a lobby is passed through)
-			if(en.kind == "player" && lobby_out(h.id))
+			if(en.kind == "player" && (lobby_out(h.id) || camera_only(h.id)))
 				continue;
 			double w[3], et = 0;
 			world_of(en, w);
@@ -36003,6 +36046,146 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "Action %s %s by %s", cs(name),
 				down ? "pressed" : "released", cs(pe.name));
 		action_runs(peer, name, down ? "pressed" : "released", json::null());
+	}
+
+	// [KIT_RTS] Whether a player of team `team` (its name, "" none) commands an
+	// entity: one of its types says unit = true, enabled, its team param "" or
+	// that name
+	bool commands(const Entity &e, const ss_ &team)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].unit && in.disabled.empty()){
+				const ss_ t = jstr(in.params, "team");
+				return t.empty() || t == team;
+			}
+		return false;
+	}
+
+	// [KIT_RTS] "kit:order" {"ids": [id...], "at": [x, y, z]} or {"ids",
+	// "target": id}: a placed peer's order in play (not in the tools, within
+	// the acts' allowance) to ORDER_MAX units at most, each one they command
+	// (commands()) in their scene, the others left out; on_order(c, order, by)
+	// on each instance of theirs that has it. order: {at = its own spot, in a
+	// square ORDER_SPACING m apart about the point (the units sorted by z then
+	// x, as the spots), center = the point, k = its place in the order (from
+	// 1), n = how many} or {target = id, k, n} (an entity with a place in that
+	// scene). simplified: a spot may be in a wall (the pathfinder goes as
+	// near as it can)
+	static constexpr size_t ORDER_MAX = 256;
+	static constexpr double ORDER_SPACING = 1.5;
+	void on_order(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_order_u(packet);
+	}
+
+	void on_order_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty() ||
+				!pi->second.player || !act_allowed(pi->second))
+			return;
+		Peer &pe = pi->second;
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(pe, why))
+				log_i(MODULE, "An order from %s refused: %s", cs(pe.name), cs(why));
+		};
+		if(!m_session.running)
+			return refuse("the server is Stopped");
+		if(pe.editing)
+			return refuse("in the tools");
+		if(waiting_refused(pe, "order"))
+			return;
+		const json::Value j = packet.data.size() < 8192 ?
+				json::load_string(packet.data.c_str()) : json::null();
+		const json::Value &ids = j.get("ids"), &at = j.get("at");
+		double p[3] = {0, 0, 0};
+		bool has_at = at.is_array() && at.size() == 3;
+		for(unsigned k = 0; has_at && k < 3; k++){
+			has_at = at.at(k).is_number() && std::fabs(at.at(k).as_number()) < 1e6;
+			p[k] = has_at ? at.at(k).as_number() : 0;
+		}
+		const uint64_t target = j.get("target").is_number() ?
+				(uint64_t)std::max(0.0, j.get("target").as_number()) : 0;
+		if(!ids.is_array() || !ids.size() || ids.size() > ORDER_MAX ||
+				has_at == (target != 0))
+			return refuse("not {\"ids\": [...], \"at\": [x, y, z] | \"target\": id}");
+		if(target){
+			auto ti = m_entities.find(target);
+			ss_ ts;
+			if(ti == m_entities.end() || !ti->second.has_pos ||
+					!scene_of(ti->second, &ts) || ts != pe.scene)
+				return refuse("no such target");
+		}
+		const ss_ team = team_name(team_of_player(pe.player));
+		// The units: id, place
+		sv_<std::pair<uint64_t, std::array<double, 3>>> units;
+		std::set<uint64_t> seen;
+		size_t refused = 0;
+		for(unsigned i = 0; i < ids.size(); i++){
+			const json::Value &v = ids.at(i);
+			const uint64_t id = v.is_number() ? (uint64_t)std::max(0.0, v.as_number()) : 0;
+			auto ei = m_entities.find(id);
+			ss_ es;
+			if(!seen.insert(id).second)
+				continue;
+			if(ei == m_entities.end() || !ei->second.has_pos ||
+					!scene_of(ei->second, &es) || es != pe.scene ||
+					!commands(ei->second, team)){
+				refused++;
+				continue;
+			}
+			std::array<double, 3> w;
+			world_of(ei->second, w.data());
+			units.push_back(std::make_pair(id, w));
+		}
+		if(refused)
+			refuse(itos(refused)+" of "+itos(ids.size())+" not theirs to command");
+		if(units.empty())
+			return;
+		typedef std::pair<uint64_t, std::array<double, 3>> U;
+		std::sort(units.begin(), units.end(), [](const U &a, const U &b){
+			return a.second[2] != b.second[2] ? a.second[2] < b.second[2] :
+					a.second[0] < b.second[0];
+		});
+		const int n = (int)units.size();
+		const int cols = (int)std::ceil(std::sqrt((double)n));
+		const int rows = (n + cols - 1) / cols;
+		const ss_ by = by_of(pe.name);
+		for(int k = 0; k < n; k++){
+			json::Value o = json::object();
+			if(target){
+				o.set("target", (int64_t)target);
+			} else {
+				const double s[3] = {p[0] + (k % cols - (cols - 1) / 2.0) * ORDER_SPACING,
+						p[1], p[2] + (k / cols - (rows - 1) / 2.0) * ORDER_SPACING};
+				o.set("at", point(s));
+				o.set("center", point(p));
+			}
+			o.set("k", (int64_t)(k + 1));
+			o.set("n", (int64_t)n);
+			const Entity &e = m_entities[units[k].first];
+			for(size_t i = 0; i < e.comps.size(); i++){
+				if(!m_types[e.comps[i].type].handlers.count("on_order") ||
+						!e.comps[i].disabled.empty())
+					continue;
+				Run r;
+				r.entity = e.id;
+				r.comp = i;
+				r.handler = "on_order";
+				r.by = by;
+				r.args.append(o);
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+		if(target)
+			log_i(MODULE, "Order by %s: %d units at entity %s", cs(pe.name), n,
+					cs(itos(target)));
+		else
+			log_i(MODULE, "Order by %s: %d units to %.2f,%.2f,%.2f", cs(pe.name), n,
+					p[0], p[1], p[2]);
 	}
 
 	// [KIT_UI_COMPONENTS] "kit:ui" "<id> 1" pressed, "<id> 0" released:

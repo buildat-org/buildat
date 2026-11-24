@@ -2069,6 +2069,23 @@ namespace interface
 // shots, which go with it. Refused (logged) while Stopped, unplaced, or
 // for an item that is not a ranged projectile one. simplified: no
 // magazine, ammo or wear; hitscan items refused.
+// [KIT_RTS] Units a player commands: a type with `unit = true` (kit/unit)
+// makes its entity one, and its param `team` whose (a kit/team's name: its
+// members'; "": any player's). Its show has unit = {team}, and kit/controls'
+// camera "rts" (a player who is a camera alone: no body, no movement stepped
+// on either side, not drawn, not hit, in no zone; client_lua/rts.lua) selects
+// such units by a click or a box and orders them. An order, "kit:order"
+// {"ids": [id...], "at": [x, y, z]} or {"ids", "target": id}, is a placed
+// player's in play (Running, not in the tools, within the acts' allowance),
+// to 256 units at most; the ids they do not command (another team's, another
+// scene's, gone) are left out, logged. It runs on_order(c, order, by) on each
+// instance with it of each unit: order = {at = its own spot (the units in a
+// square 1.5 m apart about the point, sorted by z then x), center = the point,
+// k = its place (1...), n = how many} or {target = id, k, n}. kit/unit's walks
+// to the spot (c:propose_move), or goes after the target to within its range
+// and shoots it with its weapon (c:fire) while there (its state target, so
+// c.target), until the target is gone or another order comes. kit:controls
+// carries the player's team's name (team) for the client's selection.
 // [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
 // acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
 // <id>"): its own goal state as a player's, a goal's zone entered, and

@@ -151,7 +151,7 @@ end
 -- side camera's and a chase or first person following the heading never turn)
 function M.view_turns()
 	local m = camera_mode()
-	return m ~= "top_down" and m ~= "side" and not chase_follow(true)
+	return m ~= "top_down" and m ~= "side" and m ~= "rts" and not chase_follow(true)
 end
 -- [KIT_TOOLS_2] A shot's recoil: the view kicked up by deg degrees
 function M.kick(deg)
@@ -162,7 +162,7 @@ function M.pointer_free()
 	local p = params().pointer or "auto"
 	if p == "auto" then
 		return camera_mode() == "top_down" or camera_mode() == "side" or
-				chase_follow() ~= nil
+				camera_mode() == "rts" or chase_follow() ~= nil
 	end
 	return p == "cursor"
 end
@@ -1820,8 +1820,30 @@ local function route_tick()
 	end
 end
 
--- The app's click, or the movement's
+-- [KIT_RTS] For rts.lua: the zoom (the wheel's, a pinch's), the touch stick
+-- ({f, r}, nil: none), the player's team's name ("" none), the steps sent
+function M.view_zoom()
+	return C.zoom
+end
+function M.touch_stick()
+	return C.stick
+end
+function M.my_team()
+	return C.ctl and type(C.ctl.team) == "string" and C.ctl.team or ""
+end
+function M.steps_sent()
+	return C.seq
+end
+function M.controls_paused()
+	return paused()
+end
+
+-- The app's click, or the movement's ([KIT_RTS] a tap with the rts camera
+-- rts.lua's)
 local function click(x, y, left)
+	if camera_mode() == "rts" then
+		return M.rts_tap(x, y, left, TOUCH)
+	end
 	-- [KIT_SPECTATE] the clicks pick whom to watch (players.lua)
 	if M.spectate_click(left) then
 		return
@@ -1835,8 +1857,9 @@ local function click(x, y, left)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+	-- ([KIT_RTS] the rts camera's clicks are rts.lua's)
 	if not C.on or TOUCH or E.editing or paused() or ui_utils.clicks_wanted() or
-			not O.act then
+			not O.act or camera_mode() == "rts" then
 		return
 	end
 	local b = data:GetInt("Button")
@@ -1897,7 +1920,9 @@ local function zoom_tick()
 end
 
 magic.SubscribeToEvent("MouseWheel", function(_, data)
-	if not C.on or E.editing or paused() or camera_mode() == "first_person" then
+	-- ([KIT_RTS] the rts camera's with Shift moves its cut: rts.lua's)
+	if not C.on or E.editing or paused() or camera_mode() == "first_person" or
+			camera_mode() == "rts" and magic.input:GetQualifierDown(magic.QUAL_SHIFT) then
 		return
 	end
 	-- ([KIT_WHEEL_TRACKPAD] by the notch, the web's in tenths: a trackpad's
@@ -2557,7 +2582,10 @@ if TOUCH then
 			return
 		end
 		-- The mouse sensitivity's, at half of 0.2 (floorplanner's)
-		if M.view_turns() then
+		-- ([KIT_RTS] one finger pans the rts camera)
+		if camera_mode() == "rts" then
+			M.rts_pan_pixels(data:GetInt("DX"), data:GetInt("DY"))
+		elseif M.view_turns() then
 			C.yaw = C.yaw + data:GetInt("DX") * 0.1
 			C.pitch = math.max(-89, math.min(89, C.pitch + data:GetInt("DY") * 0.1))
 		end
@@ -3416,7 +3444,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 		P.pose[M.vehicle_of(seat)] = {at[1], at[2] + 0.5, at[3], C.draw_yaw or 0}
 	end
 	local mode = camera_mode()
-	if at then
+	-- ([KIT_RTS] the rts camera rts.lua's, no body of its own drawn)
+	if mode == "rts" then
+		M.rts_camera(dt, at, O.camera, params())
+		at = nil
+	elseif at then
 		place_camera(dt, at)
 	end
 	-- [KIT_PLAYER_MODEL] the players' bodies (players.lua): this one's

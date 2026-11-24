@@ -53,6 +53,14 @@
 -- Front view where the camera is side), over the remembered,
 -- the builder's picks standing after it. Without it an app
 -- with Kit's controls walks with kit/walker in first person.
+-- [KIT_RTS] camera rts: a player who is a camera alone (no body: no movement
+-- stepped on either side, not drawn, not hit, in no zone; the movement
+-- param unused), an orbit round a point on the ground: height m from it
+-- (the wheel zooms), angle degrees down, yaw its first turn; panned by the
+-- movement keys, a middle drag or one finger, turned by a right drag; a depth
+-- cut (cut m over the point at the start, 0 none; PageUp, PageDown, Shift
+-- and the wheel move it, Home takes it off) hides the voxels and the looks
+-- above it. The pointer: kit/unit's selection and orders (client_lua/rts.lua).
 local function signal(c, input, value, by)
 	local s = c.state[input]
 	local n = type(s) == "table" and (tonumber(s.n) or 0) + 1 or 1
@@ -105,7 +113,7 @@ return {
 	controls = true,
 	params = {
 		camera = {type = "string", default = "first_person",
-			choices = {"first_person", "chase", "top_down", "side"}},
+			choices = {"first_person", "chase", "top_down", "side", "rts"}},
 		pointer = {type = "string", default = "auto",
 			choices = {"auto", "crosshair", "cursor"}},
 		camera_frame = {type = "string", default = "world",
@@ -131,6 +139,8 @@ return {
 			max = 80},
 		yaw = {cat = "look", type = "number", default = 0, min = -360,
 			max = 360},
+		-- ([KIT_RTS] the rts camera's depth cut at the start, m over its point)
+		cut = {cat = "look", type = "number", default = 0, min = 0, max = 100},
 		ortho = {cat = "look", type = "bool", default = false},
 		dead_zone = {cat = "look", type = "number", default = 0, min = 0,
 			max = 20},
@@ -181,22 +191,23 @@ return {
 			fov = "Changes the view's angle over its fov time. Value: the angle; 0 goes back.",
 			glitch = "Shows a glitch on the screen. Value: its length in seconds (none: 1).",
 			tint = "Flashes a colour on the screen. Value: #rrggbb (none: white).",
-			camera = "Changes the camera's mode. Value: first_person, chase, top_down or side; \"\" for its own.",
+			camera = "Changes the camera's mode. Value: first_person, chase, top_down, side or rts; \"\" for its own.",
 			camera_target = "Aims the sender's camera (no sender: all), whatever `to` says. Value: an entity id or [x, y, z]; 0 resets.",
 		},
 		params = {
-			camera = "first_person (the eye), chase (behind the player), top_down (from above) or side (across a plane).",
+			camera = "first_person (the eye), chase (behind the player), top_down (from above), side (across a plane) or rts (a camera alone, no body: an orbit round a point, units selected and ordered).",
 			pointer = "crosshair (mouse look), cursor (a free pointer, the right button turns) or auto (by the camera).",
 			camera_frame = "On a moving voxel object: world keeps the horizon level, object tilts the view with the deck; body tilts it with the body's own up (its state's up, as a stunt car sets it in a loop).",
 			movement = "The type that moves the players' bodies (kit/walker, kit/click_to_move, a custom one) or none.",
 			plane = "vertical holds the bodies at one z (a side game), horizontal at one height (top-down), or none.",
 			fov = "The view's angle in degrees.",
 			distance = "How far behind (chase) or across (side) the camera is, in metres.",
-			height = "The top-down camera's height over the player in metres.",
-			angle = "The top-down camera's angle down from level, in degrees.",
+			height = "The top-down camera's height over the player in metres (rts: its distance from the point it turns round).",
+			angle = "The top-down or rts camera's angle down from level, in degrees.",
 			chase_follow = "Above 0: the camera follows the body's heading with this lag in seconds (0: mouse look).",
 			chase_pitch = "Degrees the following chase camera looks down.",
-			yaw = "The top-down camera's fixed direction in degrees.",
+			yaw = "The top-down camera's fixed direction in degrees (rts: its first).",
+			cut = "The rts camera's depth cut at the start, metres over the point it turns round: what is above is hidden (0: none).",
 			ortho = "A flat view with no perspective (top_down and side).",
 			dead_zone = "Metres the body moves off the view's middle before the camera follows (0: always).",
 			look_ahead = "Metres the view leads the body the way it faces.",

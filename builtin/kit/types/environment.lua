@@ -125,6 +125,8 @@ return {
 		sun = {cat = "look", type = "bool", default = true},
 		moon = {cat = "look", type = "bool", default = true},
 		stars = {cat = "look", type = "bool", default = true},
+		-- ([KIT_RTS] a world with no sky lit from above; client_lua/environment.lua)
+		fill = {cat = "look", type = "number", default = 0, min = 0, max = 1},
 	},
 	state = {
 		-- {key = value}: what the signals set, shared with the clients
@@ -182,6 +184,7 @@ return {
 			sun = "Whether there is a sun and its light.",
 			moon = "Whether there is a moon and its light.",
 			stars = "Whether stars show at night.",
+			fill = "With the sun and the moon off (underground): a light from above at this share of noon's, with noon's ambient, so floors read bright and walls less (0: none). For a World with its sky light off.",
 		},
 	},
 	inputs = {set_time = "number", set_day_minutes = "number",

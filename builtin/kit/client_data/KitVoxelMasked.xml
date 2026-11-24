@@ -1,6 +1,6 @@
 <!-- [KIT_VOXEL_FORMAT] Kit's leaves and plants cut out (DiffAlphaMask.xml's): KitVoxel.glsl with
      the tint (module.lua's voxel_look). -->
-<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITTINT" psdefines="DIFFMAP KITTINT ALPHAMASK">
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITTINT" psdefines="KITCUT DIFFMAP KITTINT ALPHAMASK">
     <pass name="base" />
     <pass name="litbase" psdefines="AMBIENT" />
     <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
