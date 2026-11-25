@@ -195,11 +195,11 @@ The client ([HEARTH_UI]) is a sidebar of topics beside a page, in one
 scroll view; the arrow keys move between the two. Escape at the top
 opens My account. From a launcher it opens "Exit to launcher?" (Exit, My
 account, Cancel) instead, which the × at the frame's top right opens too
-([HEARTH_CLOSE]). On the web it opens "Leave Hearth?" (Leave, My account,
-Cancel), where Leave goes back to the page before with the login kept
-([HEARTH_WEB_BACK]), and Back steps through the pages to the sidebar and
-that dialog. A draft and the place are kept over a restart
-([HEARTH_RESUME]). A thread or topic row carries
+([HEARTH_CLOSE]); on the web Exit keeps the login. On the web page's own
+/app it opens "Leave Hearth?" (Leave, My account, Cancel), where Leave
+goes back to the page before with the login kept ([HEARTH_WEB_BACK]), and
+Back steps through the pages to the sidebar and that dialog. A draft and
+the place are kept over a restart ([HEARTH_RESUME]). A thread or topic row carries
 a ● for a message within a day and a • within a week, amber while
 unread ([HEARTH_NEW_MARKS]); home's "Waiting for you" lists the unread
 threads, followed first. The client's pages: the topics and the latest

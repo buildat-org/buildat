@@ -458,9 +458,11 @@ local base_top = nil
 local function can_exit()
 	return buildat.can_leave_to_launcher()
 end
--- [HEARTH_WEB_BACK] On the web page the dialog is "Leave Hearth?", the
--- browser's Back at the top reaching it as Escape; Leave goes to the page
--- before and keeps the login (a page left, not a Log out)
+-- [HEARTH_WEB_BACK] On the web the browser's Back at the top reaches the
+-- dialog as Escape. On the page's own /app (no launcher under Hearth) it
+-- is "Leave Hearth?", Leave going to the page before; under the web
+-- launcher (play's page) "Exit to launcher?", Exit going to it. Both keep
+-- the login on the web (a page left, not a Log out)
 local on_web = buildat.leave_web_page(false) ~= nil
 local function ask_exit()
 	local root = uistack.main:push({desc = "hearth exit"})
@@ -468,9 +470,13 @@ local function ask_exit()
 	root.priority = 200
 	local function close() uistack.main:pop(root) end
 	local t
+	local to_launcher = can_exit()
 	local function leave()
 		if not on_web then
 			accounts.logout()
+		elseif to_launcher then
+			log:info("hearth: exit to the launcher, the login kept")
+			buildat.leave()
 		elseif not buildat.leave_web_page(true) then
 			t.text = "No page before this one to go back to"
 		end
@@ -484,8 +490,8 @@ local function ask_exit()
 	end})
 	t = menu.window:CreateChild("Text")
 	t:SetStyleAuto()
-	t.text = on_web and "Leave Hearth?" or "Exit to launcher?"
-	menu:add(on_web and "Leave" or "Exit", leave, true):SetFocus(true)
+	t.text = to_launcher and "Exit to launcher?" or "Leave Hearth?"
+	menu:add(to_launcher and "Exit" or "Leave", leave, true):SetFocus(true)
 	menu:add("My account", function()
 		close()
 		accounts.show_account()
@@ -1719,7 +1725,7 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 end)
 -- [PLAYTEST_1008] The browser's Back is Escape while the handler above has
 -- a page to go back from (the web page's depth, [TAP_BACK]), and on the
--- web at the top too, to "Leave Hearth?" ([HEARTH_WEB_BACK])
+-- web at the top too, to the exit dialog ([HEARTH_WEB_BACK])
 local back_extra = nil
 magic.SubscribeToEvent("Update", function()
 	local n = frame and frame.visible and (accounts.page or on_web or
