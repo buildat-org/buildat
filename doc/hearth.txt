@@ -192,9 +192,10 @@ Taking part: the client
 The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
 scroll view, by the arrow keys between the two; Escape at the top opens
 My account -- from a launcher, "Exit to launcher?" (Exit, My account,
-Cancel), which the × at the frame's top right opens too ([HEARTH_CLOSE]);
-on the web "Leave Hearth?" (Leave, My account, Cancel), Leave going back
-to the page before with the login kept ([HEARTH_WEB_BACK]) -- and on the
+Cancel), which the × at the frame's top right opens too ([HEARTH_CLOSE]),
+on the web with the login kept; on the web page's own /app "Leave
+Hearth?" (Leave, My account, Cancel), Leave going back to the page
+before with the login kept ([HEARTH_WEB_BACK]) -- and on the
 web Back steps through the pages to the sidebar and that dialog; a draft
 and the
 place kept over a restart ([HEARTH_RESUME]). A thread or topic row carries
