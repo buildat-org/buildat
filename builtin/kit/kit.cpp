@@ -6368,6 +6368,9 @@ struct Module: public interface::Module, public Interface
 			// this one (builtin/storage's "was")
 			s->get("was", m_made_by);
 		}
+		// [KIT_TEMPLATE_RESET] a later start's from its template again
+		if(!first && host.reset_types && !host.local_types_path.empty())
+			import_local_types(host.local_types_path);
 		load_local_types();
 		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
 		// export beside its composition, before the rows load

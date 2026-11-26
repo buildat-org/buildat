@@ -81,8 +81,9 @@ namespace storage
 	};
 
 	// [WORLD_MENU_TRASH] A save in the trash: its entry (the directory's
-	// name in trash/, "<name>-<YYYY-MM-DD_HHMMSS>"), the save's name and
-	// that date ("" for an entry not named so)
+	// name in trash/, "<name>-<YYYY-MM-DD_HHMMSS>", [KIT_TEMPLATE_RESET] a
+	// copy's "<name>-<YYYY-MM-DD>_<n>"), the save's name and that date
+	// ("YYYY-MM-DD_HHMMSS" or "YYYY-MM-DD_<n>"; "" for an entry not named so)
 	struct TrashInfo
 	{
 		ss_ entry, name, date;
@@ -91,11 +92,14 @@ namespace storage
 	{
 		TrashInfo t;
 		t.entry = t.name = entry;
-		// "-YYYY-MM-DD_HHMMSS" at the end
-		const size_t n = entry.size();
-		if(n > 18 && entry[n - 18] == '-' && entry[n - 7] == '_'){
-			t.name = entry.substr(0, n - 18);
-			t.date = entry.substr(n - 17);
+		// "-YYYY-MM-DD_<digits>" at the end
+		const size_t u = entry.rfind('_');
+		if(u != ss_::npos && u > 11 && u + 1 < entry.size() &&
+				entry.find_first_not_of("0123456789", u + 1) == ss_::npos &&
+				entry[u - 11] == '-' && entry[u - 6] == '-' &&
+				entry[u - 3] == '-'){
+			t.name = entry.substr(0, u - 11);
+			t.date = entry.substr(u - 10);
 		}
 		return t;
 	}
@@ -120,6 +124,11 @@ namespace storage
 		// saves: its entry, "" if not moved (no such save, open, or the
 		// rename failed). Nothing empties the trash on its own
 		virtual ss_ trash(const ss_ &name) = 0;
+		// [KIT_TEMPLATE_RESET] A copy of the save, open or not, put in the
+		// trash as trash/<name>-<YYYY-MM-DD>_<n> (n from 1 up within the
+		// day): its entry, "" if not copied. A restore beside the save
+		// takes the entry's name (restore())
+		virtual ss_ trash_copy(const ss_ &name) = 0;
 		// What is in the trash, the newest first
 		virtual sv_<TrashInfo> list_trash() = 0;
 		// The entry deleted for good

@@ -25,6 +25,20 @@ components it uses. util/kit_templates_check.sh plays each one to its
 end, and util/pack_templates.sh packs them for an Aitta with the
 caller's key.
 
+A game made from a template keeps none of the template's later changes
+by itself [KIT_TEMPLATE_RESET]. It records the template's hash when it
+is made and at each reset. A builder who opens it where the installed
+template has changed since (a new Buildat's, a new install) gets a
+notice once per template version: Reset types..., Reset game... or Not
+now. It names the template's types the builders edited in the game.
+Games... has the same two for the running game ("Reset types to
+template...", "Reset game to template..."). Reset types replaces the
+game's types of the template's names with the template's; the game's
+composition, voxels and its own other types stay. Reset game makes the
+game again from the template. Each first puts a copy of the game into
+the trash as <name>-<YYYY-MM-DD>_<n>; Games...' trash restores it beside
+the game under that name (util/workbench_template_reset_check.sh).
+
 A game moves between servers as a template [KIT_PROJECT_EXPORT]. The
 editor's palette has Export this game in its New tab (for builders), and
 Games... has it and Publish this game... in its right column for the

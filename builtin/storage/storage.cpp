@@ -715,7 +715,10 @@ struct Module: public interface::Module, public Interface
 		// [WORLD_MENU_TRASH] An entry's name and date; the trash's own name
 		const TrashInfo t = trash_info("my world-2026-10-19_120000");
 		if(t.name != "my world" || t.date != "2026-10-19_120000" ||
-				trash_info("odd").name != "odd" || valid_name("trash"))
+				trash_info("odd").name != "odd" || valid_name("trash") ||
+				trash_info("my world-2026-11-26_12").name != "my world" ||
+				trash_info("my world-2026-11-26_12").date != "2026-11-26_12" ||
+				trash_info("w_1").name != "w_1")
 			throw Exception("storage check: the trash's names");
 	}
 
@@ -965,6 +968,70 @@ struct Module: public interface::Module, public Interface
 			return "";
 		}
 		log_i(MODULE, "Save %s moved to %s", cs(name), cs(to));
+		return entry;
+	}
+
+	// [KIT_TEMPLATE_RESET] A copy into trash/<name>-<YYYY-MM-DD>_<n>, the
+	// save left where it is: its database by VACUUM INTO (an open one's
+	// under its lock, as copy_to()), the directory's other files beside
+	ss_ trash_copy(const ss_ &name)
+	{
+		namespace fs = interface::fs;
+		const ss_ path = m_saves_path+"/"+name;
+		if(!valid_name(name) || !fs::path_exists(path+"/save.sqlite"))
+			return "";
+		time_t now = time(NULL);
+		char date[16];
+		strftime(date, sizeof date, "%Y-%m-%d", localtime(&now));
+		ss_ entry;
+		for(int n = 1; entry.empty() || fs::path_exists(m_saves_path+"/trash/"+
+				entry); n++)
+			entry = name+"-"+date+"_"+std::to_string(n);
+		const ss_ to = m_saves_path+"/trash/"+entry;
+		if(!fs::create_directories(to))
+			return "";
+		ss_ why;
+		CSave *open = nullptr;
+		for(const up_<CSave> &save : m_open)
+			if(save->m_path == path)
+				open = save.get();
+		if(open)
+			why = open->copy_to(to+"/save.sqlite");
+		else {
+			sqlite3 *db = nullptr;
+			ss_ q;
+			for(char c : to+"/save.sqlite")
+				q += c == '\'' ? ss_("''") : ss_(1, c);
+			if(sqlite3_open_v2((path+"/save.sqlite").c_str(), &db,
+					SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK ||
+					sqlite3_exec(db, ("VACUUM INTO '"+q+"'").c_str(), nullptr,
+					nullptr, nullptr) != SQLITE_OK)
+				why = db ? sqlite3_errmsg(db) : "not opened";
+			sqlite3_close(db);
+		}
+		// The rest (a Luanti mod's files...), not the database's own
+		std::function<bool(const ss_&, const ss_&)> copy_rest =
+				[&](const ss_ &from, const ss_ &into){
+			for(const fs::Node &n : fs::list_directory(from)){
+				if(n.name == "." || n.name == ".." || (from == path &&
+						n.name.compare(0, 11, "save.sqlite") == 0))
+					continue;
+				const ss_ a = from+"/"+n.name, b = into+"/"+n.name;
+				if(n.is_directory ? !fs::create_directories(b) ||
+						!copy_rest(a, b) : !fs::copy_file(a, b))
+					return false;
+			}
+			return true;
+		};
+		if(why.empty() && !copy_rest(path, to))
+			why = "its files not copied";
+		if(!why.empty()){
+			log_w(MODULE, "trash_copy(): [%s] to [%s]: %s", cs(path), cs(to),
+					cs(why));
+			remove_directory_tree(to);
+			return "";
+		}
+		log_i(MODULE, "Save %s copied to %s", cs(name), cs(to));
 		return entry;
 	}
 

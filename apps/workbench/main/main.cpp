@@ -69,6 +69,25 @@
 // the browser's picker on the web, natively <user>/exports. Manage's
 // Copy... copies a project whole (its save); the agents' list_games,
 // copy_game and rename_game are Manage's, an admin's (Host::projects).
+//
+// [KIT_TEMPLATE_RESET] A game made from a template keeps it (world_menu's
+// option "template", Start from's value) and the hash of its files
+// (tree_hash(), store "workbench" "template_hash") at its making and at
+// each reset. A builder (Kit's edit rights) in it is told of the template
+// ("main:template"): Games...' right column has Reset types to template
+// and Reset game to template, and where the installed template's hash is
+// not the game's, a notice as the game opens, once per hash and builder
+// (Not now remembers it: "template_seen/<account>"), with Reset types,
+// Reset game and Not now. It names the template's types a builder edited
+// here (their rows' "by" not "the template", the source not the installed
+// one's): what Reset types loses. A game from before the record is up to
+// date where its types are the installed template's, else told. Either
+// reset ("main:template_reset") is a reload as a switch: the game, closed,
+// copied into the trash first (storage's trash_copy(),
+// <name>-<YYYY-MM-DD>_<n>; restored beside the game, it keeps that name),
+// then Reset types (Kit's Host::reset_types: the template's types replace
+// the game's of their names, the game's own kept) or Reset game (the save
+// made again from the template, its options kept)
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -85,6 +104,7 @@
 #include "worldgen/api.h"
 #include "world_menu/api.h"
 #include "interface/aitta.h"
+#include "interface/sha256.h"
 #include "interface/fs.h"
 #include "interface/zip.h"
 #include "interface/server_config.h"
@@ -92,6 +112,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <iterator>
@@ -249,6 +270,8 @@ struct Module: public interface::Module
 		// [KIT_SERVER_PUBLISH] a template an admin installed through the
 		// server: in Start from
 		sub(m_server, "kit:templates_changed", &Module::configure_menu);
+		sub(m_server, "network:packet_received/main:template_reset",
+				&Module::on_template_reset);
 	}
 
 	void on_start()
@@ -287,6 +310,20 @@ struct Module: public interface::Module
 					log_w(MODULE, "workbench: %s: %s", from, cs(why));
 				else
 					ok = start_project(env, false, true, "file");
+			} else if(const char *tm = getenv("BUILDAT_WORKBENCH_TEMPLATE")){
+				// [KIT_TEMPLATE_RESET] made from that template (Start from's
+				// value) when it is not there yet. Never set but by a check
+				bool made = false;
+				storage::access(m_server, [&](storage::Interface *i){
+					storage::Save *s = i->open(env);
+					if(!s && (s = i->create(env))){
+						s->store("world_menu")->set("template", tm);
+						made = true;
+					}
+					if(s)
+						i->close(s);
+				});
+				ok = start_project(env, false, made, made ? tm : "");
 			} else
 				ok = start_project(env, true);
 			if(!ok){
@@ -654,9 +691,222 @@ struct Module: public interface::Module
 			return;
 		}
 		configure_menu();
+		send_template(peer, false);
 		world_menu::access(m_server, [&](world_menu::Interface *i){
 			i->show_running(peer, m_project);
 		});
+	}
+
+	// ---- [KIT_TEMPLATE_RESET] (the header's)
+
+	// The running game's template: its value in Start from, "" for none
+	// installed (or none at all)
+	ss_ game_template(ss_ *dir = nullptr)
+	{
+		ss_ from;
+		if(!m_save || !m_save->store("world_menu")->get("template", from))
+			return "";
+		auto it = m_templates.find(from);
+		if(it == m_templates.end())
+			return "";
+		if(dir)
+			*dir = it->second;
+		return from;
+	}
+
+	static ss_ read_all(const ss_ &path)
+	{
+		std::ifstream f(path, std::ios::binary);
+		return ss_((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+	}
+
+	// A template's files hashed: each one's path, size and bytes, in order
+	static ss_ tree_hash(const ss_ &dir)
+	{
+		ss_ all;
+		std::function<void(const ss_&)> add = [&](const ss_ &rel){
+			auto list = interface::fs::list_directory(dir+rel);
+			std::sort(list.begin(), list.end(), [](const interface::fs::Node &a,
+					const interface::fs::Node &b){ return a.name < b.name; });
+			for(const auto &n : list){
+				if(n.name == "." || n.name == "..")
+					continue;
+				if(n.is_directory){
+					add(rel+"/"+n.name);
+					continue;
+				}
+				const ss_ data = read_all(dir+rel+"/"+n.name);
+				all += rel+"/"+n.name+'\0'+itos(data.size())+'\0'+data;
+			}
+		};
+		add("");
+		return interface::sha256::hex(interface::sha256::calculate(all));
+	}
+
+	// A template's types as Kit's import_local_types() reads them:
+	// local/<name> -> its server part and client part
+	static sm_<ss_, std::pair<ss_, ss_>> template_types(const ss_ &dir)
+	{
+		sm_<ss_, std::pair<ss_, ss_>> out;
+		for(const auto &n : interface::fs::list_directory(dir+"/types")){
+			const size_t dot = n.name.find('.');
+			if(n.is_directory || dot == ss_::npos || n.name.substr(dot) != ".lua")
+				continue;
+			const ss_ stem = n.name.substr(0, dot);
+			out["local/"+stem] = {read_all(dir+"/types/"+n.name),
+					read_all(dir+"/types/"+stem+".client.lua")};
+		}
+		return out;
+	}
+
+	// {title, hash (the installed template's), changed (not the game's),
+	// edited: [the template's types a builder changed here, by name]};
+	// null for a game with no template installed
+	json::Value template_state()
+	{
+		ss_ dir;
+		if(game_template(&dir).empty())
+			return json::null();
+		const ss_ hash = tree_hash(dir);
+		storage::Store *ws = m_save->store("workbench"),
+				*ks = m_save->store("kit");
+		json::Value edited = json::array();
+		bool differ = false;
+		for(const auto &t : template_types(dir)){
+			ss_ row;
+			const json::Value r = ks->get("type:"+t.first, row) ?
+					json::load_string(row.c_str()) : json::Value();
+			const bool same = r.is_object() &&
+					json::jstr(r, "source") == t.second.first &&
+					json::jstr(r, "client") == t.second.second;
+			differ = differ || !same;
+			if(!same && r.is_object() && json::jstr(r, "by") != "the template")
+				edited.append(t.first.substr(6));
+		}
+		ss_ had;
+		ws->get("template_hash", had);
+		// A game from before the record: up to date where its types are
+		// the template's. simplified: its composition is not compared (Kit
+		// rewrites it); a later change of the template is told
+		if(had.empty() && !differ){
+			ws->set("template_hash", hash);
+			had = hash;
+		}
+		json::json_error_t e;
+		json::Value o = json::object();
+		o.set("title", json::jstr(json::load_file((dir+"/meta.json").c_str(),
+				&e), "title"));
+		o.set("hash", hash);
+		o.set("changed", had != hash);
+		o.set("edited", edited);
+		return o;
+	}
+
+	// The last reset's result, said to each builder coming in after it
+	ss_ m_reset_said;
+	std::set<ss_> m_reset_told;
+
+	// To a builder: the template's state; `notice` as the game opens
+	void send_template(size_t peer, bool notice)
+	{
+		bool can = false;
+		kit::access(m_server, [&](kit::Interface *k){
+			can = k->can_edit(peer);
+		});
+		if(!can || !m_save)
+			return;
+		json::Value o = template_state();
+		const bool said = !m_reset_said.empty() &&
+				m_reset_told.insert(m_names[peer]).second;
+		if(o.is_null() && !said)
+			return;
+		if(o.is_null())
+			o = json::object();
+		ss_ seen;
+		m_save->store("workbench")->get("template_seen/"+m_names[peer], seen);
+		o.set("notice", notice && o.get("changed").is_true() &&
+				seen != json::jstr(o, "hash"));
+		if(said)
+			o.set("said", m_reset_said);
+		log_i(MODULE, "workbench: to %s, the template: %s", cs(m_names[peer]),
+				cs(o.stringify()));
+		network::send(m_server, peer, "main:template", o.stringify());
+	}
+
+	// "types", "game" or "later <hash>" (Not now) from a builder
+	void on_template_reset(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		bool can = false;
+		if(m_save && !m_switching && m_in.count(peer))
+			kit::access(m_server, [&](kit::Interface *k){
+				can = k->can_edit(peer);
+			});
+		const ss_ from = can ? game_template() : "";
+		const ss_ &d = packet.data;
+		if(from.empty() || (d != "types" && d != "game" &&
+				d.compare(0, 6, "later ") != 0)){
+			log_w(MODULE, "workbench: a template reset by %s refused: not a "
+					"builder in a game from an installed template",
+					cs(m_names[peer]));
+			return;
+		}
+		if(d[0] == 'l'){
+			m_save->store("workbench")->set("template_seen/"+m_names[peer],
+					d.substr(6, 64));
+			log_i(MODULE, "workbench: %s: not now (the template %s)",
+					cs(m_names[peer]), cs(from));
+			return;
+		}
+		reload_for(m_names[peer]+" resets the "+d+" of "+m_project+
+				" to the template "+from, "reset_"+d+"\n"+m_project+"\n0\n"+from,
+				"The game "+m_project+" is being reset to its template");
+	}
+
+	// The reload's: the backup, then the reset and the game started; false
+	// as start_project(). No backup, no reset (the game starts as it was)
+	bool reset_project(const ss_ &how, const ss_ &name, const ss_ &from)
+	{
+		const bool game = how == "reset_game";
+		auto t = m_templates.find(from);
+		ss_ entry;
+		if(t != m_templates.end())
+			storage::access(m_server, [&](storage::Interface *i){
+				entry = i->trash_copy(name);
+			});
+		if(entry.empty()){
+			m_reset_said = t == m_templates.end() ? "Not reset: the template "
+					"is no longer installed" : "Not reset: the backup copy into "
+					"the trash failed (the server's log says why)";
+			log_w(MODULE, "workbench: %s: %s", cs(name), cs(m_reset_said));
+			return start_project(name, false);
+		}
+		json::json_error_t e;
+		m_reset_said = ss_(game ? "The game" : "The types")+" reset to the "
+				"template "+json::jstr(json::load_file((t->second+"/meta.json").
+				c_str(), &e), "title")+". The game as it was is in the trash as "+
+				entry+".";
+		log_i(MODULE, "workbench: %s: %s", cs(name), cs(m_reset_said));
+		if(!game)
+			return start_project(name, false, false, from, true);
+		// Made again, its options (Start from) kept
+		storage::access(m_server, [&](storage::Interface *i){
+			sm_<ss_, ss_> options;
+			if(storage::Save *s = i->open(name)){
+				storage::Store *o = s->store("world_menu");
+				for(const ss_ &k : o->list(""))
+					o->get(k, options[k]);
+				i->close(s);
+			}
+			i->remove(name);
+			if(storage::Save *s = i->create(name)){
+				for(const auto &kv : options)
+					s->store("world_menu")->set(kv.first, kv.second);
+				i->close(s);
+			}
+		});
+		return start_project(name, false, true, from);
 	}
 
 	// Tells a peer in the project whether they have Games...
@@ -728,6 +978,11 @@ struct Module: public interface::Module
 		});
 		if(how == "play" && start_project(name, false, created == "1", from)){
 			log_i(MODULE, "workbench: switched to \"%s\"", cs(name));
+			return;
+		}
+		// [KIT_TEMPLATE_RESET]
+		if(how.compare(0, 6, "reset_") == 0 && reset_project(how, name, from)){
+			log_i(MODULE, "workbench: \"%s\" %s done", cs(name), cs(how));
 			return;
 		}
 		// The switch's game did not load: this instance is reloaded again
@@ -906,8 +1161,9 @@ struct Module: public interface::Module
 	// parameter gone since): false, the reload into no game under way
 	// (m_switching), but a check's BUILDAT_WORKBENCH_PROJECT's, which stops
 	// the server
+	// [KIT_TEMPLATE_RESET] reset_types: `from`'s types replace the game's
 	bool start_project(const ss_ &name, bool create, bool fresh = false,
-			const ss_ &from = "")
+			const ss_ &from = "", bool reset_types = false)
 	{
 		if(m_save)
 			return false;
@@ -953,6 +1209,11 @@ struct Module: public interface::Module
 			h.local_types_path = dir+"/types";
 			h.opens_in_edit = true;
 			log_i(MODULE, "workbench: the project from the template %s", cs(from));
+		}
+		const auto rt = reset_types ? m_templates.find(from) : m_templates.end();
+		if(rt != m_templates.end()){
+			h.local_types_path = rt->second+"/types";
+			h.reset_types = true;
 		}
 		h.project = name;
 		h.projects = [this](const ss_ &op, const json::Value &a,
@@ -1027,6 +1288,10 @@ struct Module: public interface::Module
 		}
 		if(!imported.empty())
 			interface::fs::remove_all(imported);
+		// [KIT_TEMPLATE_RESET] the template's hash, at its making and a reset
+		if(tmpl != m_templates.end() || rt != m_templates.end())
+			m_save->store("workbench")->set("template_hash", tree_hash(
+					tmpl != m_templates.end() ? tmpl->second : rt->second));
 		for(size_t peer : m_waiting)
 			enter(peer);
 		m_waiting.clear();
@@ -1116,6 +1381,7 @@ struct Module: public interface::Module
 				c->join(peer, m_names[peer]);
 			});
 		spawn(peer);
+		send_template(peer, true);
 	}
 
 	// The middle of the World, unless a spawner puts them elsewhere
