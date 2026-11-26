@@ -17781,6 +17781,18 @@ struct Module: public interface::Module, public Interface
 		for(const Instance &in : e.comps)
 			if(m_types[in.type].health && in.disabled.empty())
 				show.set("health", true);
+		// [KIT_RTS_PLAYTEST_1] a unit's name (the selection window's) and
+		// whether it moves (a movement on it; box select leaves the rest,
+		// buildings, out)
+		if(show.get("unit").is_object()){
+			json::Value u = show.get("unit");
+			u.set("name", e.name);
+			for(const Instance &in : e.comps)
+				if(in.disabled.empty() &&
+						m_types[in.type].decl.get("movement").is_object())
+					u.set("moves", true);
+			show.set("unit", u);
+		}
 		return show;
 	}
 

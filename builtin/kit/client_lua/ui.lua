@@ -806,6 +806,22 @@ function M.own_frames_top(x0, x1, y0, game)
 	return hit and top or nil
 end
 
+-- [KIT_RTS_PLAYTEST_1] The bottom of the game's frames anchored top_left (not
+-- in a panel) over x0...x1, nil: none (rts.lua's Getting started goes under)
+function M.game_top_left_bottom(x0, x1)
+	local b
+	for _, r in pairs(U) do
+		if not r.own and not r.pr and r.el and r.w and r.h and shown(r.el) and
+				tostring(r.ui.anchor) == "top_left" then
+			local p = r.el.screenPosition
+			if p.x < x1 and p.x + r.w > x0 then
+				b = math.max(b or 0, p.y + r.h)
+			end
+		end
+	end
+	return b
+end
+
 function M.own_place(name, w, h)
 	local bx, by, bw, bh = hud_box()
 	local V = vmin()
@@ -2850,6 +2866,18 @@ end
 function M.ui_at(x, y)
 	return hit(x, y) ~= nil or (E.editing and not own_check and
 			handle_at(x, y) ~= nil)
+end
+
+-- [KIT_RTS_PLAYTEST_1] A press (down) or release of the button at x, y
+-- (pixels) as a click there: the rts camera's held pointer, which the UI does
+-- not see. true: a button was there
+function M.ui_press_at(x, y, down)
+	local r = U[hit(x, y) or ""]
+	if r and r.kind == "button" and r.press then
+		r.press(down)
+		return true
+	end
+	return false
 end
 
 -- Edit mode: a press on a handle resizes the selected one, on one selects

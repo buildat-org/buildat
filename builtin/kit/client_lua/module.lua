@@ -3680,7 +3680,8 @@ do
 	local ok, err, install = buildat.run_script_file("kit/rts.lua")
 	assert(ok and type(install) == "function", "kit: rts.lua: " ..
 			tostring(err))
-	install({M = M, E = E, O = O, P = P, log = log, material = material})
+	install({M = M, E = E, O = O, P = P, log = log, material = material,
+		STYLE = STYLE, text = text, button = button})
 end
 
 -- ---- [KIT_TOOLS_1] The hands, the hotbar, the hit: hands.lua

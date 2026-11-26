@@ -61,6 +61,8 @@
 -- cut (cut m over the point at the start, 0 none; PageUp, PageDown, Shift
 -- and the wheel move it, Home takes it off) hides the voxels and the looks
 -- above it. The pointer: kit/unit's selection and orders (client_lua/rts.lua).
+-- [KIT_RTS_PLAYTEST_1] help: the game's own sections of the rts camera's
+-- Getting started window, after its Keys.
 local function signal(c, input, value, by)
 	local s = c.state[input]
 	local n = type(s) == "table" and (tonumber(s.n) or 0) + 1 or 1
@@ -141,6 +143,9 @@ return {
 			max = 360},
 		-- ([KIT_RTS] the rts camera's depth cut at the start, m over its point)
 		cut = {cat = "look", type = "number", default = 0, min = 0, max = 100},
+		-- ([KIT_RTS_PLAYTEST_1] the rts camera's Getting started window's own
+		-- sections after its Keys)
+		help = {type = "string", default = ""},
 		ortho = {cat = "look", type = "bool", default = false},
 		dead_zone = {cat = "look", type = "number", default = 0, min = 0,
 			max = 20},
@@ -208,6 +213,7 @@ return {
 			chase_pitch = "Degrees the following chase camera looks down.",
 			yaw = "The top-down camera's fixed direction in degrees (rts: its first).",
 			cut = "The rts camera's depth cut at the start, metres over the point it turns round: what is above is hidden (0: none).",
+			help = "The rts camera's Getting started window's own sections after its Keys: \"Title: line|line||Title: line\" (\"|\" a new line, \"||\" a new section; at most 256 bytes).",
 			ortho = "A flat view with no perspective (top_down and side).",
 			dead_zone = "Metres the body moves off the view's middle before the camera follows (0: always).",
 			look_ahead = "Metres the view leads the body the way it faces.",

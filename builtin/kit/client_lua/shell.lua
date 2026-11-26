@@ -139,6 +139,8 @@ end
 -- on). A check's run has it off (util/web_drive.js pins it)
 function SH.fullscreen(v)
 	S.fullscreen = v == true
+	-- ([KIT_RTS_PLAYTEST_1] the rts camera's edge pan: the page fullscreen)
+	E.page_fullscreen = S.fullscreen
 	if S.fullscreen or SH.fs_set then
 		buildat.set_web_fullscreen(S.fullscreen and "always" or false)
 		SH.fs_set = S.fullscreen

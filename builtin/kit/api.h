@@ -2121,6 +2121,20 @@ namespace interface
 // and shoots it with its weapon (c:fire) while there (its state target, so
 // c.target), until the target is gone or another order comes. kit:controls
 // carries the player's team's name (team) for the client's selection.
+// [KIT_RTS_PLAYTEST_1] The show's unit also has name (the entity's) and
+// moves (true: a type with a movement on it; a box selects only those, a
+// click any). The rts camera's client in play: a Getting started window
+// (top left; its title and each section's fold, kept on the client) of the
+// keys and kit/controls' help sections; a selection window (bottom right,
+// over the game's bottom panels): one unit's name, its kit/health and what
+// it does -- a shared state `status` (a text) of a type on it, else
+// "attacking" (kit/unit's shared state target), "moving" or "idle" -- or
+// how many of each name; a health bar over each damaged entity with
+// kit/health the client has (never one the fog hides: it does not have
+// it); Shift and the pan keys pan faster; the pointer at the screen's edge
+// pans in fullscreen, and in a window with the client's "Prefer pointer
+// lock" (Kit's section of the game's settings), which holds the pointer
+// and draws Kit's own.
 // [KIT_RTS] (4z37zzo) A spot whose cell a body cannot stand in (solid, solid
 // over it, or air for 3 cells under it, by the pathfinder's cells: the
 // voxels and the solid looks) moves to the nearest one it can within 3

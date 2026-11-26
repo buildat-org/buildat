@@ -3522,6 +3522,14 @@ function M.editor(options)
 	buildat.add_game_settings_section("kit", {title = "Kit",
 			draw = function(_, ui)
 		NT.settings_redraw = ui.redraw
+		-- [KIT_RTS_PLAYTEST_1] everyone's, this client's (its storage)
+		ui.button("Prefer pointer lock: " .. (M.prefer_pointer_lock() and "yes" or
+				"no"), function()
+			M.prefer_pointer_lock(not M.prefer_pointer_lock())
+			ui.redraw()
+		end)
+		ui.text("RTS controls hold the pointer in the window too, so its " ..
+				"edge pans the view (in fullscreen it always does)", "dim")
 		if E.can_edit and not E.persistent then
 			ui.button("Always keep builds: " .. (E.always_keep and "yes" or
 					"no"), function()
@@ -3529,9 +3537,6 @@ function M.editor(options)
 			end)
 			ui.text("Keeps players' builds at End without asking (builders only)",
 					"dim")
-		else
-			ui.text("Nothing to set here: Kit's settings are for builders, " ..
-					"in a world with rounds", "dim")
 		end
 	end})
 
