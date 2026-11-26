@@ -27,7 +27,11 @@
 #   6. a harvester's round trip: ore mined, unloaded at the refinery, Blue's
 #      money up;
 #   7. the computer: within a few game minutes Red buys, its harvesters
-#      unload and its attackers are sent at Blue;
+#      unload and its attackers are sent at Blue; [KIT_RTS_PLAYTEST_1] (11)
+#      the player's view moved off the base first (the tank ordered into
+#      the middle cavern), Under attack told as Red's hits on Blue come,
+#      once in the rate limit (the match's alert_every 6 s here): told,
+#      hits held back, told again no sooner than 6 s after;
 #   8. the recorder's perf with 60 units in view (a check type's 60 of
 #      Blue's tanks in the middle cavern, the cut on, made with the tools on
 #      in the round: try); with Firefox and web/, a short web run on the
@@ -35,7 +39,7 @@
 #      a box, a right click's order (the page's mouse), the units in view
 #      (the frame about as bright as the native's), its perf.
 # Screenshots (KEEP_TMP=1): $t/lobby.png, $t/start.png, $t/cut.png,
-# $t/factory.png, $t/vault.png, $t/ai.png, $t/many.png, $t/web/*.png
+# $t/factory.png, $t/vault.png, $t/ai.png, $t/attack.png, $t/many.png, $t/web/*.png
 #   util/kit_rts_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -245,6 +249,7 @@ step 10 "entities, 1 to undo" "event kit_edit {\"op\": \"place\", \"type\": \"wo
 step 10 "entities, 2 to undo" "event kit_edit {\"op\": \"place\", \"type\": \"workbench/rts_many\", \"pos\": [-7.5, 7, -6]}"
 step 10 "entities, 3 to undo" "event kit_edit {\"op\": \"set\", \"id\": $AI, \"comp\": 0, \"param\": \"aggression\", \"value\": 1}"
 step 10 "entities, 4 to undo" "event kit_edit {\"op\": \"set\", \"id\": $MATCH, \"comp\": 0, \"param\": \"start_money\", \"value\": 1500}"
+step 10 "entities, 5 to undo" "event kit_edit {\"op\": \"set\", \"id\": $MATCH, \"comp\": 0, \"param\": \"alert_every\", \"value\": 6}"
 MANY=$(grep -aoP "workbench/rts_many \K[0-9]+" "$SL" | head -1)
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$SL" 0 30 "vault built: "
@@ -392,7 +397,17 @@ done
 [ -n "$ok" ] || fail "Blue's money did not go up with the unload ($SL)"
 echo "$ok"
 
-# ---- 7. The computer: buys, harvests, attacks (aggression 1)
+# ---- 7. (11) The player's view off the base: the tank (in the vault)
+# ordered into the middle cavern, 35 m from Blue's HQ
+say "event kit_rts_focus -40 6.5 -10"
+mclick $TANK left "kit: rts: selected 1 \(click on $TANK\)"
+say "event kit_rts_focus 0 6.5 0"
+m=$(mark "$SL")
+mclick 0,6.5,0 right "kit: rts: 1 ordered to"
+await "$SL" "$m" 10 "Order by kitboss: 1 units to"
+# (the match's view follows it)
+await "$SL" 0 10 "local/rts_match $MATCH: view: Blue follows tank $TANK\$"
+# ---- The computer: buys, harvests, attacks (aggression 1)
 m0=0
 await "$SL" "$m0" 30 "local/rts_ai $AI: buys a "
 for i in $(seq 600); do
@@ -406,6 +421,32 @@ reds=$(grep -aoP "made Red harvester \K[0-9]+" "$SL" | sort -u | tr '\n' '|')
 grep -aqE "local/rts_harvester (${reds%|}): unloaded" "$SL" || fail "no Red harvester unloaded ($SL)"
 echo "ok: the computer: $(grep -ac "local/rts_ai $AI: buys" "$SL") buys ($(grep -aoP "local/rts_ai $AI: buys a \K\w+" "$SL" | sort | uniq -c | tr -s ' ' | tr '\n' ',')), its harvesters unloaded, $(grep -aE "local/rts_ai $AI: (sends|attacks)" "$SL" | head -1 | grep -oP 'rts_ai [0-9]+: \K.*')"
 say "frames 10" "screenshot $t/ai.png"
+# (11) Under attack: Red's hits on Blue out of the view told, once in 6 s
+await "$SL" 0 240 "local/rts_match $MATCH: under attack: Blue's .*, told at t="
+say "frames 3" "screenshot $t/attack.png"
+await "$SL" 0 120 "local/rts_match $MATCH: under attack: Blue's .*, not told"
+n=$(grep -ac "local/rts_match $MATCH: under attack: Blue's .*, told at t=" "$SL")
+m=$(mark "$SL")
+for i in $(seq 300); do
+	[ "$(grep -ac "local/rts_match $MATCH: under attack: Blue's .*, told at t=" "$SL")" -gt "$n" ] && break
+	kill -0 "$SERVER_PID" 2>/dev/null || fail "the server is gone ($SL)"
+	grep -aq "match over: " "$SL" && break
+	sleep 0.2
+done
+python3 -I - "$SL" "$MATCH" <<'PY' || fail "Under attack not once in its 6 s ($SL)"
+import re, sys
+s = open(sys.argv[1], "rb").read().decode(errors="replace")
+ev = [(float(m.group(3)), m.group(2)) for m in
+	re.finditer(r"local/rts_match %s: under attack: Blue's (\w+ \d+) hit out of view(, told at| at) t=([\d.]+)" % sys.argv[2], s)]
+told = [t for t, k in ev if k == ", told at"]
+held = [t for t, k in ev if k == " at"]
+assert len(told) >= 2 and held, ("not told twice and held back", ev[:10])
+gaps = [b - a for a, b in zip(told, told[1:])]
+assert all(g >= 6 - 0.1 for g in gaps), ("told sooner than 6 s", told)
+assert all(any(a <= h < a + 6.1 for a in told) for h in held), ("a hit held back with none told in 6 s before it", told, held[:10])
+print("ok: Under attack told at t=%s (Blue's %s), %d hits in between held back, gaps %s" % (
+	", ".join("%.0f" % t for t in told[:4]), re.search(r"under attack: Blue's (\w+)", s).group(1), len(held), ["%.0f" % g for g in gaps[:4]]))
+PY
 
 # ---- 8. Perf: 60 tanks in view (the cut on: the cavern under the rock)
 # (try: the tools on, in the running round; then off, the rts camera back)

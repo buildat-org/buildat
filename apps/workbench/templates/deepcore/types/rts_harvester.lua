@@ -17,6 +17,15 @@
 -- tunnels seen then); a cell it mines goes into the flood at once. With
 -- none reachable it waits where it is (its match tells the team's player);
 -- with cargo it unloads first.
+--   [KIT_RTS_PLAYTEST_1] (7) Ore in the floor beside a stand is mined too,
+-- from the side, `down_cost` m further than ore level with it: one level
+-- down a cell sideways, never under or next to a building. Any ore cell
+-- with air over it (a floor) is mined only where that leaves a stair
+-- (safe(): solid under it, no way up beside the stand over it lost),
+-- checked at the flood and again as it starts. The cell mined is a stand
+-- one down, in the flood at once, so the cut is a staircase it climbs back
+-- (a step up of one cell, the pathfinder's), never a pit. (5) While it
+-- mines, ore dust off the face.
 -- simplified: no queue at the refinery; a harvester claims the cell it
 -- goes for (others pick another); stuck on its way home (no nearer in 6 s)
 -- it finds its way again, and an ore cell it gets no nearer to (3 s
@@ -104,6 +113,39 @@ end
 
 local SIDES = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 
+-- [KIT_RTS_PLAYTEST_1] (7) Whether the ore cell (x, y, z) may be mined
+-- without a pit. A cell with solid over it (a wall's): yes. One with air
+-- over it is the floor of a stand, which drops a level as it goes: yes if
+-- the cell under it is solid (none, or the World's floor: a hole) and no
+-- stand beside the one over it is a step up from it (a solid cell with air
+-- over that, which `reached`(x, y, z) says the refinery's flood reaches):
+-- the way up from below through it would be lost. So the stand over it
+-- drops into a stair one down, beside the stand it was mined from: each
+-- level down a cell sideways, the cut a staircase. g(x, y, z): the cell's
+-- name, nil not read yet; nil back: not read yet
+local function safe(g, x, y, z, reached)
+	local top, under = g(x, y + 1, z), g(x, y - 1, z)
+	if top == nil or under == nil then
+		return nil
+	end
+	if top ~= "air" then
+		return true
+	end
+	if under == "air" or under == "" then
+		return false
+	end
+	for _, d in ipairs(SIDES) do
+		local s, o = g(x + d[1], y + 1, z + d[2]), g(x + d[1], y + 2, z + d[2])
+		if s == nil or o == nil then
+			return nil
+		end
+		if s ~= "air" and s ~= "" and o == "air" and reached(x + d[1], y + 2, z + d[2]) then
+			return false
+		end
+	end
+	return true
+end
+
 local function push(net, k)
 	if not net.seen[k] then
 		net.seen[k] = true
@@ -119,18 +161,45 @@ local function expand(m, c, net, k, ore)
 	if head == nil then
 		return false
 	end
+	local function g(a, b, d)
+		return at(m, c, a, b, d)
+	end
+	local function reached(a, b, d)
+		return net.seen[key(a, b, d)] == true
+	end
 	for _, d in ipairs(SIDES) do
 		local nx, nz = x + d[1], z + d[2]
-		for dy = 0, 1 do
+		-- (7) level with it, over its head, and in the floor beside it (a
+		-- stair down: the cell over it air)
+		for dy = -1, 1 do
 			local n = at(m, c, nx, y + dy, nz)
 			if n == nil then
 				return false
 			end
-			if n == ore then
-				local ok = key(nx, y + dy, nz)
-				if not net.has[ok] then
-					net.has[ok] = true
-					net.ore[#net.ore + 1] = {ok, k}
+			local ok = key(nx, y + dy, nz)
+			local e = net.has[ok]
+			if n == ore and (not e or (e.down and dy >= 0)) then
+				local sf = true
+				if dy < 0 then
+					local top = at(m, c, nx, y, nz)
+					if top == nil then
+						return false
+					end
+					sf = top == "air"
+				end
+				if sf then
+					sf = safe(g, nx, y + dy, nz, reached)
+					if sf == nil then
+						return false
+					end
+				end
+				if sf and e then
+					-- (found down first, level now: mined from this stand)
+					e[2], e.down = k, nil
+				elseif sf then
+					e = {ok, k, down = dy < 0 or nil}
+					net.has[ok] = e
+					net.ore[#net.ore + 1] = e
 				end
 			end
 		end
@@ -238,8 +307,24 @@ local function net_of(c, m)
 	return t.done
 end
 
+local BUILDINGS = {hq = true, refinery = true, factory = true}
+
+-- (7) A floor cell under a building (its 5 x 5) or next to one: not mined
+-- down (the flood sees cells, not buildings)
+local function under_building(c, k)
+	local x, _, z = unkey(k)
+	for _, u in ipairs(c.units or {}) do
+		if BUILDINGS[u.name] and math.abs(u.pos[1] - x) < 3.6 and
+				math.abs(u.pos[3] - z) < 3.6 then
+			return true
+		end
+	end
+	return false
+end
+
 -- The ore of the net with the shortest way there and on to the refinery
--- (as the crow flies): {ore key, stand key}
+-- (as the crow flies; ore in the floor `down_cost` m further, level ore
+-- first): {ore key, stand key, down = true for ore in the floor}
 local function pick(c, m, net)
 	local skip, p = c.state.skip, c.pos
 	local r = home(c)
@@ -248,16 +333,47 @@ local function pick(c, m, net)
 	for _, e in ipairs(net.ore) do
 		local cl = m.claims[e[1]]
 		if not e.gone and not skip[tostring(e[1])] and
-				(not cl or cl[1] == c.id or cl[2] < c.now) then
+				(not cl or cl[1] == c.id or cl[2] < c.now) and
+				not (e.down and under_building(c, e[1])) then
 			local x, y, z = unkey(e[2])
 			local d = math.sqrt((x - p[1]) ^ 2 + (y - p[2]) ^ 2 + (z - p[3]) ^ 2) +
-				math.sqrt((x - h[1]) ^ 2 + (y - h[2]) ^ 2 + (z - h[3]) ^ 2)
+				math.sqrt((x - h[1]) ^ 2 + (y - h[2]) ^ 2 + (z - h[3]) ^ 2) +
+				(e.down and c.params.down_cost or 0)
 			if d < bd then
 				best, bd = e, d
 			end
 		end
 	end
 	return best
+end
+
+-- (7) safe() on the World's cells now (c:voxels_at round the ore at o), the
+-- stands its team's flood (net; none: all) reaches
+local function safe_live(c, o, net)
+	local x0, y0, z0 = o[1] - 1, o[2] - 1, o[3] - 1
+	local v = c:voxels_at({x0, y0, z0}, {3, 4, 3})
+	return safe(function(x, y, z)
+		return v[1 + (x - x0) + 3 * ((z - z0) + 3 * (y - y0))] or ""
+	end, o[1], o[2], o[3], function(x, y, z)
+		return not net or net.seen[key(x, y, z)] == true
+	end)
+end
+
+-- [KIT_RTS_PLAYTEST_1] (5) A burst of ore dust off the face it mines, at
+-- each think while it mines (one colour: one emitter a burst on a client;
+-- big enough to see from the rts camera's height)
+local function mine_effect(c, o, st)
+	local dx, dy, dz = st[1] - o[1], st[2] - 0.5 - o[2], st[3] - o[3]
+	local l = math.max(0.01, math.sqrt(dx * dx + dy * dy + dz * dz))
+	dx, dy, dz = dx / l, dy / l, dz / l
+	c:effect({at = {o[1] + dx * 0.55, o[2] + dy * 0.55, o[3] + dz * 0.55}, count = 10,
+		shape = "square", colors = {"#60ffd0"}, dir = {dx, dy + 0.8, dz}, spread = 40,
+		speed_min = 1.2, speed_max = 3, gravity = 9, ttl_min = 0.3, ttl_max = 0.6,
+		size_min = 0.3, size_max = 0.5, fade = 0.5})
+	if not c.state.dusted then
+		c.state.dusted = true
+		c:log("harvesting effect at " .. o[1] .. "," .. o[2] .. "," .. o[3])
+	end
 end
 
 -- Standing still: a goal where it is (no goal, propose_move(nil), would let
@@ -323,15 +439,30 @@ local function think(c)
 			if c:voxel_at(o[1], o[2], o[3]) ~= c.params.ore then
 				s.mode = "seek"
 			elseif s.mode == "go" then
+				-- (7) checked again on the World as it is now
+				if not safe_live(c, o, net) or (s.down and under_building(c, ok)) then
+					c:log("not safe to mine " .. o[1] .. "," .. o[2] .. "," .. o[3] .. " now")
+					s.skip[tostring(ok)] = c.now + 60
+					m.claims[ok] = nil
+					s.mode = "seek"
+					return
+				end
 				s.mode = "mine"
 				s.since = c.now
 				hold(c)
+				mine_effect(c, o, st)
 			elseif c.now - (s.since or 0) >= c.params.mine_time then
 				c:set_voxels_at({{o[1], o[2], o[3], "air"}})
 				s.cargo = s.cargo + c.params.per_cell
 				s.mined = s.mined + 1
 				s.mode = "seek"
 				m.claims[ok] = nil
+				-- (7) below its refinery's level, or a stair down: said
+				local r = home(c)
+				if s.down or (r and st[2] < cell(r.pos)[2]) then
+					c:log(string.format("mined %d,%d,%d%s from %d,%d,%d", o[1], o[2], o[3],
+						s.down and " down" or "", st[1], st[2], st[3]))
+				end
 				-- (into the floods that reached it: what it opens is reached,
 				-- flooded on from it the next runs)
 				set_at(m, o[1], o[2], o[3], "air")
@@ -339,11 +470,7 @@ local function think(c)
 				for _, t in pairs(m.nets) do
 					for _, n in ipairs({t.done or false, t.next or false}) do
 						if n and n.has[ok] then
-							for _, e in ipairs(n.ore) do
-								if e[1] == ok then
-									e.gone = true
-								end
-							end
+							n.has[ok].gone = true
 							if open then
 								push(n, ok)
 							end
@@ -353,6 +480,8 @@ local function think(c)
 				c:effect({at = {o[1], o[2], o[3]}, count = 12, shape = "square",
 					colors = {"#40e0b0", "#20a080", "#808080", "#606060"},
 					speed_min = 0.5, speed_max = 2, ttl_max = 0.6, size_max = 0.12})
+			else
+				mine_effect(c, o, st)
 			end
 			return
 		end
@@ -405,7 +534,7 @@ local function think(c)
 		c:log("ore again")
 	end
 	m.claims[e[1]] = {c.id, c.now + 10}
-	s.ore, s.stand = o, st
+	s.ore, s.stand, s.down = o, st, e.down == true
 	s.mode, s.near, s.since = "go", 1e9, c.now
 	c:propose_move({to = {st[1], st[2] - 0.5, st[3]}, range = 0.3})
 end
@@ -423,6 +552,7 @@ return {
 			think = "Seconds between its looks round.",
 			flood = "Cells of the way from its refinery it looks along a think (the harvesters together).",
 			fresh = "Seconds the way and the ore it knows stay before it looks again (a digger's tunnels seen then).",
+			down_cost = "Metres ore in the floor counts as further away than ore level with it (level ore first).",
 		},
 	},
 	component = true,
@@ -438,11 +568,12 @@ return {
 		think = {type = "number", default = 0.5, min = 0.2, max = 5},
 		flood = {type = "number", default = 200, min = 10, max = 2000},
 		fresh = {type = "number", default = 20, min = 2, max = 600},
+		down_cost = {type = "number", default = 16, min = 0, max = 1000},
 	},
 	state = {cargo = {default = 0, shared = true}, mode = {default = "seek"},
 		ore = {default = false}, stand = {default = false}, since = {default = 0},
 		near = {default = 0}, ordered = {default = false}, skip = {default = {}},
-		mined = {default = 0}},
+		mined = {default = 0}, down = {default = false}, dusted = {default = false}},
 	on_start = function(c)
 		c:after(0.3 + math.random() * 0.5, "think")
 	end,
