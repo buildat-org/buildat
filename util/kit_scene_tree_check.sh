@@ -125,8 +125,8 @@ arrived() # <offset in the client's log> <scene> <regex of the controls the clie
 	await "$CL" "$1" 20 "kit editor: in the scene $2 "
 	o=$(tail -c +$(($1 + 1)) "$CL" | grep -abm1 -E "kit editor: in the scene $2 " | cut -d: -f1)
 	await "$CL" "$(($1 + o))" 20 "player physics enabled"
-	grep -a "kit: controls: " "$CL" | tail -1 | grep -qaE "kit: controls: $3" ||
-		fail "in $2 not \"$3\": $(grep -a "kit: controls: " "$CL" | tail -1) ($CL)"
+	grep -a "kit: controls: camera " "$CL" | tail -1 | grep -qaE "kit: controls: $3" ||
+		fail "in $2 not \"$3\": $(grep -a "kit: controls: camera " "$CL" | tail -1) ($CL)"
 }
 to_scene() # <scene> <regex of the controls the client has there>
 {
