@@ -1169,7 +1169,8 @@ namespace interface
 //   delete is refused while anything uses it. A put that takes long
 //   holds its builder's next for a while. Agents: put_type, get_type,
 //   delete_type. A template's types/<name>.lua are its game's from
-//   its first start (Host::local_types_path); an export (below) takes
+//   its first start (Host::local_types_path), and again at a start with
+//   Host::reset_types ([KIT_TEMPLATE_RESET]); an export (below) takes
 //   those its prefabs use as the builder's own <author>/<name>.
 //   simplified: a start that finds one no longer loading (a file not the
 //   same each run) leaves it out of the box, its entities' runs failing
@@ -2506,6 +2507,10 @@ namespace kit
 		// directory (<name>.lua, <name>.client.lua), the game's custom
 		// types local/<name> from its first start ("": none)
 		ss_ local_types_path;
+		// [KIT_TEMPLATE_RESET] A later start's too: those types replace the
+		// game's of the same names (Workbench's Reset types to template),
+		// the game's others kept
+		bool reset_types = false;
 		// [KIT_PROJECT_EXPORT] The game's name: a builder exports it
 		// ("export_project", the agents' export_template) as a template
 		// under it; "": no export. A template's first start also takes the

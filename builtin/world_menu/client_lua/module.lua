@@ -306,8 +306,11 @@ function M.open(spec)
 	for _, e in ipairs(spec.trash or {}) do
 		if M.matches(e.name, filter) then
 			trashed = trashed + 1
-			local when = e.date ~= "" and (", " .. e.date:sub(1, 10) .. " " ..
-					e.date:sub(12, 13) .. ":" .. e.date:sub(14, 15)) or ""
+			-- ([KIT_TEMPLATE_RESET] a backup copy's "YYYY-MM-DD_<n>")
+			local when = #e.date == 17 and (", " .. e.date:sub(1, 10) .. " " ..
+					e.date:sub(12, 13) .. ":" .. e.date:sub(14, 15)) or
+					e.date ~= "" and (", " .. e.date:sub(1, 10) .. " backup " ..
+					e.date:sub(12)) or ""
 			local row = add_row(e.name .. " (in the trash" .. when .. ")")
 			menu:add(row, function()
 				ui_utils.show_confirm_dialog("The " .. spec.noun .. " " .. e.name ..

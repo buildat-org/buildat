@@ -325,6 +325,59 @@ if accounts then
 		accounts.account_page(function() menu.back() end)
 	end, {order = 30, page = true})
 end
+-- [KIT_TEMPLATE_RESET] A builder's: the game's template (main.cpp's
+-- header), {title, hash, changed, edited, notice, said}: Games...' Reset
+-- types to template and Reset game to template, each confirmed, and the
+-- notice once the mode is settled (over the pause menu: the pointer free)
+local template, template_notice = nil, false
+local function reset_confirm(what)
+	local t = template
+	-- (short lines: a dialog's wrap of a long one ran off the screen)
+	local edited = #(t.edited or {}) > 0 and "\nEdited here, and lost: " ..
+			table.concat(t.edited, ", ") .. "." or ""
+	ui_utils.show_confirm_dialog((what == "types" and
+			"Reset the types to the template " .. t.title .. "?\nIts types " ..
+			"replace this game's of the same names; the rest stays." ..
+			edited or
+			"Reset the game to the template " .. t.title .. "?\nThe game is " ..
+			"made again from it: everything made here is replaced.") ..
+			"\nA backup copy of the game goes to the trash first\n(an " ..
+			"admin's Games... restores it).", function()
+		log:info("workbench: reset the " .. what .. " to the template")
+		buildat.send_packet("main:template_reset", what)
+	end, function() end, what == "types" and "Reset types" or "Reset game",
+			"Cancel")
+end
+buildat.sub_packet("main:template", function(data)
+	template = buildat.parse_json(data)
+	template_notice = template.notice == true
+	if (template.said or "") ~= "" then
+		ui_utils.show_notification(template.said, 15)
+		log:info("workbench: said: " .. template.said)
+	end
+end)
+magic.SubscribeToEvent("Update", function()
+	if not template_notice or not settled then
+		return
+	end
+	template_notice = false
+	local t = template
+	menu.open()
+	ui_utils.show_confirm_dialog("The template " .. t.title .. " has " ..
+			"changed since this game was made from it." ..
+			(#(t.edited or {}) > 0 and "\nIts types edited here: " ..
+			table.concat(t.edited, ", ") .. "." or "") ..
+			"\nReset types: the template's types replace this game's." ..
+			"\nReset game: the game is made again from the template, its " ..
+			"composition too.\nEither puts a backup copy of the game into the " ..
+			"trash first.",
+			function() reset_confirm("types") end, function()
+		buildat.send_packet("main:template_reset", "later " .. t.hash)
+		log:info("workbench: the template notice: not now")
+		menu.close()
+	end, "Reset types...", "Not now",
+			{also = {"Reset game...", function() reset_confirm("game") end}})
+end)
 -- [WORKBENCH_SWITCH_PROJECT] An admin's: Manage over the running project
 -- (world_menu's client; its Back, or Play on the running one, is play)
 local picker = false
@@ -347,6 +400,11 @@ menu.add(function() return picker and "Games..." or nil end, function()
 			close()
 			kit.publish_game()
 		end)
+		-- [KIT_TEMPLATE_RESET] a game from a template's
+		if template and template.title then
+			add("Reset types to template...", function() reset_confirm("types") end)
+			add("Reset game to template...", function() reset_confirm("game") end)
+		end
 	end
 	menu.hold(function() end)
 	buildat.send_packet("main:projects", "")
