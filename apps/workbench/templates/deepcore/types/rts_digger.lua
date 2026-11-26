@@ -8,7 +8,8 @@
 -- voxel not there (kit/hard_rock) it cannot dig: it tries the other way round,
 -- then gives up there. Where the way is open it just drives. Its tunnels are
 -- the World's cells (c:set_voxels_at, game changes), so the pathfinder takes
--- any unit through them.
+-- any unit through them. While a slice is dug, dust of its voxel flies off
+-- it ([KIT_RTS_PLAYTEST_1] (6)).
 -- simplified: straight runs along the grid, no diagonal; a slice's cells
 -- dug at once after its time; it gives up after two blocked tries, or
 -- after three steps from the same cell (it could not get into its slice:
@@ -46,7 +47,7 @@ local function slice(c, a, sx, sz, dy, times)
 	local size = {ax == 1 and w or 1, h + (dy < 0 and 1 or 0), az == 1 and w or 1}
 	local y0 = ny
 	local names = c:voxels_at({x0, y0, z0}, size)
-	local cells, t = {}, 0
+	local cells, t, mat = {}, 0, nil
 	local i = 0
 	for y = 0, size[2] - 1 do
 		for z = 0, size[3] - 1 do
@@ -60,13 +61,40 @@ local function slice(c, a, sx, sz, dy, times)
 					if not s then
 						return false, 0, n
 					end
-					t = math.max(t, s)
+					if s >= t then
+						t, mat = s, n
+					end
 					cells[#cells + 1] = {x0 + x, y0 + y, z0 + z, "air"}
 				end
 			end
 		end
 	end
-	return cells, t, {nx, ny, nz}
+	return cells, t, {nx, ny, nz}, mat
+end
+
+-- [KIT_RTS_PLAYTEST_1] (6) Rock dust off the slice it digs, every 0.4 s
+-- while it digs: its slowest voxel's own texture (shape voxel: rock
+-- coloured), one emitter a burst on a client, big enough for the rts
+-- camera's height
+local function dust(c)
+	local n, mat, p = c.state.next, c.state.dust, c.pos
+	if type(n) ~= "table" or type(c.state.cells) ~= "table" or mat == "" then
+		-- (between slices: the next one starts it again)
+		c.state.dusting = false
+		return
+	end
+	local dx, dz = p[1] - n[1], p[3] - n[3]
+	local l = math.max(0.01, math.sqrt(dx * dx + dz * dz))
+	dx, dz = dx / l, dz / l
+	c:effect({at = {n[1] + dx * 0.5, n[2] + 0.3, n[3] + dz * 0.5}, count = 10,
+		shape = "voxel", voxels = {mat}, dir = {dx, 0.9, dz}, spread = 50,
+		speed_min = 1.5, speed_max = 3.5, gravity = 10, ttl_min = 0.35, ttl_max = 0.7,
+		size_min = 0.3, size_max = 0.5, spin = 360, fade = 0.4})
+	if not c.state.dusted then
+		c.state.dusted = true
+		c:log("digging effect of " .. mat .. " at " .. n[1] .. "," .. n[2] .. "," .. n[3])
+	end
+	c:after(0.4, "dust")
 end
 
 local function step(c)
@@ -102,7 +130,7 @@ local function step(c)
 		{{0, sign(dz)}, {sign(dx), 0}}
 	for _, s in ipairs(tries) do
 		if s[1] ~= 0 or s[2] ~= 0 then
-			local cells, t, next = slice(c, a, s[1], s[2], sign(dy), times)
+			local cells, t, next, mat = slice(c, a, s[1], s[2], sign(dy), times)
 			if cells == nil then
 				-- not loaded yet: again soon
 				c:after(0.5, "dig")
@@ -111,6 +139,11 @@ local function step(c)
 				c.state.next = next
 				c.state.cells = cells
 				c:after(math.max(0.1, t), "dug")
+				c.state.dust = mat or ""
+				if mat and not c.state.dusting then
+					c.state.dusting = true
+					c:after(0.05, "dust")
+				end
 				return
 			else
 				c:log("cannot dig " .. tostring(next) .. " towards " .. g[1] .. "," .. g[3])
@@ -144,7 +177,8 @@ return {
 	},
 	state = {goal = {default = false}, next = {default = false},
 		cells = {default = false}, waits = {default = 0}, last = {default = ""},
-		stuck = {default = 0},
+		stuck = {default = 0}, dust = {default = ""}, dusting = {default = false},
+		dusted = {default = false},
 		-- ([KIT_RTS_PLAYTEST_1] the selection window's)
 		status = {default = "", shared = true}},
 	on_order = function(c, order)
@@ -164,7 +198,9 @@ return {
 		end
 	end,
 	on_timer = function(c, name)
-		if name == "dig" then
+		if name == "dust" then
+			dust(c)
+		elseif name == "dig" then
 			step(c)
 		elseif name == "dug" and type(c.state.goal) == "table" and
 				type(c.state.cells) == "table" then

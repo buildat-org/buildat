@@ -23,7 +23,13 @@
 #     from its refinery, a step up one, a drop of three; buildings' feet
 #     left out);
 #   - the computer sent an attack, and its tanks reached Blue's base or
-#     hurt it, before minute 6.
+#     hurt it, before minute 6;
+#   - [KIT_RTS_PLAYTEST_1] (7) a Blue harvester mined down (the watcher's
+#     3 x 2 x 3 of ore in the base's floor; Blue's harvesters' down_cost 0,
+#     so it is the nearest), stood a level or two under the floor and came
+#     back up with its load (unloaded), and every stand there in the last
+#     map reaches back to the refinery (this check's flood both ways: a
+#     staircase, no pit); (5), (6) the harvesting and digging effects made.
 # A minute-by-minute account of the match is printed.
 #   util/kit_rts_econ_check.sh            (KEEP_TMP=1: the server's log kept)
 set -u
@@ -47,15 +53,29 @@ return {
 	world_voxels = true,
 	params = {dig_to = {type = "position", default = {-27, 7, 10}},
 		blue_ai = {type = "entity", default = 899}},
-	state = {y = {default = 6}, pass = {default = 0}},
+	state = {y = {default = 4}, pass = {default = 0}},
 	on_start = function(c)
 		c:after(5, "dig")
 		c:after(1, "look")
+		c:after(1, "floor")
 		c:after(30, "map")
 		c:after(30, "blue")
 	end,
 	on_timer = function(c, name)
-		if name == "blue" then
+		if name == "floor" then
+			-- (7) ore in the floor between Blue's HQ and its east wall, two
+			-- deep (after the base's region is written)
+			local v = {}
+			for x = -30, -28 do
+				for z = -5, -3 do
+					for y = 5, 6 do
+						v[#v + 1] = {x, y, z, "kit/ore"}
+					end
+				end
+			end
+			c:set_voxels_at(v)
+			c:log("watch: floor ore " .. #v)
+		elseif name == "blue" then
 			c:send(c.params.blue_ai, "start")
 			c:log("watch: Blue's computer started")
 		elseif name == "dig" then
@@ -89,7 +109,7 @@ return {
 			c:log(string.format("watch t=%.0f blue=%d red=%d blue_hp=%.2f near=%d",
 				c.now, money.Blue or -1, money.Red or -1, hp, near))
 		elseif name == "map" then
-			c.state.y = 6
+			c.state.y = 4
 			c.state.pass = c.state.pass + 1
 			c:after(60, "map")
 			c:after(0.1, "dump")
@@ -115,7 +135,7 @@ return {
 	end,
 }
 EOF
-python3 -I - "$g/composition.json" <<'PY' || fail "the watcher not added"
+python3 -I - "$g/composition.json" "$g/prefabs.json" <<'PY' || fail "the watcher not added"
 import json, sys
 p = sys.argv[1]
 j = json.load(open(p))
@@ -130,6 +150,14 @@ j["entities"].append({"id": 899, "parent": 2, "name": "Blue's computer",
 		"route": "-30 7 -2, -22 7 0, -10 7 0, 2 7 -1, 14 7 -1, 26 7 -1, 34 7 4",
 		"map_x": 44, "map_z": 28, "first_wave": 3600, "aggression": 0, "defence": 30}}]})
 j["next_id"] = max(j["next_id"], 901)
+json.dump(j, open(p, "w"), indent="\t")
+# (7) Blue's harvesters take ore in the floor as near as level ore: the
+# watcher's floor ore first
+p = sys.argv[2]
+j = json.load(open(p))
+for c in j["deepcore/harvester_blue"]["entities"][0]["components"]:
+	if c["type"] == "local/rts_harvester":
+		c.setdefault("params", {})["down_cost"] = 0
 json.dump(j, open(p, "w"), indent="\t")
 PY
 (cd "$g" && zip -qrX "$u/shared/game.zip" .) || fail "not zipped"
@@ -325,6 +353,87 @@ for i, l in enumerate(lines):
 			print("map at t=%.0f: %s's refinery reaches %d cells, %d of ore; idle: %s" % (mp["t"], side, cells, len(ore), idlers or "none"))
 			if idlers and ore:
 				bad.append("%s's harvesters %s idle at t=%.0f with %d ore it reaches: %s" % (side, idlers, mp["t"], len(ore), sorted(ore)[:5]))
+# (7) Down by stairs: a Blue harvester mined down, stood under the floor
+# (y 7's stands) and unloaded after it
+low = {}
+for i, l in enumerate(lines):
+	m = re.search(r"local/rts_harvester (\d+): mined (-?\d+),(-?\d+),(-?\d+)( down)? from (-?\d+),(-?\d+),(-?\d+)", l)
+	if m and team.get(m.group(1)) == "Blue":
+		h = m.group(1)
+		low.setdefault(h, {"down": None, "under": None, "back": None})
+		if m.group(5) and low[h]["down"] is None:
+			low[h]["down"] = t[i]
+		if int(m.group(7)) < 7 and low[h]["under"] is None:
+			low[h]["under"] = (t[i], int(m.group(7)), i)
+	m = re.search(r"local/rts_harvester (\d+): unloaded", l)
+	if m and m.group(1) in low and low[m.group(1)]["under"] and low[m.group(1)]["back"] is None:
+		low[m.group(1)]["back"] = t[i]
+ok = [(h, v) for h, v in low.items() if v["down"] is not None and v["under"] and v["back"] is not None]
+if not ok:
+	bad.append("no Blue harvester mined down, stood under the floor and unloaded: %s" % low)
+else:
+	h, v = ok[0]
+	print("ok: Blue's harvester %s mined down at t=%.0f, mined from a stand at y %d at t=%.0f, unloaded at the refinery at t=%.0f" %
+		(h, v["down"], v["under"][1], v["under"][0], v["back"]))
+# The cut: every stand round the floor ore in the last map reaches the
+# refinery and back (no pit)
+if maps and "Blue" in refinery:
+	g = maps[max(maps, key=int)]["g"]
+	rp = refinery["Blue"]
+	start = (round(rp[0]), int(rp[1] + 0.5), round(rp[2]))
+	ft = [f for f in feet if f != (start[0], start[2])]
+	def stands(c):
+		x, y, z = c
+		if g.get(c, "#") != "." or g.get((x, y - 1, z), "#") == ".":
+			return False
+		return not any(abs(x - fx) <= 2 and abs(z - fz) <= 2 for fx, fz in ft)
+	def nexts(c):
+		x, y, z = c
+		out = []
+		for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+			n = (x + dx, y, z + dz)
+			if stands(n):
+				out.append(n)
+			elif g.get(n, "#") == ".":
+				for d in (1, 2, 3):
+					f = (n[0], y - d, n[2])
+					if stands(f):
+						out.append(f)
+						break
+					if g.get(f, "#") != ".":
+						break
+			elif g.get((x, y + 1, z), "#") == "." and stands((n[0], y + 1, n[2])):
+				out.append((n[0], y + 1, n[2]))
+		return out
+	seen, q, edges = {start}, deque([start]), {}
+	while q:
+		c = q.popleft()
+		for n in nexts(c):
+			edges.setdefault(n, set()).add(c)
+			if n not in seen:
+				seen.add(n)
+				q.append(n)
+	back, q = {start}, deque([start])
+	while q:
+		c = q.popleft()
+		for p in edges.get(c, ()):
+			if p not in back:
+				back.add(p)
+				q.append(p)
+	cut = [c for c in seen if -32 <= c[0] <= -26 and -7 <= c[2] <= -1]
+	low_cut = sorted(c for c in cut if c[1] < 7)
+	pits = sorted(c for c in cut if c not in back)
+	left = [k for k, ch in g.items() if ch == "o" and -30 <= k[0] <= -28 and -5 <= k[2] <= -3 and k[1] in (5, 6)]
+	print("the floor ore's cut: %d stands under the floor %s, %d ore left; stands not back to the refinery: %s" % (len(low_cut), low_cut, len(left), pits or "none"))
+	if pits:
+		bad.append("a pit at the floor ore: %s reached but no way back" % pits)
+	if not low_cut:
+		bad.append("no stand under the floor at the floor ore in the last map")
+# (5), (6) the effects made
+for what, rx in (("harvesting", r"local/rts_harvester \d+: harvesting effect at"), ("digging", r"local/rts_digger \d+: digging effect of kit/")):
+	if not [l for l in lines if re.search(rx, l)]:
+		bad.append("no %s effect" % what)
+print("effects: %s" % [l.split(": ", 2)[-1] for l in lines if re.search(r"rts_(harvester|digger) \d+: (harvesting|digging) effect", l)][:4])
 # The match, minute by minute
 print("the match, minute by minute:")
 for mnt in range(int(end // 60) + 1):

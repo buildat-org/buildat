@@ -23,8 +23,8 @@
 --   panel on each player's screen ("again": the same match once more; "lobby":
 --   back). The `money` text (to its team) shows the team's money, `status`
 --   (to the player) what a buy did and at a start what to do first,
---   `notice` (to the player, in the middle of the screen for a few seconds)
---   a buy refused and an idle harvester.
+--   `notice` (to the player, near the top right for a few seconds) a buy
+--   refused and an idle harvester, `alert` Under attack (alerts() below).
 -- simplified: dug tunnels stay dug from one match to the next (Stop puts the
 -- World back); a building is made at once, no construction time; a player
 -- leaving a 1v1 does not end it
@@ -50,14 +50,12 @@ local function team_of_player(c, by)
 	end
 end
 
--- (bad: a buy refused, also the `notice` in the middle of their screen)
+-- (bad: a buy refused, the `notice` near the top right instead)
 local function say(c, by, text, bad)
 	if by and tostring(by):match("^player:") then
-		if c.params.status ~= 0 then
-			c:send(c.params.status, "value", text, by)
-		end
-		if bad and c.params.notice ~= 0 then
-			c:send(c.params.notice, "value", text, by)
+		local to = bad and c.params.notice or c.params.status
+		if to ~= 0 then
+			c:send(to, "value", text, by)
 		end
 	end
 	c:log(text)
@@ -239,6 +237,65 @@ local function pockets(c, base, side)
 	return #out
 end
 
+-- [KIT_RTS_PLAYTEST_1] (11) "Under attack": a unit or building of a side
+-- with a player whose health went down since the last tick (c.units'
+-- share), out of the player's view, tells them in the `alert` text, once in
+-- `alert_every` s. The view (s.attention): within `view` m of the tank or
+-- digger of theirs that last set off moving, following it while it moves
+-- (those move on their player's orders alone; one 5 s out of the factory
+-- not yet); the camera's start, their base, before that.
+-- simplified: the server does not know the camera, nor can a unit made in
+-- play reach its match to tell it of an order (no prefab link or entity
+-- parameter outside the prefab); a pan, or an order to a harvester or to a
+-- unit on the move, is not seen
+local function alerts(c)
+	local s, p = c.state, c.params
+	local hp, hit, moving = {}, {}, {}
+	for _, u in ipairs(c.units or {}) do
+		local k = tostring(u.id)
+		s.seen[k] = s.seen[k] or c.now
+		if (u.name == "tank" or u.name == "digger") and u.moving and s.players[u.team] then
+			moving[k] = true
+			if not s.moving[k] and c.now - s.seen[k] > 5 and s.follow[u.team] ~= u.id then
+				s.follow[u.team] = u.id
+				c:log("view: " .. u.team .. " follows " .. u.name .. " " .. k)
+			end
+		end
+		if s.follow[u.team] == u.id and u.moving then
+			s.attention[u.team] = {u.pos[1], u.pos[2], u.pos[3]}
+		end
+	end
+	s.moving = moving
+	for _, u in ipairs(c.units or {}) do
+		if u.health then
+			local k = tostring(u.id)
+			hp[k] = u.health
+			local a = s.attention[u.team]
+			if s.hp[k] and u.health < s.hp[k] - 1e-6 and s.players[u.team] and
+					not hit[u.team] and not (a and (u.pos[1] - a[1]) ^ 2 +
+					(u.pos[3] - a[3]) ^ 2 < p.view ^ 2) then
+				hit[u.team] = u
+			end
+		end
+	end
+	s.hp = hp
+	for team, u in pairs(hit) do
+		local what = team .. "'s " .. u.name .. " " .. u.id .. " hit out of view"
+		local ago = c.now - (s.alerted[team] or -1e9)
+		if ago >= p.alert_every then
+			s.alerted[team] = c.now
+			c:log(string.format("under attack: %s, told at t=%.1f", what, c.now))
+			if p.alert ~= 0 then
+				c:send(p.alert, "value", "Under attack: your " ..
+					(u.name == "hq" and "HQ" or u.name), s.players[team])
+			end
+		else
+			c:log(string.format("under attack: %s at t=%.1f, not told (told %.0f s ago)",
+				what, c.now, ago))
+		end
+	end
+end
+
 local function panels(c, by, now)
 	local p = c.params
 	for _, x in ipairs({{p.lobby, "lobby"}, {p.hud, "playing"}, {p.result, "over"}}) do
@@ -255,6 +312,8 @@ local function start(c)
 	end
 	s.queue = {}
 	s.winner = ""
+	s.hp, s.alerted, s.seen, s.moving, s.follow = {}, {}, {}, {}, {}
+	s.attention = {Blue = p.blue_base, Red = p.red_base}
 	s.mode = "playing"
 	s.since = c.now
 	for _, team in ipairs({"Blue", "Red"}) do
@@ -316,7 +375,10 @@ return {
 			result = "The result card's panel.", result_text = "The result card's text.",
 			money = "A text shown to a team: its money.",
 			status = "A text shown to a player: what their buy did.",
-			notice = "A text shown to a player in the middle of the screen: a buy refused, a harvester idle.",
+			notice = "A text shown to a player near the top right: a buy refused, a harvester idle.",
+			alert = "A text shown to a player near the top right: Under attack.",
+			view = "Metres about the tank or digger of a player's that last set off moving (their base before) that count as in their view (no Under attack there).",
+			alert_every = "Seconds between a side's Under attack notices at most.",
 			start_factory = "Each side starts with a factory.",
 			blue_base = "Where Blue's HQ is made.", red_base = "Where Red's HQ is made.",
 			start_money = "Each side's money at the start.",
@@ -346,6 +408,9 @@ return {
 		result = {type = "entity", default = 0}, result_text = {type = "entity", default = 0},
 		money = {type = "entity", default = 0}, status = {type = "entity", default = 0},
 		notice = {type = "entity", default = 0},
+		alert = {type = "entity", default = 0},
+		view = {type = "number", default = 16, min = 1, max = 200},
+		alert_every = {type = "number", default = 20, min = 1, max = 600},
 		start_factory = {type = "bool", default = true},
 		blue_base = {type = "position", default = {-36, 4, -9}},
 		red_base = {type = "position", default = {35, 4, 8}},
@@ -370,7 +435,9 @@ return {
 	state = {mode = {default = "lobby", shared = true}, vs = {default = ""},
 		players = {default = {}}, queue = {default = {}}, winner = {default = "", shared = true},
 		since = {default = 0}, waiting = {default = ""}, money = {default = {}},
-		idle = {default = {}}, still = {default = {}}},
+		idle = {default = {}}, still = {default = {}}, hp = {default = {}},
+		attention = {default = {}}, alerted = {default = {}}, seen = {default = {}},
+		moving = {default = {}}, follow = {default = {}}},
 	inputs = {vs_computer = "none", versus = "none", again = "none", lobby = "none",
 		build = "string", build_harvester = "none", build_digger = "none",
 		build_tank = "none", build_refinery = "none", build_factory = "none"},
@@ -475,6 +542,7 @@ return {
 				end
 			end
 			s.still = still
+			alerts(c)
 			-- (a second for the start's buildings to be made)
 			if c.now - s.since > 2 then
 				if not alive.Blue then
