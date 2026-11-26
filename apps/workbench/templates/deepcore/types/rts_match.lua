@@ -85,9 +85,12 @@ end
 local function spot(c, hq)
 	local h = {math.floor(hq.pos[1] + 0.5), math.floor(hq.pos[2] + 0.5),
 		math.floor(hq.pos[3] + 0.5)}
-	for _ = 1, 14 do
-		local a = math.random() * 2 * math.pi
-		local r = 5.5 + math.random() * 3
+	-- Every spot on rings out from the HQ, from a random angle (14 random
+	-- tries found none beside the start factory and the units now and then)
+	local a0 = math.random() * 2 * math.pi
+	for k = 0, 16 * 6 - 1 do
+		local a = a0 + (k % 16) * math.pi / 8
+		local r = 5.5 + math.floor(k / 16)
 		local p = {h[1] + math.floor(math.cos(a) * r + 0.5), h[2],
 			h[3] + math.floor(math.sin(a) * r + 0.5)}
 		local free = true
