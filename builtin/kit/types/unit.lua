@@ -11,6 +11,9 @@
 -- [KIT_RTS] Under kit/game_rules' fog its `sight` is how far (m) it sees for
 -- its team (`vision = "sight"`): another team's units that near are sent to
 -- its team's players.
+-- [KIT_RTS_PLAYTEST_1] The rts camera's selection window says what a unit
+-- does: a shared state `status` (a short text) of a type on its entity,
+-- else "attacking" while target is set (shared), "moving", or "idle".
 -- simplified: no queue of orders, no stance; a target is chased wherever it
 -- goes, until it is gone or another order comes
 local function think(c)
@@ -60,7 +63,8 @@ return {
 		range = {type = "number", default = 10, min = 0.5, max = 64},
 		sight = {type = "number", default = 12, min = 0, max = 64},
 	},
-	state = {target = {default = 0}},
+	-- ([KIT_RTS_PLAYTEST_1] shared: the selection window's "attacking")
+	state = {target = {default = 0, shared = true}},
 	on_order = function(c, order)
 		if order.target then
 			-- (c.target is the state's as the run starts: the next run's)

@@ -19,6 +19,13 @@
 #   - the camera zooms (the wheel), turns (a right drag), pans (a middle
 #     drag, W) and cuts (PageDown, Shift and the wheel, Home), each logged
 #     and screenshot ($t/*.png, KEEP_TMP=1);
+#   - [KIT_RTS_PLAYTEST_1] the Getting started window (Keys and the help's
+#     two sections) folding a section and minimizing, kept in the client's
+#     storage and read at a rejoin; the box leaves the Blue depot (a unit
+#     with no movement) out, a click takes it; the selection window's text
+#     (30 Archer; the depot's health; an archer idle, attacking); a health
+#     bar over the damaged Red unit only; Shift and W pan faster; Kit's own
+#     pointer at the left edge pans;
 #   - the recorder's perf (draws, Kit ms) with the 60 units in view.
 # Then the web client in headless Firefox (skipped without it or web/): the
 # same save, box select, an order, the recorder's perf.
@@ -114,7 +121,8 @@ ents = [{"id": 2, "parent": 1, "name": "world", "kind": "scene"},
 	{"id": 5, "parent": 2, "name": "red", "pos": [0, 1, 4],
 		"components": [{"type": "kit/team", "params": {"name": "Red", "color": "#d03030"}}]},
 	{"id": 6, "parent": 2, "name": "controls",
-		"components": [{"type": "kit/controls", "params": {"camera": "rts", "height": 30, "angle": 55}}]},
+		"components": [{"type": "kit/controls", "params": {"camera": "rts", "height": 30, "angle": 55,
+			"help": "Check: one line|and another||Second: its line"}}]},
 	{"id": 7, "parent": 2, "name": "env",
 		"components": [{"type": "kit/environment", "params": {"sun": False, "moon": False,
 			"stars": False, "fill": 0.8}}]}]
@@ -127,12 +135,18 @@ for team, x0, color in (("Blue", -16, "#3060d0"), ("Red", 6, "#d03030")):
 			{"type": "kit/health", "params": {"max": 1000000}}]
 		if team == "Red":
 			comps.append({"type": "workbench/rts_target"})
-		ents.append({"id": nid, "parent": 2, "name": "%s%d" % (team, i),
+		ents.append({"id": nid, "parent": 2, "name": "archer",
 			"pos": [x0 + 2 * (i % 6), 1, -4 + 2 * (i // 6)], "components": comps})
 		nid += 1
 def put(k, v):
 	db.execute("insert or replace into store (store, key, value) values (?, ?, ?)",
 		("kit", k, json.dumps(v).encode()))
+# A Blue building (70: a unit with no movement) west of the Blue units
+ents.append({"id": nid, "parent": 2, "name": "depot", "pos": [-20, 1, 0],
+	"components": [{"type": "kit/part", "params": {"size": [2, 1.5, 2], "color": "#3060d0"}},
+		{"type": "kit/unit", "params": {"team": "Blue"}},
+		{"type": "kit/health", "params": {"max": 100}}]})
+nid += 1
 put("authored", {"kit": 1, "api": 1, "next_id": nid, "entities": ents})
 put("session", {"by": "", "restore": [], "round": [], "running": True})
 db.execute("delete from store where store = ? and key = ?", ("kit", "runtime"))
@@ -209,7 +223,32 @@ screenshot $t/start.png"
 r0=$(last_rts)
 echo "start: $r0"
 
+# ---- [KIT_RTS_PLAYTEST_1] Getting started (Keys and the help's two
+# sections): a section's title folds it, the window's minimizes it, kept in
+# this client's storage (and read at the rejoin below); no health bar yet
+grep -a "kit: rts: getting started 3 sections" "$CL" | tail -1 ||
+	fail "no Getting started window of 3 sections ($CL)"
+say 'click Button "Keys"
+frames 20
+screenshot '"$t"'/gs_folded.png'
+grep -aq "kit: rts: getting started: Keys folded" "$CL" || fail "Keys did not fold ($CL)"
+grep -a "kit: rts: getting started 3 sections" "$CL" | tail -1 |
+	grep -q "3 sections, 3 lines shown" || fail "Keys folded: not 3 lines left ($CL)"
+say 'click Button "Getting started"
+frames 20
+screenshot '"$t"'/gs_min.png'
+grep -aq "kit: rts: getting started: minimized" "$CL" || fail "the window did not minimize ($CL)"
+kept=$(find "$t/cu" -name kit_getting_started | head -1)
+[ -n "$kept" ] && grep -q "folded Keys" "$kept" && grep -q "minimized" "$kept" ||
+	fail "the fold not kept ($t/cu: ${kept:-none})"
+grep -a "kit: rts: health bars over" "$CL" | grep -v "over 0$" &&
+	fail "a health bar with nothing damaged ($CL)"
+
 # ---- Selection and orders
+click_unit() # <id>: a left click where the client draws that unit (it moves)
+{
+	say "event kit_rts_where click $1"
+}
 n0=$(lines "$CL" "kit: rts: selected")
 say "mouse_pos 4 4
 mouse_down left
@@ -221,6 +260,10 @@ grep -a "kit: rts: selected" "$CL" | tail -1
 grep -a "kit: rts: selected" "$CL" | tail -1 | grep -q "selected 30 (box" ||
 	fail "the box did not select the 30 Blue units ($CL)"
 sel=$(last_rts | grep -oP 'selected 30: \K.*')
+# ([KIT_RTS_PLAYTEST_1] not the Blue depot, 70: no movement; the window's count)
+wait_for_log "$CL" "the selection window: 30 selected; 30 Archer$" 10 ||
+	fail "no selection window of 30 Archers ($CL)"
+say "screenshot $t/selected.png"
 for id in $sel; do
 	[ "$id" -ge 10 ] && [ "$id" -le 39 ] || fail "entity $id selected, not a Blue unit ($CL)"
 done
@@ -243,6 +286,18 @@ grep -a "kit: rts: selected" "$CL" | tail -1 | grep -q "selected 0 (click on non
 say "keypress 1"
 grep -a "kit: rts: selected" "$CL" | tail -1 | grep -q "selected 30 (group 1)" ||
 	fail "group 1 not recalled ($CL)"
+# ([KIT_RTS_PLAYTEST_1] a click still selects the depot; one unit's window)
+say "event kit_click_at -20 1.75 0"
+grep -a "kit: rts: selected" "$CL" | tail -1 | grep -q "selected 1 (click on 70)" ||
+	fail "a click did not select the depot ($CL)"
+wait_for_log "$CL" "the selection window: Depot; Health 100/100$" 10 ||
+	fail "no window of the depot ($CL)"
+click_unit 10
+grep -a "kit: rts: selected" "$CL" | tail -1 | grep -q "selected 1 (click on 10)" ||
+	fail "a click did not select unit 10 ($CL)"
+wait_for_log "$CL" "the selection window: Archer; Health 1000000/1000000; idle$" 10 ||
+	fail "no window of an idle archer ($CL)"
+say "keypress 1"
 # A Red unit (40, at 6, 1, -4) as the target
 h0=$(lines "$SL" "hit by unit")
 say "event kit_click_at 6 1 -4 right"
@@ -250,6 +305,17 @@ grep -aq "kit: rts: 30 ordered at entity 40" "$CL" || fail "no target order ($CL
 wait_for_log "$SL" "Order by rtsboss: 30 units at entity 40" 10 || fail "the server took no target ($SL)"
 await_n "$SL" "hit by unit" $((h0 + 3)) 40
 grep -aqE "Entity [0-9]+ hits entity 40 with kit/bow" "$SL" || fail "no kit/bow hit on 40 ($SL)"
+# ([KIT_RTS_PLAYTEST_1] a bar over the damaged 40, none over the rest)
+wait_for_log "$CL" "kit: rts: health bars over [0-9]*: (.* )?40( |$)" 10 ||
+	fail "no health bar over 40 ($(grep -a 'health bars over' "$CL" | tail -3))"
+for id in $(grep -a "kit: rts: health bars over" "$CL" | grep -oP 'over [0-9]+: \K.*' | tr ' ' '\n' | sort -u); do
+	grep -aqE "hits entity $id with" "$SL" || fail "a bar over $id, never hit ($CL)"
+done
+say "screenshot $t/bar.png"
+click_unit 10
+wait_for_log "$CL" "the selection window: Archer; Health 1000000/1000000; attacking$" 10 ||
+	fail "no window of an attacking archer ($CL)"
+say "keypress 1"
 # ---- Bodyless
 last_rts | grep -q "steps 0," || fail "the client sent steps: $(last_rts)"
 grep -aq "rtsboss's body" "$CL" && fail "a body drawn for rtsboss ($CL)"
@@ -290,6 +356,38 @@ say "keydown w
 delay 700
 keyup w"
 r4=$(last_rts)
+# ([KIT_RTS_PLAYTEST_1] Shift: faster (back, the world in view); Kit's own
+# pointer at the left edge)
+say "keydown shift
+frames 2
+keydown s
+delay 700
+keyup s
+frames 2
+keyup shift"
+grep -aq "kit: rts: panning x3" "$CL" || fail "no fast pan ($CL)"
+say "event kit_rts_pointer 480 300
+frames 3
+screenshot $t/pointer.png"
+r5=$(last_rts)
+say "event kit_rts_pointer 2 300
+frames 30
+screenshot $t/edge.png"
+r6=$(last_rts)
+say "event kit_rts_pointer off"
+grep -aq "kit: rts: edge pan 0,-1$" "$CL" || fail "no pan at the left edge ($CL)"
+grep -aq "kit: rts: the pointer held, Kit's drawn" "$CL" || fail "Kit's pointer not drawn ($CL)"
+python3 -I - "$r3" "$r4" "$r5" "$r6" <<'PY' || fail "Shift and W, the edge"
+import re, sys
+def f(s):
+    m = re.search(r"camera at (\S+),(\S+),(\S+),", s)
+    return [float(x) for x in m.groups()]
+c, d, e, g = [f(s) for s in sys.argv[1:]]
+mv = lambda p, q: ((p[0] - q[0]) ** 2 + (p[2] - q[2]) ** 2) ** 0.5
+assert mv(d, e) > 2 * mv(c, d), ("Shift and W not faster", mv(c, d), mv(d, e))
+assert mv(e, g) > 1, ("no edge pan", e, g)
+print("W %.1f m, Shift and W %.1f m, the edge %.1f m" % (mv(c, d), mv(d, e), mv(e, g)))
+PY
 python3 -I - "$r1" "$r2" "$r3" "$r4" <<'PY' || fail "the camera did not turn and pan"
 import re, sys
 def f(s):
@@ -324,6 +422,24 @@ last_rts | grep -q "cut off" || fail "Home did not take the cut off: $(last_rts)
 say "keypress Home"
 last_rts | grep -q "cut 2.0," || fail "Home did not put the cut back: $(last_rts)"
 grep -a "kit: rts: the cut" "$CL" | tail -4
+# ---- [KIT_RTS_PLAYTEST_1] The window shown again (Keys still folded), the
+# client gone and back: the fold read from its storage
+say 'click Button "Getting started"
+frames 20'
+echo quit > "$C"
+wait "$CLI" 2>/dev/null
+CL=$t/c2.log
+env DISPLAY="$d" WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=rtsboss \
+	BUILDAT_JOIN_CODE="$code" bin/buildat -C "$t/cc" -D "$t/cu" -s localhost:$SERVER_PORT \
+	-w 960x600 -l 3 -o sound_mute=1 -c - < "$C" > "$CL" 2>&1 &
+CLI=$!
+CHECK_PIDS+=($CLI)
+wait_for_log "$CL" "kit: rts: getting started 3 sections" 120 ||
+	fail "no Getting started window after the rejoin ($CL)"
+grep -a "kit: rts: getting started 3 sections" "$CL" | head -1 |
+	grep -q "3 lines shown" || fail "the rejoin's window not as kept: Keys folded ($CL)"
+say "frames 10
+screenshot $t/rejoined.png"
 # ---- The recorder's perf (a report each 5 s), the 60 units in view: the
 # start's point and zoom, the cut off, some 10 s of frames
 say "keypress Home

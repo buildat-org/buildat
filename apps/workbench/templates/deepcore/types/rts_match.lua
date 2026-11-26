@@ -282,9 +282,9 @@ local function start(c)
 	c:send(p.ai, s.vs == "computer" and "start" or "stop")
 	for team, by in pairs(s.players) do
 		panels(c, by, "playing")
-		-- (what to do first: a playtest's player found nothing to do)
-		say(c, by, "Click a unit to select it, right click where it goes. " ..
-			"Diggers dig, harvesters bring ore home; the bar below buys.")
+		-- (what to do first: a playtest's player found nothing to do;
+		-- [KIT_RTS_PLAYTEST_1] the rest in the Getting started window)
+		say(c, by, "Click a unit, right click where it goes")
 	end
 	c:log("match started: " .. s.vs)
 end

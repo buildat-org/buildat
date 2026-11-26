@@ -292,10 +292,12 @@ kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 -- editor), or after 10 s without its state
 local editing, looking, settled = false, false, false
 local menu
+-- ([KIT_RTS_PLAYTEST_1] the rts camera's held pointer, "Prefer pointer
+-- lock": Kit draws its own)
 local function capture(on)
 	ui_utils.mouse_look(on and settled and not TOUCH and
 			(not editing or looking) and
-			not kit.pointer_free(),
+			(not kit.pointer_free() or kit.pointer_lock()),
 			function()
 		if not kit.drop_crosshair() then
 			menu.open()

@@ -410,6 +410,21 @@ local function think(c)
 	c:propose_move({to = {st[1], st[2] - 0.5, st[3]}, range = 0.3})
 end
 
+-- [KIT_RTS_PLAYTEST_1] What it does, for the rts camera's selection window
+-- (its shared state status)
+local STATUS = {seek = "looking for ore", go = "going to the ore",
+	mine = "mining", home = "carrying %d to the refinery",
+	stuck = "carrying %d, finding a way", ordered = "moving",
+	none = "idle: no ore its refinery reaches",
+	no_refinery = "idle: carrying %d, no refinery"}
+
+local function status(c)
+	local s = c.state
+	local n = math.floor(s.cargo)
+	local t = (STATUS[s.mode] or tostring(s.mode)):gsub("%%d", n)
+	return n > 0 and not t:find("carrying") and t .. ", carrying " .. n or t
+end
+
 return {
 	version = 1,
 	about = {
@@ -442,7 +457,7 @@ return {
 	state = {cargo = {default = 0, shared = true}, mode = {default = "seek"},
 		ore = {default = false}, stand = {default = false}, since = {default = 0},
 		near = {default = 0}, ordered = {default = false}, skip = {default = {}},
-		mined = {default = 0}},
+		mined = {default = 0}, status = {default = "", shared = true}},
 	on_start = function(c)
 		c:after(0.3 + math.random() * 0.5, "think")
 	end,
@@ -454,6 +469,7 @@ return {
 	on_timer = function(c, name)
 		if name == "think" then
 			think(c)
+			c.state.status = status(c)
 		end
 	end,
 }

@@ -739,6 +739,7 @@ type kit/controls param fov | {"default": 75, "kind": "number", "max": 150, "min
 type kit/controls param fov_time | {"default": 0.3, "kind": "number", "max": 10, "min": 0}
 type kit/controls param glitch | {"default": 0, "kind": "number", "max": 1, "min": 0}
 type kit/controls param height | {"default": 14, "kind": "number", "max": 200, "min": 2}
+type kit/controls param help | {"default": "", "kind": "string"}
 type kit/controls param look_ahead | {"default": 0, "kind": "number", "max": 20, "min": 0}
 type kit/controls param look_velocity | {"default": 0, "kind": "number", "max": 5, "min": 0}
 type kit/controls param movement | {"default": "kit/walker", "kind": "string"}
@@ -1921,7 +1922,7 @@ type kit/unit param range | {"default": 10, "kind": "number", "max": 64, "min": 
 type kit/unit param sight | {"default": 12, "kind": "number", "max": 64, "min": 0}
 type kit/unit param team | {"default": "", "kind": "string"}
 type kit/unit param weapon | {"default": "", "kind": "string"}
-type kit/unit state target
+type kit/unit state target | shared
 type kit/unit_walker | version 1
 type kit/unit_walker handlers | step
 type kit/unit_walker param acceleration | {"default": 30, "kind": "number", "max": 500, "min": 1}

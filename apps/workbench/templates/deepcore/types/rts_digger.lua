@@ -82,6 +82,7 @@ local function step(c)
 		c.state.goal = false
 		c:propose_move(nil)
 		c:log("dug to " .. g[1] .. "," .. g[2] .. "," .. g[3])
+		c.state.status = "idle"
 		return
 	end
 	-- (three steps from the same cell: it does not get into the slice it
@@ -93,6 +94,7 @@ local function step(c)
 		c.state.goal = false
 		c:propose_move(nil)
 		c:log("stuck at " .. here .. " towards " .. g[1] .. "," .. g[3])
+		c.state.status = "idle: stuck"
 		return
 	end
 	local times = digs(c.params.digs)
@@ -118,6 +120,7 @@ local function step(c)
 	c.state.goal = false
 	c:propose_move(nil)
 	c:log("blocked by hard rock")
+	c.state.status = "idle: hard rock in the way"
 end
 
 return {
@@ -141,7 +144,9 @@ return {
 	},
 	state = {goal = {default = false}, next = {default = false},
 		cells = {default = false}, waits = {default = 0}, last = {default = ""},
-		stuck = {default = 0}},
+		stuck = {default = 0},
+		-- ([KIT_RTS_PLAYTEST_1] the selection window's)
+		status = {default = "", shared = true}},
 	on_order = function(c, order)
 		-- (the point clicked, not its spot: a spot is moved out of walls)
 		local at = order.center or order.at
@@ -150,9 +155,11 @@ return {
 			c.state.goal = g
 			c.state.waits, c.state.last = 0, ""
 			c:log("digging to " .. g[1] .. "," .. g[2] .. "," .. g[3])
+			c.state.status = "digging"
 			c:after(0.05, "dig")
 		else
 			c.state.goal = false
+			c.state.status = ""
 			c:propose_move(nil)
 		end
 	end,
