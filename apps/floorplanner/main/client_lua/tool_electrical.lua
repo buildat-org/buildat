@@ -1352,14 +1352,15 @@ local function build_lines(y)
 			local gap = 0.8 * s + 0.15 * tm
 			-- A label as wide as the segment between its boxes' symbols at
 			-- most (a character half its em), the text smaller to fit
-			-- simplified: shrunk, to 0.4 of the text at least, not moved
-			-- elsewhere along the run; labels may still overlap there
+			-- simplified: shrunk, to half the text at least, not moved
+			-- elsewhere along the run, and nothing keeps it off a box's
+			-- label; a placement that avoids the others is the upgrade
 			local function fit(lines)
 				local n = 0
 				for _, l in ipairs(lines) do
 					n = math.max(n, #l)
 				end
-				return math.max(0.4 * tm, math.min(tm, (long - 5 * s) / (0.5 * n)))
+				return math.max(0.5 * tm, math.min(tm, (long - 3 * s) / (0.5 * n)))
 			end
 			local num, over = {}, {}
 			if on(2) then

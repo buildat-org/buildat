@@ -52,7 +52,7 @@ screenshot $t/all_out.png
 event fp_elec view 3000 2000 4500 select
 frames 10
 screenshot $t/room.png
-event fp_elec view 7500 5500 4000 select
+event fp_elec view 3000 5500 4000 select
 frames 10
 screenshot $t/study.png
 event fp_elec viewset el_labels 0
