@@ -2838,6 +2838,8 @@ local function build_toolbar()
 	local l = S.layout and doc.ents[S.layout]
 	add(l and l.strs.name or "Layouts", nil, function()
 		S.layouts_open = not S.layouts_open
+		-- In the Circuits window's place ([FP_ELECTRICAL])
+		S.circuits_open = S.circuits_open and not S.layouts_open
 		log:info("Layouts menu " .. (S.layouts_open and "shown" or "closed"))
 		refresh_panels()
 	end, S.layouts_open)
@@ -4573,8 +4575,8 @@ do
 		end
 		S.primary = t.id
 		if t.kind == "ebox" or t.kind == "erun" then
-			-- simplified: a box or a run is not dragged; its panel moves it
-			return
+			-- A box, or a run's point ([FP_ELECTRICAL]); a run itself not
+			S.drag = E.elec_drag(t)
 		elseif t.kind == "node" and sel_count() == 1 then
 			S.drag = {kind = "node", id = t.id, moved = true,
 					x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
@@ -4694,6 +4696,11 @@ do
 	local function update_drag()
 		local d = S.drag
 		if d.kind == "box" then
+			return
+		end
+		if d.kind == "elec" then
+			-- The overlay's, drawn each frame: nothing to rebuild
+			E.elec_drag_update(d)
 			return
 		end
 		if d.kind == "footprint" then
@@ -4877,6 +4884,8 @@ do
 				end
 			end
 			refresh_panels()
+		elseif d.kind == "elec" then
+			E.elec_drag_end(d)
 		elseif d.kind == "footprint" then
 			local w, dd = math.abs(d.x1 - d.x0), math.abs(d.z1 - d.z0)
 			if w >= 1 and dd >= 1 and doc.can("edit") then

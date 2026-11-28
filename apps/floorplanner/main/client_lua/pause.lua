@@ -106,7 +106,8 @@ do
 				{"Outlet box mm", "el_h_outlet"}, {"Device box mm", "el_h_device"},
 				{"Equipment box mm", "el_h_equipment"}, {"Board mm", "el_h_board"},
 				{"Junction box under the ceiling mm", "el_h_junction"},
-				{"Conduit mm", "el_conduit_d"}}) do
+				{"Conduit mm", "el_conduit_d"},
+				{"Cable slack a box end mm", "el_slack"}, {"Cable waste %", "el_waste"}}) do
 			plan_int(f[1], f[2])
 		end
 			-- The trees on the horizon (PBR): their height over their

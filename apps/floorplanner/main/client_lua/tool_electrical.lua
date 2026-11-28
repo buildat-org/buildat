@@ -159,13 +159,12 @@ local function run_at(x, z)
 	if not x then
 		return nil
 	end
-	local d = doc()
 	local best, bd = nil, snap_radius()
 	for id, r in pairs(E.elec_derived().runs) do
-		local a = d.ents[d.ents[id].ints.a]
-		if a and a.ints.layout == S.layout then
-			for i = 2, #r.pts do
-				local p, q = r.pts[i - 1], r.pts[i]
+		local pts = r.on[S.layout]
+		if pts then
+			for i = 2, #pts do
+				local p, q = pts[i - 1], pts[i]
 				local _, _, _, dd = geom.nearest_on_segment(x, z, p[1], p[2], q[1], q[2])
 				if dd <= bd then
 					best, bd = id, dd
@@ -176,12 +175,63 @@ local function run_at(x, z)
 	return best
 end
 
--- What a click of Select takes in the Electrical view: a box, else a run
+-- A run's handles: its points (pt, its index), and the middle of each
+-- segment (ins, the index a point added there takes)
+-- simplified: on the floor it was drawn on only, not a riser's other
+local function handles(r)
+	local out = {}
+	for k = 2, #r.pts - 1 do
+		out[#out + 1] = {pt = k - 1, x = r.pts[k][1], z = r.pts[k][2]}
+	end
+	for j = 1, #r.pts - 1 do
+		out[#out + 1] = {ins = j, x = (r.pts[j][1] + r.pts[j + 1][1]) / 2,
+				z = (r.pts[j][2] + r.pts[j + 1][2]) / 2}
+	end
+	return out
+end
+
+-- The selected run's handle at x, z
+local function handle_at(x, z)
+	local id = S.primary
+	local r = S.sel[id] == "erun" and E.elec_derived().runs[id]
+	if not (x and r and r.on[S.layout] == r.pts) then
+		return nil
+	end
+	local best, bd = nil, snap_radius()
+	for _, h in ipairs(handles(r)) do
+		local dd = geom.len(h.x - x, h.z - z)
+		if dd < bd then
+			best, bd = h, dd
+		end
+	end
+	return best and {kind = "erun", id = id, pt = best.pt, ins = best.ins}
+end
+
+-- A run's path as a point drag has it
+local function drag_pts(dg)
+	local out = {}
+	for k, p in ipairs(E.elec_derived().runs[dg.run].pts) do
+		out[k] = p
+	end
+	if dg.ins then
+		table.insert(out, dg.ins + 1, {dg.x, dg.z})
+	else
+		out[dg.pt + 1] = {dg.x, dg.z}
+	end
+	return out
+end
+
+-- What a click of Select takes in the Electrical view: the selected run's
+-- handle, a box, else a run
 function E.elec_target()
 	if not S.electrical or S.view ~= "2d" then
 		return nil
 	end
 	local x, z = cursor_floor()
+	local h = handle_at(x, z)
+	if h then
+		return h
+	end
 	local b = box_at(x, z)
 	if b then
 		return {kind = "ebox", id = b.id}
@@ -225,6 +275,91 @@ local function done(what)
 	return function(err)
 		log:info("fp elec: " .. what .. (err == "" and " done" or ": " .. err))
 	end
+end
+
+-- **Dragged with Select**: a box along its wall, onto another wall as an
+-- opening is, or on the ceiling; a run's point, or a new one from the
+-- middle of a segment. editor.lua's drag calls these for its kind "elec".
+function E.elec_drag(t)
+	local e = doc().ents[t.id]
+	if t.kind == "ebox" and e then
+		local ints = {}
+		for k, v in pairs(e.ints) do
+			ints[k] = v
+		end
+		return {kind = "elec", box = t.id, ints = ints}
+	elseif t.kind == "erun" and e and (t.pt or t.ins) then
+		return {kind = "elec", run = t.id, pt = t.pt, ins = t.ins}
+	end
+end
+
+local function snapped_cursor()
+	local x, z = cursor_floor()
+	if x and not S.ctrl then
+		x, z = geom.snap(x, grid_step()), geom.snap(z, grid_step())
+	end
+	return x and math.floor(x + 0.5), z and math.floor(z + 0.5)
+end
+
+function E.elec_drag_update(dg)
+	if dg.run then
+		dg.x, dg.z = snapped_cursor()
+		return
+	end
+	local i = dg.ints
+	if i.wall == 0 then
+		local x, z = snapped_cursor()
+		if x then
+			i.x, i.z = x, z
+		end
+		return
+	end
+	local wp = wall_point()
+	if wp and wp.wall ~= i.wall then
+		i.wall, i.along, i.side = wp.wall, wp.along, wp.side
+		return
+	end
+	local f = el.wall_line(doc().ents, i.wall, geom)
+	local x, z = cursor_floor()
+	if f and x then
+		local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
+		i.along = math.floor(math.max(0, math.min(f.len, along)) + 0.5)
+	end
+end
+
+function E.elec_drag_end(dg)
+	local d = doc()
+	if dg.box then
+		local e, i = d.ents[dg.box], dg.ints
+		if e and (i.wall ~= e.ints.wall or i.along ~= e.ints.along or
+				i.side ~= e.ints.side or i.x ~= e.ints.x or i.z ~= e.ints.z) then
+			send({{op = "set", ent = {id = dg.box, ints = i.wall ~= 0 and
+					{wall = i.wall, along = i.along, side = i.side} or
+					{x = i.x, z = i.z}}}}, done("box moved"))
+		end
+		return
+	end
+	if not (d.ents[dg.run] and E.elec_derived().runs[dg.run] and dg.x) then
+		return
+	end
+	-- A point dropped on its neighbour goes; one added there is none
+	local pts = drag_pts(dg)
+	local k = dg.ins and dg.ins + 1 or dg.pt + 1
+	for _, n in ipairs({pts[k - 1], pts[k + 1]}) do
+		if geom.len(n[1] - dg.x, n[2] - dg.z) < snap_radius() then
+			if dg.ins then
+				return
+			end
+			table.remove(pts, k)
+			break
+		end
+	end
+	local l = {}
+	for j = 2, #pts - 1 do
+		l[#l + 1] = math.floor(pts[j][1] + 0.5)
+		l[#l + 1] = math.floor(pts[j][2] + 0.5)
+	end
+	send({{op = "set", ent = {id = dg.run, lists = {pts = l}}}}, done("run points"))
 end
 
 -- A new box: on the wall under the pointer, else on the ceiling there
@@ -453,7 +588,9 @@ function E.elec_toolbar(add)
 		end
 	end
 	add("Circuits", nil, function()
+		-- In the Layouts window's place: both are at the top middle
 		S.circuits_open = not S.circuits_open
+		S.layouts_open = S.layouts_open and not S.circuits_open
 		refresh_panels()
 	end, S.circuits_open)
 end
@@ -594,6 +731,8 @@ function E.elec_props(props, sel, heading, set, int_field, delete_selected)
 		heading("Run " .. sel.id)
 		panel.label(props, el.box_name(d.ents, i.a) .. " - " ..
 				el.box_name(d.ents, i.b))
+		panel.label(props, "Drag a point, or a + to add one;")
+		panel.label(props, "a point dropped on the next goes")
 		local cs = {}
 		for _, c in ipairs(circuits()) do
 			cs[#cs + 1] = {circuit_text(c), c.id}
@@ -722,8 +861,21 @@ function E.elec_props(props, sel, heading, set, int_field, delete_selected)
 	return true
 end
 
+-- **The listing** saved as CSV, as the plan's export is: into
+-- <user>/exports, or the web's download
+function E.elec_export()
+	local d = doc()
+	local name = (d.plan_name ~= "" and d.plan_name or "plan") .. "-electrical.csv"
+	local path, why = buildat.save_file(name, el.listing_csv(el.listing(d.ents,
+			geom, E.elec_derived())))
+	log:info("fp elec: listing " .. (path and "exported to " .. path or
+			"not exported: " .. why))
+	d.notice(not path and "Not exported: " .. why or path == "" and
+			"Exported " .. name .. ": see your downloads" or "Exported to " .. path)
+end
+
 -- **The Circuits window**: every circuit, picked to be drawn for and
--- edited; the picked one's fields
+-- edited, and the picked one's fields; or, its other page, what to buy
 function E.elec_window()
 	if E.elec_win then
 		panel.discard(E.elec_win)
@@ -735,15 +887,42 @@ function E.elec_window()
 	local d = doc()
 	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, S.panel_y or 50)
 	E.elec_win = w
-	local function set(id, fields)
-		send({{op = "set", ent = {id = id, ints = fields.ints, strs = fields.strs}}})
-	end
 	local top = panel.row(w)
-	panel.label(top, "Circuits: click one to draw runs for it")
+	for _, p in ipairs({{"Circuits", false}, {"To buy", true}}) do
+		panel.keep(function() return panel.button(top, p[1], function()
+			S.elec.buy = p[2]
+			refresh_panels()
+		end, (S.elec.buy or false) == p[2]) end)
+	end
 	panel.keep(function() return panel.button(top, "Close", function()
 		S.circuits_open = false
 		refresh_panels()
 	end) end)
+	if S.elec.buy then
+		-- The listing's lines, as the CSV has them, in two columns
+		local st = settings()
+		local row = panel.row(w)
+		panel.label(row, "Cables: " .. st.el_slack .. " mm slack a box end, " ..
+				st.el_waste .. " % waste (Plan settings)")
+		panel.keep(function() return panel.button(row, "Export CSV",
+				E.elec_export) end)
+		-- The pieces' kinds and the rest's, side by side; shorter than the
+		-- CSV's: what the item says already, a switch's kinds in English
+		local cols = panel.row(w)
+		local c1, c2 = panel.column(cols), panel.column(cols)
+		local short = {Board = "", Box = "", Cable = "", ["ML wire"] = ""}
+		for _, r in ipairs(el.listing(d.ents, geom, E.elec_derived())) do
+			local text = (short[r.kind] or r.kind .. " ") ..
+					r.item:gsub(" %(%a+%)", "") .. (r.kind == "Fuse" and ", " ..
+					r.notes:gsub(":.*", "") or "") .. ": " .. r.qty .. " " .. r.unit
+			panel.label(r.unit == "pcs" and r.kind ~= "Fuse" and c1 or c2, text)
+		end
+		return
+	end
+	local function set(id, fields)
+		send({{op = "set", ent = {id = id, ints = fields.ints, strs = fields.strs}}})
+	end
+	panel.label(w, "Click a circuit to draw runs for it")
 	local board = boards()[1]
 	if board then
 		panel.label(w, "Board '" .. board.strs.name .. "', main fuse " ..
@@ -944,12 +1123,12 @@ local function build_lines(y)
 	-- conductor (to eight) across the middle of the longest segment
 	for id, r in pairs(der.runs) do
 		local e = d.ents[id]
-		local a = d.ents[e.ints.a]
-		if a.ints.layout == S.layout then
+		local pts = r.on[S.layout]
+		if pts then
 			local col = circuit_color(d.ents[e.ints.circuit])
 			local long, li = -1, 2
-			for j = 2, #r.pts do
-				local p, q = r.pts[j - 1], r.pts[j]
+			for j = 2, #pts do
+				local p, q = pts[j - 1], pts[j]
 				local l = geom.len(q[1] - p[1], q[2] - p[2])
 				if l > long then
 					long, li = l, j
@@ -965,7 +1144,7 @@ local function build_lines(y)
 					add(p[1], p[2], q[1], q[2], col)
 				end
 			end
-			local p, q = r.pts[li - 1], r.pts[li]
+			local p, q = pts[li - 1], pts[li]
 			if long > 0 then
 				local ux, uz = (q[1] - p[1]) / long, (q[2] - p[2]) / long
 				local n = math.min(r.count or 0, 8)
@@ -1045,11 +1224,11 @@ function E.elec_overlay(line, dashed)
 	-- name at it
 	for id, r in pairs(der.runs) do
 		local e = d.ents[id]
-		local a = d.ents[e.ints.a]
-		if a.ints.layout == S.layout and #r.pts >= 2 then
+		local pts = r.on[S.layout]
+		if pts and #pts >= 2 then
 			local c = d.ents[e.ints.circuit]
-			local m = math.ceil(#r.pts / 2)
-			local p, q = r.pts[m], r.pts[m + 1] or r.pts[m]
+			local m = math.ceil(#pts / 2)
+			local p, q = pts[m], pts[m + 1] or pts[m]
 			world_label((p[1] + q[1]) / 2, 0, (p[2] + q[2]) / 2, tostring(c and
 					c.ints.number or "?"))
 		end
@@ -1060,15 +1239,35 @@ function E.elec_overlay(line, dashed)
 			world_label(b.x, 0, b.z, b.e.strs.name)
 		end
 	end
-	-- The selection
+	-- The selection, where a drag has it: a run's points and the middles
+	-- of its segments (a point added there) on the floor it was drawn on
+	local dg = S.drag and S.drag.kind == "elec" and S.drag
 	for id, kind in pairs(S.sel) do
 		local r = kind == "erun" and der.runs[id]
-		if r then
-			for j = 2, #r.pts do
-				line(r.pts[j - 1][1], r.pts[j - 1][2], r.pts[j][1], r.pts[j][2], accent)
+		local pts = r and (dg and dg.run == id and dg.x and drag_pts(dg) or
+				r.on[S.layout])
+		if pts then
+			local h = 6 * mm_per_px()
+			for j = 2, #pts do
+				line(pts[j - 1][1], pts[j - 1][2], pts[j][1], pts[j][2], accent)
+			end
+			for _, hd in ipairs(r.on[S.layout] == r.pts and not dg and
+					handles(r) or {}) do
+				if hd.pt then
+					for _, s in ipairs({{-h, -h, h, -h}, {h, -h, h, h}, {h, h, -h, h},
+							{-h, h, -h, -h}}) do
+						line(hd.x + s[1], hd.z + s[2], hd.x + s[3], hd.z + s[4], accent)
+					end
+				else
+					line(hd.x - h, hd.z, hd.x + h, hd.z, accent)
+					line(hd.x, hd.z - h, hd.x, hd.z + h, accent)
+				end
 			end
 		elseif kind == "ebox" and d.ents[id] then
 			local x, z = el.box_xz(d.ents, d.ents[id], geom)
+			if dg and dg.box == id then
+				x, z = el.box_xz(d.ents, {ints = dg.ints}, geom)
+			end
 			local s = 14 * mm_per_px()
 			for t = 0, 15 do
 				local a0, a1 = t / 16 * 2 * math.pi, (t + 1) / 16 * 2 * math.pi
@@ -1290,7 +1489,7 @@ end
 -- Edits the server is to refuse, each logged with the reason
 local function try(what)
 	local d = doc()
-	local function run(c, a, b, route)
+	local function run(c, a, b, route, pts)
 		local ca, ba, bb = circuit_no(c), by_name(a) or a, by_name(b) or b
 		if not (ca and ba and bb) then
 			log:info("fp elec try " .. what .. ": missing parts")
@@ -1298,7 +1497,7 @@ local function try(what)
 		end
 		send({{op = "create", ent = {id = d.placeholder(), type = "erun",
 				ints = {circuit = ca.id, a = ba.id, b = bb.id, route = route},
-				lists = {pts = {}}}}}, done("try " .. what))
+				lists = {pts = pts or {}}}}}, done("try " .. what))
 	end
 	if what == "loop" then
 		run(1, "SW E", "SW W", 2)
@@ -1324,6 +1523,10 @@ local function try(what)
 			end
 		end
 		run(2, "KJ", onto, 0)
+	elseif what == "wall_along" then
+		-- In the walls' cavities from SW K east, then 2500 mm along the
+		-- kitchen's outer wall, 50 mm off its line, to a ceiling box
+		run(2, "SW K", "Kitchen 1", 0, {8950, 3500, 8950, 1000})
 	end
 end
 
@@ -1366,6 +1569,54 @@ magic.SubscribeToEvent("command_seq:fp_elec", function(_, ev)
 		log:info("fp elec view: " .. arg)
 	elseif cmd == "export" then
 		doc().export_plan()
+	elseif cmd == "list" then
+		E.elec_export()
+	elseif cmd == "where" then
+		-- Every box's place and every run's points, by name
+		local d, lines = doc(), {}
+		for _, b in ipairs(d.of_type("ebox")) do
+			local i = b.ints
+			local f = i.wall ~= 0 and el.wall_line(d.ents, i.wall, geom)
+			local x, z = el.box_xz(d.ents, b, geom)
+			lines[#lines + 1] = string.format("box %s: at %d %d, wall %s side %d",
+					el.box_name(d.ents, b.id), math.floor(x + 0.5), math.floor(z + 0.5),
+					f and string.format("%d,%d+%d", f.ax, f.az, f.len) or "none", i.side)
+		end
+		for _, r in ipairs(d.of_type("erun")) do
+			lines[#lines + 1] = "run " .. el.box_name(d.ents, r.ints.a) .. "-" ..
+					el.box_name(d.ents, r.ints.b) .. ": pts " ..
+					(#r.lists.pts > 0 and table.concat(r.lists.pts, " ") or "none")
+		end
+		table.sort(lines)
+		for _, l in ipairs(lines) do
+			log:info("fp elec where " .. arg .. ": " .. l)
+		end
+	elseif cmd == "riser" then
+		-- A floor above, a ceiling box on it 1 m east of J1 and a run of
+		-- circuit 1 up to it; then that floor's plan, logging whether it
+		-- draws the run
+		local d = doc()
+		local pl, pb, pr = d.placeholder(), d.placeholder(), d.placeholder()
+		send({{op = "create", ent = {id = pl, type = "layout",
+				ints = {y = settings().floor_step}, strs = {name = "Upper"}}},
+				{op = "create", ent = {id = pb, type = "ebox", ints = {layout = pl,
+				role = R.ceiling, x = 2000, z = 2000}, strs = {name = "Up"}}},
+				{op = "create", ent = {id = pr, type = "erun", ints = {
+				circuit = circuit_no(1).id, a = by_name("J1").id, b = pb, route = 2},
+				lists = {pts = {}}}}}, function(err)
+			if err ~= "" then
+				return log:info("fp elec riser: " .. err)
+			end
+			E.place.switch(E.real_id(pl))
+			refresh_panels()
+			local r = E.elec_derived().runs[E.real_id(pr)]
+			log:info("fp elec riser: drawn on the upper floor: " ..
+					tostring(r and r.on[S.layout] ~= nil) .. ", " ..
+					(r and math.floor(r.len + 0.5) or "no") .. " mm")
+		end)
+	elseif cmd == "windows" then
+		log:info("fp elec windows: layouts " .. tostring(E.place.win ~= nil) ..
+				", circuits " .. tostring(E.elec_win ~= nil))
 	end
 end)
 end

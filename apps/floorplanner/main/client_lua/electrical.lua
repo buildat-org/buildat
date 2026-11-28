@@ -513,7 +513,7 @@ function M.items_text(items)
 	return #t > 0 and table.concat(t, ", ") or "nothing (no load past it)"
 end
 
--- Everything derived: runs[id] = {pts, len, horiz, vert, elev, items,
+-- Everything derived: runs[id] = {pts, on, len, horiz, vert, elev, items,
 -- count, text, cable, section, conduit, conduit_d, warn}; gangs["box:gang"]
 -- = the insert's kind; boxes[id] = {inserts}; groups = {{name, circuit,
 -- chain, loads, feed, last}}; circuits[id] = {warn = {...}}
@@ -541,8 +541,18 @@ function M.derive(ents, geom)
 	for _, id in ipairs(rids) do
 		local r = ents[id]
 		local pts, horiz, vert, elev = M.run_path(ents, r, geom)
-		out.runs[id] = {pts = pts, horiz = horiz, vert = vert, elev = elev,
-				len = horiz + vert, items = {}}
+		-- Where each floor's plan draws it: a riser on both its floors
+		local la, lb = ents[r.ints.a].ints.layout, ents[r.ints.b].ints.layout
+		local on = {[la] = pts}
+		if lb ~= la then
+			on[lb] = {}
+			for k, p in ipairs(pts) do
+				local x, _, z = between(ents, la, lb, p[1], 0, p[2], geom)
+				on[lb][k] = {x, z}
+			end
+		end
+		out.runs[id] = {pts = pts, on = on, horiz = horiz, vert = vert,
+				elev = elev, len = horiz + vert, items = {}}
 		table.insert(by_circuit[r.ints.circuit], r)
 	end
 	local groups = control_groups(ents)
@@ -591,6 +601,142 @@ function M.derive(ents, geom)
 		end
 	end
 	return out
+end
+
+-- **The listing**: what to buy, as rows {kind, item, qty, unit, notes},
+-- notes the circuits a line is for. The board; the boxes by role and
+-- mounting; the inserts (outlets by kind and count a box, switches by
+-- their gangs' kinds, equipment connections by label); each cable; ML
+-- wire by section and colour; conduit by diameter; a fuse a circuit. A
+-- run's cable is its length, the slack at both ends and the waste on
+-- top, a conduit's its length and the waste; each line's metres rounded
+-- up.
+-- simplified: ML colours by IEC 60445 for PE, N and the phases (L1 brown,
+-- L2 black, L3 grey); travellers black and a switched live grey are
+-- picks, as is a circuit's own wire listed by its name
+-- simplified: the slack and the waste, 300 mm a box end and 10 %, are
+-- picks in Plan settings
+local COLOURS = {PE = "yellow-green", N = "blue", L1 = "brown", L2 = "black",
+	L3 = "grey"}
+local KINDS = {"Board", "Box", "Outlet", "Switch", "Equipment", "Cable",
+	"ML wire", "Conduit", "Fuse"}
+
+function M.listing(ents, geom, der)
+	der = der or M.derive(ents, geom)
+	local st = settings(ents)
+	local slack, waste = st.el_slack or 300, (st.el_waste or 10) / 100
+	local lines = {}
+	local function add(kind, item, qty, unit, cs, key, note)
+		key = kind .. "\0" .. (key or item)
+		local l = lines[key]
+		if not l then
+			l = {kind = kind, item = item, qty = 0, unit = unit, cs = {}, note = note}
+			lines[key] = l
+		end
+		l.qty = l.qty + qty
+		for c in pairs(cs) do
+			l.cs[c] = true
+		end
+	end
+	-- Each box's circuits, by its runs
+	local box_cs = {}
+	for id in pairs(der.runs) do
+		local r = ents[id].ints
+		for _, b in ipairs({r.a, r.b}) do
+			box_cs[b] = box_cs[b] or {}
+			box_cs[b][ents[r.circuit].ints.number] = true
+		end
+	end
+	for id, b in pairs(ents) do
+		local i = b.type == "ebox" and b.ints
+		local cs = box_cs[id] or {}
+		if i and i.role == M.ROLE.board then
+			add("Board", (b.strs.name ~= "" and b.strs.name or "Board") ..
+					", main fuse " .. i.fuse .. " A", 1, "pcs", cs)
+		elseif i then
+			add("Box", M.ROLE_NAMES[i.role] .. (i.surface == 1 and ", surface" or
+					", flush"), 1, "pcs", cs)
+			if i.role == M.ROLE.outlet then
+				add("Outlet", (i.outlet == 1 and "RJ45" or "Schuko") .. " x" .. i.count,
+						1, "pcs", cs)
+			elseif i.role == M.ROLE.switch then
+				local k = {}
+				for g = 1, i.gangs do
+					k[g] = der.gangs[id .. ":" .. g] or "1-way"
+				end
+				add("Switch", (i.gangs == 2 and "two-gang " or "single ") ..
+						table.concat(k, " + "), 1, "pcs", cs)
+			elseif i.role == M.ROLE.equipment then
+				add("Equipment", "connection " .. (b.strs.name ~= "" and "'" ..
+						b.strs.name .. "'" or "(no label)"), 1, "pcs", cs)
+			end
+		end
+	end
+	for id, r in pairs(der.runs) do
+		local c = ents[ents[id].ints.circuit]
+		local cs = {[c.ints.number] = true}
+		local mm = (r.len + 2 * slack) * (1 + waste)
+		for part in (r.cable .. " + "):gmatch("(.-) %+ ") do
+			if part:sub(1, 3) == "ML " then
+				for _, it in ipairs(r.items) do
+					local col = COLOURS[it.name] or
+							it.name:find(" travellers$") and "black" or
+							it.name:find(" switched$") and "grey" or "'" .. it.name .. "'"
+					add("ML wire", "ML " .. r.section .. " " .. col, mm * it.n, "m", cs)
+				end
+			elseif part ~= "none" then
+				add("Cable", part, mm, "m", cs)
+			end
+		end
+		if r.conduit then
+			add("Conduit", r.conduit_d .. " mm", r.len * (1 + waste), "m", cs)
+		end
+	end
+	for _, c in pairs(ents) do
+		if c.type == "circuit" and c.ints.kind == 0 then
+			local n = c.ints.number
+			add("Fuse", c.ints.fuse .. " A", 1, "pcs", {[n] = true},
+					string.format("%05d", n), "circuit " .. n ..
+					(c.strs.name ~= "" and ": " .. c.strs.name or ""))
+		end
+	end
+	local rank = {}
+	for k, v in ipairs(KINDS) do
+		rank[v] = k
+	end
+	local rows = {}
+	for key, l in pairs(lines) do
+		local cs = {}
+		for c in pairs(l.cs) do
+			cs[#cs + 1] = c
+		end
+		table.sort(cs)
+		rows[#rows + 1] = {kind = l.kind, item = l.item, key = key, unit = l.unit,
+				qty = l.unit == "m" and math.ceil(l.qty / 1000 - 1e-6) or l.qty,
+				notes = l.note or #cs > 0 and (#cs > 1 and "circuits " or "circuit ") ..
+				table.concat(cs, ", ") or ""}
+	end
+	table.sort(rows, function(x, y)
+		if x.kind ~= y.kind then
+			return rank[x.kind] < rank[y.kind]
+		end
+		return x.key < y.key
+	end)
+	return rows
+end
+
+-- The listing as CSV: kind, item, quantity, unit, notes
+function M.listing_csv(rows)
+	local function q(v)
+		v = tostring(v)
+		return v:find('[,"\n]') and '"' .. v:gsub('"', '""') .. '"' or v
+	end
+	local out = {"kind,item,quantity,unit,notes"}
+	for _, r in ipairs(rows) do
+		out[#out + 1] = table.concat({q(r.kind), q(r.item), q(r.qty), q(r.unit),
+				q(r.notes)}, ",")
+	end
+	return table.concat(out, "\n") .. "\n"
 end
 
 return M
