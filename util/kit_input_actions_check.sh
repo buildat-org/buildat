@@ -58,7 +58,9 @@ acts_type() # <name> <prefix> <key>...
 	[ -z "${MOUSE_LAST:-}" ] || echo "acts[$((i - 1))].mouse = \"$MOUSE_LAST\"" >> "$f"
 	echo "return {version = 1, actions = acts}" >> "$f"
 }
-ACTS_A="Y U O P J K L N" ACTS_B="M F4 F5 F7 F8 Home End"
+# (keys free in play: not F6 (edit) nor F8, a recorded builder's mark that
+# opens its note field and takes the keys after it, [KIT_PLAYTEST_REC])
+ACTS_A="Y U O P J K L N" ACTS_B="M F3 F4 F5 F7 Home End"
 acts_type acts_a a $ACTS_A
 MOUSE_LAST=middle acts_type acts_b b $ACTS_B
 export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
