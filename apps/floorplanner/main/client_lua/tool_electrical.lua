@@ -1114,7 +1114,7 @@ local function build_lines(y)
 	local d = doc()
 	local der = E.elec_derived()
 	local k = mm_per_px()
-	local s = 8 * k
+	local s = 16 * k -- (8 px was too small to read: the user)
 	local out = {}
 	local function add(ax, az, bx, bz, c)
 		local n = #out
@@ -1297,7 +1297,7 @@ function E.elec_overlay(line, dashed)
 			if dg and dg.box == id then
 				x, z = el.box_xz(d.ents, {ints = dg.ints}, geom)
 			end
-			local s = 14 * mm_per_px()
+			local s = 28 * mm_per_px()
 			for t = 0, 15 do
 				local a0, a1 = t / 16 * 2 * math.pi, (t + 1) / 16 * 2 * math.pi
 				line(x + s * math.cos(a0), z + s * math.sin(a0), x + s * math.cos(a1),
@@ -1348,7 +1348,7 @@ function E.elec_overlay(line, dashed)
 		local b = box_at(x, z)
 		local r = not b and run_at(x, z)
 		if b or r then
-			world_label(x, 0, z - 12 * mm_per_px(), E.elec_name(b and b.id or r))
+			world_label(x, 0, z - 24 * mm_per_px(), E.elec_name(b and b.id or r))
 		end
 	end
 end
