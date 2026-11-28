@@ -13,6 +13,8 @@
 # its first team's score, that team's win_score reached linked to the
 # arena's "win": a round's winner says whose timer ran, and a map not picked
 # running sends the arena a team not in the round, which it logs.
+# [KIT_MAP_ROTATION_LEFTOVERS] (3) A map runs in a round on it alone, not in
+# the default round either: each map's timer ticks once a round on it.
 # The arena's maps begin by its inspector's "Add to maps" dropdown (add_to_maps.png).
 # The arena (kit/arena, in the lobby's zone round the spawn: back from a
 # round both queue again) has maps "alpha, beta, gamma, nowhere". Played:
@@ -103,6 +105,7 @@ map_scene() # <name> <biome> <seconds> <team 1> <color> <team 2> <color>
 	team '-5, 1, 0' "$6" "$7"
 	eval "TEAMS_$1='$4 $6'"
 	place kit/timer '0, 1, 8'
+	eval "TIMER_$1=$id"
 	set_ $id interval "$3"
 	set_ $id repeats 1
 	set_ $id autostart true
@@ -354,6 +357,7 @@ second_log=$t/bob.log
 [ -z "$web" ] || second_log=$t/drive/page.log
 grep -aq "refused" "$t/boss.log" && grep -a "refused" "$t/boss.log" | head -5
 ALPHA="$TEAMS_alpha" BETA="$TEAMS_beta" GAMMA="$TEAMS_gamma" \
+TIMERS="alpha:$TIMER_alpha beta:$TIMER_beta gamma:$TIMER_gamma" \
 ARENA=$ARENA SECOND=$second \
 python3 - "$s" "$t/boss.log" "$second_log" <<'PY' || fail "the rounds ($s, $t/boss.log, $t/bob.log)"
 import os, re, sys
@@ -376,8 +380,7 @@ for n in range(1, 17):
 		joined = re.findall(r"kit/team \d+: %s joins team (\w+)" % who, p)
 		assert len(joined) == 1 and joined[0] in teams[m], (n, who, m, joined)
 	assert "joins team" in p
-	# Its team the winner. (A timer's log says nothing: the default round's
-	# copies log alike)
+	# Its team the winner
 	assert A + "round over: %s wins!" % teams[m][0] in p, (n, m)
 	end = log.split("Session %d (a game)" % n)[1].split("Session %d (a game)" % (n + 1))[0]
 	for who in ("kitboss", os.environ["SECOND"]):
@@ -385,6 +388,13 @@ for n in range(1, 17):
 # A map not picked running: its timer's team into "win", none of the round's
 assert "win: no team or player in" not in log, "a map not picked ran"
 print("  rounds:", " ".join(played[n] for n in sorted(played)))
+# [KIT_MAP_ROTATION_LEFTOVERS] (3) Each map's timer ticked once a round on it:
+# none in the default round (after each Play) nor in another map's round
+for m, tid in (x.split(":") for x in os.environ["TIMERS"].split()):
+	ticks = len(re.findall(r"kit/timer %s: tick 1" % tid, log))
+	rounds = sum(1 for n in played if played[n] == m)
+	assert ticks == rounds, ("the map's timer ran outside its rounds", m, ticks, rounds)
+print("ok: each map's timer ticked in its own rounds only (none in the default round)")
 assert [played[n] for n in (1, 2, 3, 4)] == ["alpha", "beta", "gamma", "alpha"], played
 print("ok: round_robin: alpha, beta, gamma, alpha")
 # Random: each on what the lobby had as next

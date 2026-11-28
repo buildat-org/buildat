@@ -26735,10 +26735,12 @@ struct Module: public interface::Module, public Interface
 		// The queue, in order, within the tick's budget
 		const int64_t steps = spent;
 		PhaseTimer queue_t(*this, PH_QUEUE);
+		const std::set<ss_> maps_out = m_queue.empty() ? std::set<ss_>() :
+				left_out_maps();
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
 			m_queue.pop_front();
-			if(!left_out(r.entity))
+			if(!left_out(r.entity, maps_out))
 				spent += run(r);
 		}
 		m_meter.spent += spent - steps;
@@ -50825,15 +50827,57 @@ struct Module: public interface::Module, public Interface
 	// none of it runs (its timers would reach the arena's "win").
 	// simplified: the map's scene is still made per session, its entities
 	// still loaded; loading only the picked map would make many maps cheaper
-	bool left_out(uint64_t entity)
+	bool left_out(uint64_t entity, const std::set<ss_> &maps)
 	{
-		const GameSession *gs = active_session();
-		if(!gs || gs->left_out.empty())
+		if(maps.empty())
 			return false;
 		auto it = m_entities.find(entity);
 		ss_ scene;
 		return it != m_entities.end() && scene_of(it->second, &scene) &&
-				gs->left_out.count(scene);
+				maps.count(scene);
+	}
+
+	// [KIT_MAP_ROTATION_LEFTOVERS] (3) What runs nothing in this round: a
+	// session's left-out maps; in the default round every kit/arena's maps
+	// (arena.lua's maps_of(): scene names, "*" its listed scenes) less its own
+	// scene, so a map runs only in a round on it.
+	// simplified: made each tick with runs queued (a scan of the entities);
+	// kept until an edit or Play is the upgrade if a big world makes it a cost
+	std::set<ss_> left_out_maps()
+	{
+		if(const GameSession *gs = active_session())
+			return gs->left_out;
+		std::set<ss_> out;
+		if(m_active)
+			return out;
+		for(auto &p : m_entities){
+			for(const Instance &in : p.second.comps){
+				if(in.type != "kit/arena")
+					continue;
+				std::set<ss_> maps;
+				const ss_ v = jstr(in.params, "maps") + " ";
+				ss_ w;
+				for(char ch : v){
+					if(isalnum((unsigned char)ch) || ch == '_' || ch == '*'){
+						w += ch;
+						continue;
+					}
+					if(w == "*"){
+						const json::Value l = listed_scenes(&p.second);
+						for(unsigned i = 0; i < l.size(); i++)
+							maps.insert(jstr(l.at(i), "scene"));
+					} else if(m_host.scenes.count(w)){
+						maps.insert(w);
+					}
+					w.clear();
+				}
+				ss_ own;
+				scene_of(p.second, &own);
+				maps.erase(own);
+				out.insert(maps.begin(), maps.end());
+			}
+		}
+		return out;
 	}
 
 	// What the tick's runs asked of sessions, at the top

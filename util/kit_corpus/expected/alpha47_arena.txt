@@ -102,18 +102,6 @@ kit: World: flat 48x48, seed 0, biome desert, voxels, border wall; ground 0 to 0
 kit: World: the save holds 0 sections (0 edited)
 kit: Hosted: 91 entities, 87 instances (the composition's first start); 0 players, 0 entities made in the round
 kit: Play by app: a round from the start
-kit/region 18: holds dig none, place none, enter all, pvp all, damage all, use others
-kit/region 29: holds dig none, place none, enter all, pvp all, damage all, use others
-kit/goal 40: waits for activate
-kit/goal 41: waits for activate
-kit/goal 44: waits for activate
-kit/goal 45: waits for activate
-kit/region 58: holds dig none, place none, enter all, pvp all, damage all, use others
-kit/region 69: holds dig none, place none, enter all, pvp all, damage all, use others
-kit/goal 80: waits for activate
-kit/goal 81: waits for activate
-kit/goal 84: waits for activate
-kit/goal 85: waits for activate
 [keys]
 kit/arena after_round at_end at_start countdown duration hud_anchor hud_background hud_border hud_color hud_height hud_order hud_size hud_style hud_width hud_x hud_y join_team join_window late_join map_pick maps max_players max_rounds own_look players ready results score_to_win size status_line time_up
 kit/button color color_down hold own_look sound_press use

@@ -26,6 +26,40 @@ Each line is "<key>" or "<key> | <value>". A value ending in
 in any release (kit.cpp's experimental_names(), a type's
 `experimental = true`).
 
+[CLIENT_PART_SCENE] A client part's own is e.node and what is under it.
+Anything it reaches past that (Node's `scene` property, GetParent and
+the like: other entities' nodes, Kit's own nodes, their names and
+layout) is not part of Kit API 1 and may change in any release.
+
+Known limits
+------------
+What Kit API 1 does not do now (checked against the code, 2026-11-28).
+A limit is lifted by an opt-in, a new option or param, which is an
+addition: a game made before plays as it did. The exception is client
+physics, which only follows the server: polygons may enter it in any
+release, with no opt-in.
+- w:ray meets the solid polygons (standing, lying flat and tilted), each
+  entered from outside only: a ray starting inside one meets what it
+  enters next. No query meets a polygon on a moving object (under a
+  kit/wave).
+- w:segment meets the free voxel objects (as w:ray does) in either
+  plane; w:circle meets them in a level plane only, none in a vertical
+  one. Neither passes an object's own motion to what it hits.
+- Client physics (Bullet on a client: the static bodies of solid looks,
+  what a client part's own RigidBody meets) has no polygon shape and
+  ignores every polygon. The movements do not use it: move.lua's
+  queries meet them.
+
+Definitions
+-----------
+- A flat heightmap's top is at y = level (kit/terrain's surface
+  "heightmap", generator "flat"; a flat voxel World's top cell is at
+  level, its face at level + 0.5).
+- kit/arena's at_end defaults to "before".
+- Kept state (kept = true) in a session's copy belongs to the session:
+  it starts at its default there and is gone at the session's end; the
+  default round's is untouched.
+
 What the check lets through
 ---------------------------
 - An addition passes: within Kit API 1 Kit only adds. The check says to

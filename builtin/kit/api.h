@@ -851,11 +851,12 @@ namespace interface
 //   visitor's client; the whitelist has it for a Viewport only), a global
 //   set in a handler (a part's own state goes in locals of its chunk, on
 //   e, or in kit.shared), the server's c: (state reaches a client part
-//   through `shared` and per_player state). simplified: the scene is
-//   still reachable (a Node's `scene` property, replicate's main_scene:
-//   the sandbox guards the player's machine, not Kit's nodes from a
-//   builder's part); the guide asks a part to change only what it made
-//   under e.node, closing those the upgrade. A handler that errs is
+//   through `shared` and per_player state). [CLIENT_PART_SCENE] A client
+//   part's own is e.node and what is under it. Anything it reaches past that
+//   (Node's `scene` property, GetParent and the like: other entities' nodes,
+//   Kit's own nodes, their names and layout) is not part of Kit API 1 and
+//   may change in any release (the sandbox guards the player's machine, not
+//   Kit's nodes from a builder's part). A handler that errs is
 //   switched off for that part on that entity on that client, and (4) its
 //   first failure there goes to the server ("kit:part_failed" {id, type,
 //   handler, error}; 10 a minute a client, the error cut at 300 bytes):
@@ -1856,7 +1857,9 @@ namespace interface
 // "prev_map" in the default round: each round's map, shown as "Next map:" in
 // the lobby's status; a round's own c.teams are its map's, and a map of the
 // list not picked runs nothing in that round (not its timers either), so
-// each map can hold its own teams and win conditions.
+// each map can hold its own teams and win conditions;
+// [KIT_MAP_ROTATION_LEFTOVERS] nor in the default round: a map of a
+// kit/arena's list (less the arena's own scene) runs only in a round on it.
 // [KIT_FLAG_RIGHT_CLICK] A type's `right_use` names a shared state of its
 // own: the player whose entity id it holds has their right click use the
 // entity (kit:use, its on_use) instead of placing a voxel (the client's
