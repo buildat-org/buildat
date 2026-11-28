@@ -1857,7 +1857,9 @@ namespace interface
 // "prev_map" in the default round: each round's map, shown as "Next map:" in
 // the lobby's status; a round's own c.teams are its map's, and a map of the
 // list not picked runs nothing in that round (not its timers either), so
-// each map can hold its own teams and win conditions.
+// each map can hold its own teams and win conditions;
+// [KIT_MAP_ROTATION_LEFTOVERS] nor in the default round: a map of a
+// kit/arena's list (less the arena's own scene) runs only in a round on it.
 // [KIT_FLAG_RIGHT_CLICK] A type's `right_use` names a shared state of its
 // own: the player whose entity id it holds has their right click use the
 // entity (kit:use, its on_use) instead of placing a voxel (the client's

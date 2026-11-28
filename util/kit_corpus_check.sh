@@ -66,10 +66,12 @@ JOBS=${CORPUS_JOBS:-3}
 ONLY=${1:-}
 
 # The fixtures: name, inputs (";" between, "-" none), until (a round's
-# line, or +N game seconds)
+# line, or +N game seconds). Arena's round logs nothing past Play: all its
+# content is in its maps, which run in a round on them only
+# ([KIT_MAP_ROTATION_LEFTOVERS] (3))
 FIXTURES='
 api1/airships|50 spawn;50 spawn|kit: Entity 56'"'"'s kit/creature_walker steps in play
-api1/arena|-|kit/goal 85: waits for activate
+api1/arena|-|+5
 api1/brimstone_speedway|1328 spawn;1328 spawn|local/brim_race 137: Driver 1332 is on the grid, slot 2
 api1/crag_trial|-|kit/sign 63: shows "Best times?" by app
 api1/ctf|61 spawn;61 spawn|kit/bot 76: goal 64 reach ""
@@ -77,7 +79,7 @@ api1/puzzle_room|52 spawn|kit/ui_text 50: show for Bot 56
 api1/ship|48 spawn;48 spawn|kit/ui_text 46: show for everyone
 api1/survival|-|+5
 alpha47/airships|50 spawn;50 spawn|kit: Entity 56'"'"'s kit/creature_walker steps in play
-alpha47/arena|-|kit/goal 85: waits for activate
+alpha47/arena|-|+5
 alpha47/brimstone_speedway|1328 spawn;1328 spawn|local/brim_race 137: Driver 1332 is on the grid, slot 2
 alpha47/crag_trial|-|kit/sign 63: shows "Best times?" by app
 alpha47/ctf|61 spawn;61 spawn|kit/bot 76: goal 64 reach ""

@@ -79,7 +79,8 @@
 -- (the same one until "next_map" or "prev_map"; these step through the list
 -- under the other two as well, in the default round: a round in play is on
 -- its map). A map not picked runs nothing in that round, its timers and
--- spawners included: only its own map's links can reach "win". A name no
+-- spawners included: only its own map's links can reach "win"; nor does a
+-- map run in the default round (kit.cpp's left_out_maps()). A name no
 -- scene has is left out, in the log. [KIT_SCENE_PACKAGES] "*" in it: every
 -- listed scene (a kit/scene_info on it), there in the scenes' order
 -- ([KIT_SCENE_TREE] those right under its own scene, where any are, as

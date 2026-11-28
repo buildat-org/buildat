@@ -82,19 +82,9 @@ kit: World: flat 96x96, seed 0, biome grassland, voxels, border wall; ground 0 t
 kit: World: the save holds 0 sections (0 edited)
 kit: Hosted: 73 entities, 70 instances (the composition's first start); 0 players, 0 entities made in the round
 kit: Play by app: a round from the start
-kit/region 19: holds dig all, place all, enter all, pvp all, damage all, use all
-kit/region 27: holds dig none, place none, enter all, pvp all, damage all, use all
-kit/region 52: holds dig all, place all, enter all, pvp all, damage all, use all
-kit/goal 56: active from the start
-kit/goal 57: waits for activate
 kit/goal 64: active from the start
-kit/goal 65: active from the start
-kit/goal 66: active from the start
-kit/goal 67: active from the start
 kit/spawner 61: made 75 for app
 kit/spawner 61: made 76 for app
-kit/ui_text 33: value for everyone
-kit/ui_bar 32: value 0 for everyone
 kit/bot 75: knobs: aim 75%, reaction 0.4 s, speed 90%
 kit/bot 76: knobs: aim 75%, reaction 0.4 s, speed 90%
 kit: Entity 75's kit/creature_walker steps in play
