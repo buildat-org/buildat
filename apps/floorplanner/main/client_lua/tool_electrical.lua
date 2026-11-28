@@ -1000,6 +1000,76 @@ function E.elec_window()
 	end)
 end
 
+-- **The View panel**, in the palette's place while the view is on (the
+-- user: what is drawn, how large, how dim, "to surface the useful
+-- information in a static image" for a printout for the electrician).
+-- Plan settings (main.cpp's el_sym on), so a printout's look is the
+-- plan's; folded to its title as the palette is, the fold kept.
+-- simplified: a viewer reads them and cannot change them
+local LABELS = {{1, "Conductors"}, {2, "Cable or wires"}, {4, "Circuit number"},
+	{8, "Run length"}, {16, "Box height"}, {32, "Box name"},
+	{64, "Switch inserts"}, {128, "Legend"}}
+E.ELEC_LABELS = LABELS
+local SYM_STEPS = {{"screen (16 px)", 0}, {"50 mm", 50}, {"75 mm", 75},
+	{"100 mm", 100}, {"150 mm", 150}, {"200 mm", 200}, {"300 mm", 300}}
+local TEXT_STEPS = {{"50 mm", 50}, {"75 mm", 75}, {"100 mm", 100},
+	{"150 mm", 150}, {"200 mm", 200}, {"300 mm", 300}}
+S.elec_view_folded = buildat.storage_read("elec_view_folded") == "1"
+
+function E.elec_view_panel(w)
+	local st = settings()
+	panel.keep(function() return panel.mark(panel.button(w, "View", function()
+		S.elec_view_folded = not S.elec_view_folded
+		buildat.storage_write("elec_view_folded", S.elec_view_folded and "1" or "0")
+		refresh_panels()
+	end), S.elec_view_folded and "▼" or "▲") end)
+	if S.elec_view_folded then
+		return
+	end
+	local sid = doc().settings().id
+	local function set(k, v)
+		send({{op = "set", ent = {id = sid, ints = {[k] = v}}}}, function(err)
+			done("view " .. k .. " " .. v)(err)
+			refresh_panels()
+		end)
+	end
+	local function steps(label, list, k, unit)
+		-- A value set otherwise (the plan file) shown as one more step
+		local found, l = false, {}
+		for i, c in ipairs(list) do
+			found, l[i] = found or c[2] == st[k], c
+		end
+		if not found then
+			l[#l + 1] = {st[k] .. unit, st[k]}
+		end
+		list = l
+		dropdown(w, label, list, st[k], function(v) set(k, v) end)
+	end
+	panel.view_only = not doc().can("edit")
+	steps("Symbol unit", SYM_STEPS, "el_sym", " mm")
+	steps("Text", TEXT_STEPS, "el_text", " mm")
+	steps("Objects", {{"normal", 0}, {"dim", 1}, {"faint", 2}, {"hidden", 3}},
+			"el_objects", "")
+	steps("Walls", {{"normal", 0}, {"dim", 1}, {"faint", 2}}, "el_walls", "")
+	panel.check(w, "Outlines (grey)", st.el_outline == 1, function()
+		set("el_outline", 1 - st.el_outline)
+	end)
+	for _, l in ipairs(LABELS) do
+		local on = el.bit(st.el_labels, l[1])
+		panel.check(w, l[2], on, function()
+			set("el_labels", on and st.el_labels - l[1] or st.el_labels + l[1])
+		end)
+	end
+	panel.view_only = false
+	if el.bit(st.el_labels, 1) then
+		panel.label(w, "nT(A): n travellers of group A")
+		panel.label(w, "S(A): group A's switched live")
+		for _, g in ipairs(E.elec_derived().groups) do
+			panel.label(w, g.letter .. ": " .. g.name)
+		end
+	end
+end
+
 --
 -- The view
 --
@@ -1012,7 +1082,30 @@ local lines_node = scene:CreateChild("ElecLines")
 -- objects much)
 local dim_objects_node = scene:CreateChild("ElecDimObjects")
 local dim_objects_material = magic.cache:GetResource("Material", "main/fp_dim_objects.xml")
-local dim_key, lines_key, lines_n, dim_objects_key
+local dim_key, lines_key, lines_n, dim_objects_key, alpha_key
+-- How much of white each dim is, by the View panel's walls and objects:
+-- the walls' over all of the plan, the objects' (what they end at) over
+-- them; objects never brighter than the walls
+-- simplified: picks; dim as the user's (3) left it
+local WALL_A = {[0] = 0, 0.75, 0.9}
+local OBJECT_A = {[0] = 0, 0.9, 0.97, 1}
+local function dim_alphas()
+	local st = settings()
+	local aw = WALL_A[st.el_walls] or 0.75
+	local ao = math.max(OBJECT_A[st.el_objects] or 0.9, aw)
+	return aw, aw < 1 and 1 - (1 - ao) / (1 - aw) or 0
+end
+-- The labels, text in the scene at the plan's scale (Text3D), made again
+-- with the lines
+local labels_node = scene:CreateChild("ElecLabels")
+local label_font = magic.cache:GetResource("Font", buildat.font_sans)
+-- A Text3D's em at scale 1 in world units: its size in points at 96 DPI,
+-- a pixel 1/128 (Urho3D's Text3D)
+local FONT_PT = 40
+local EM = FONT_PT * 96 / 72 / 128
+local TEXT = magic.Color(0.1, 0.1, 0.12)
+-- What the last build drew, by kind, for a check
+local label_counts = {}
 local DARK = magic.Color(0.1, 0.25, 0.75)
 local SURFACE = magic.Color(0.65, 0.15, 0.65)
 local CIRCUIT_COLORS = {magic.Color(0.85, 0.2, 0.1), magic.Color(0.1, 0.55, 0.15),
@@ -1110,11 +1203,47 @@ local function symbol(seg, b, kinds)
 	end
 end
 
+-- A text in the plan at its scale: mm its em, turned yaw degrees from the
+-- plan's x, aligned to its point as ha, va say
+local function text3d(x, y, z, text, mm, col, yaw, ha, va)
+	local n = labels_node:CreateChild("label")
+	n.position = magic.Vector3(W(x), y, W(z))
+	-- As the plan's camera looks, turned about the vertical
+	n.rotation = magic.Quaternion(90, yaw or 0, 0)
+	local sc = W(mm) / EM
+	n.scale = magic.Vector3(sc, sc, sc)
+	local t = n:CreateComponent("Text3D")
+	t:SetFont(label_font, FONT_PT)
+	t.text = text
+	t:SetAlignment(ha or magic.HA_CENTER, va or magic.VA_CENTER)
+	t:SetColor(col)
+	t.textEffect = magic.TE_STROKE
+	t.effectColor = magic.Color(1, 1, 1, 0.9)
+end
+
+-- A switch box's inserts, short: "2×vaihto", "1-way + risti"
+local INSERT_SHORT = {["2-way (vaihto)"] = "vaihto", ["intermediate (risti)"] = "risti"}
+local function inserts_short(der, b)
+	local k = {}
+	for g = 1, b.ints.gangs do
+		local kind = der.gangs[b.id .. ":" .. g] or "1-way"
+		k[g] = INSERT_SHORT[kind] or kind
+	end
+	return #k == 2 and k[1] == k[2] and "2×" .. k[1] or table.concat(k, " + ")
+end
+
 local function build_lines(y)
 	local d = doc()
 	local der = E.elec_derived()
+	local st = settings()
 	local k = mm_per_px()
-	local s = 16 * k -- (8 px was too small to read: the user)
+	-- A symbol's unit: the View panel's mm, or 16 px (8 was too small to
+	-- read: the user)
+	local s = st.el_sym > 0 and st.el_sym or 16 * k
+	local tm, lb = st.el_text, st.el_labels
+	local function on(bit)
+		return el.bit(lb, bit)
+	end
 	local out = {}
 	local function add(ax, az, bx, bz, c)
 		local n = #out
@@ -1123,13 +1252,34 @@ local function build_lines(y)
 		out[n + 8], out[n + 9], out[n + 10] = W(bx), y, W(bz)
 		out[n + 11], out[n + 12], out[n + 13], out[n + 14] = c.r, c.g, c.b, 1
 	end
+	local function dashes(p, q, col)
+		local n = math.max(1, math.floor(geom.len(q[1] - p[1], q[2] - p[2]) /
+				(s * 5 / 16)))
+		for t = 0, n - 1, 2 do
+			add(p[1] + (q[1] - p[1]) * t / n, p[2] + (q[2] - p[2]) * t / n,
+					p[1] + (q[1] - p[1]) * (t + 1) / n,
+					p[2] + (q[2] - p[2]) * (t + 1) / n, col)
+		end
+	end
+	labels_node:Remove()
+	labels_node = scene:CreateChild("ElecLabels")
+	local counts = {}
+	local function count(kind)
+		counts[kind] = (counts[kind] or 0) + 1
+	end
 	-- The runs: solid in a cavity, dashed on a surface; a slanted tick a
-	-- conductor (to eight) across the middle of the longest segment
+	-- conductor (to eight) across the middle of the longest segment, and
+	-- there the labels: the circuit, the cable and the length over the
+	-- run, the conductors under it, along it and read from the left or
+	-- from below
+	-- simplified: at the longest segment's middle, which a short one's
+	-- boxes may be under
 	for id, r in pairs(der.runs) do
 		local e = d.ents[id]
 		local pts = r.on[S.layout]
 		if pts then
-			local col = circuit_color(d.ents[e.ints.circuit])
+			local c = d.ents[e.ints.circuit]
+			local col = circuit_color(c)
 			local long, li = -1, 2
 			for j = 2, #pts do
 				local p, q = pts[j - 1], pts[j]
@@ -1138,19 +1288,15 @@ local function build_lines(y)
 					long, li = l, j
 				end
 				if e.ints.route >= 3 then
-					local n = math.max(1, math.floor(l / (5 * k)))
-					for t = 0, n - 1, 2 do
-						add(p[1] + (q[1] - p[1]) * t / n, p[2] + (q[2] - p[2]) * t / n,
-								p[1] + (q[1] - p[1]) * (t + 1) / n,
-								p[2] + (q[2] - p[2]) * (t + 1) / n, col)
-					end
+					dashes(p, q, col)
 				else
 					add(p[1], p[2], q[1], q[2], col)
 				end
 			end
 			local p, q = pts[li - 1], pts[li]
+			local ux, uz = 1, 0
 			if long > 0 then
-				local ux, uz = (q[1] - p[1]) / long, (q[2] - p[2]) / long
+				ux, uz = (q[1] - p[1]) / long, (q[2] - p[2]) / long
 				local n = math.min(r.count or 0, 8)
 				for t = 1, n do
 					local o = (t - (n + 1) / 2) * 0.5 * s
@@ -1160,8 +1306,54 @@ local function build_lines(y)
 							col)
 				end
 			end
+			if ux < -1e-6 or (math.abs(ux) <= 1e-6 and uz < 0) then
+				ux, uz = -ux, -uz
+			end
+			-- Up on the text: the run's left as it reads
+			local vx, vz = -uz, ux
+			local yaw = math.deg(math.atan2(-uz, ux))
+			local mx, mz = (p[1] + q[1]) / 2, (p[2] + q[2]) / 2
+			local gap = 0.8 * s + 0.15 * tm
+			-- A label as wide as the segment between its boxes' symbols at
+			-- most (a character half its em), the text smaller to fit
+			-- simplified: shrunk, to 0.4 of the text at least, not moved
+			-- elsewhere along the run; labels may still overlap there
+			local function fit(lines)
+				local n = 0
+				for _, l in ipairs(lines) do
+					n = math.max(n, #l)
+				end
+				return math.max(0.4 * tm, math.min(tm, (long - 5 * s) / (0.5 * n)))
+			end
+			local num, over = {}, {}
+			if on(2) then
+				over[#over + 1] = r.cable
+				count("cable")
+			end
+			if on(4) then
+				num[#num + 1] = tostring(c and c.ints.number or "?")
+				count("circuit")
+			end
+			if on(8) then
+				num[#num + 1] = string.format("%.1f m", r.len / 1000)
+				count("length")
+			end
+			if #num > 0 then
+				over[#over + 1] = table.concat(num, "  ")
+			end
+			if #over > 0 then
+				text3d(mx + vx * gap, y, mz + vz * gap, table.concat(over, "\n"),
+						fit(over), col, yaw, magic.HA_CENTER, magic.VA_BOTTOM)
+			end
+			if on(1) then
+				local t = el.items_short(r.items, der)
+				text3d(mx - vx * gap, y, mz - vz * gap, t, fit({t}), col, yaw,
+						magic.HA_CENTER, magic.VA_TOP)
+				count("conductors")
+			end
 		end
 	end
+	-- The boxes, and their labels: the name, the inserts, the height
 	for _, b in ipairs(boxes_here()) do
 		local i = b.e.ints
 		local ux, uz, vx, vz = 1, 0, 0, 1
@@ -1178,7 +1370,136 @@ local function build_lines(y)
 			add(b.x + (ux * ax + vx * az) * s, b.z + (uz * ax + vz * az) * s,
 					b.x + (ux * bx + vx * bz) * s, b.z + (uz * bx + vz * bz) * s, col)
 		end, b.e, der.gangs)
+		local lines = {}
+		-- (a board's and an equipment box's name always, as before)
+		if b.e.strs.name ~= "" and (on(32) or i.role == R.board or
+				i.role == R.equipment) then
+			lines[#lines + 1] = b.e.strs.name
+			count("name")
+		elseif on(32) then
+			lines[#lines + 1] = el.ROLE_NAMES[i.role]:lower()
+			count("name")
+		end
+		if on(64) and i.role == R.switch then
+			lines[#lines + 1] = inserts_short(der, b.e)
+			count("inserts")
+		end
+		if on(16) and i.wall ~= 0 then
+			lines[#lines + 1] = "h " .. i.height
+			count("height")
+		end
+		-- Beside the symbol along the wall, up or right on the screen, off
+		-- the runs that leave the box into the room; a ceiling box's up and
+		-- right of it, off the runs that leave it straight
+		if #lines > 0 then
+			local text = table.concat(lines, "\n")
+			if not f then
+				text3d(b.x + 0.9 * s, y, b.z + 0.9 * s, text, tm, TEXT, 0,
+						magic.HA_LEFT, magic.VA_BOTTOM)
+			else
+				if ux < -1e-6 or (math.abs(ux) <= 1e-6 and uz < 0) then
+					ux, uz = -ux, -uz
+				end
+				local ha, va = magic.HA_LEFT, vz > 0 and magic.VA_BOTTOM or
+						magic.VA_TOP
+				if math.abs(vx) > math.abs(vz) then
+					ha, va = vx > 0 and magic.HA_LEFT or magic.HA_RIGHT, magic.VA_BOTTOM
+				end
+				text3d(b.x + ux * 2.4 * s + vx * 0.3 * s, y,
+						b.z + uz * 2.4 * s + vz * 0.3 * s, text, tm, TEXT, 0, ha, va)
+			end
+		end
 	end
+	-- **The legend**, right of the floor's walls and boxes, so that a
+	-- printout explains itself: each symbol drawn, the boxes' colours, the
+	-- runs' lines, the conductors' notation and groups, the circuits
+	if on(128) then
+		local x1, z1 = -math.huge, -math.huge
+		for _, n in ipairs(d.of_type("node")) do
+			if n.ints.layout == S.layout then
+				x1, z1 = math.max(x1, n.ints.x), math.max(z1, n.ints.z)
+			end
+		end
+		for _, b in ipairs(boxes_here()) do
+			x1, z1 = math.max(x1, b.x), math.max(z1, b.z)
+		end
+		if x1 > -math.huge then
+			local lu, row = 0.5 * tm, 1.8 * tm
+			local x0, z = x1 + 3 * tm, z1
+			local function line(text, col, draw)
+				z = z - row
+				if draw then
+					draw(x0 + 2.5 * lu, z)
+				end
+				text3d(x0 + 6 * lu, y, z, text, tm, col or TEXT, 0, magic.HA_LEFT,
+						magic.VA_CENTER)
+				count("legend")
+			end
+			line("Legend")
+			-- The symbols the floor has, a role's variants each once
+			local seen, rows = {}, {}
+			for _, b in ipairs(boxes_here()) do
+				local i = b.e.ints
+				local variants = {{i.role == R.outlet and i.outlet or 0, nil}}
+				if i.role == R.switch then
+					variants = {}
+					for g = 1, i.gangs do
+						variants[g] = {0, der.gangs[b.id .. ":" .. g] or "1-way"}
+					end
+				end
+				for _, v in ipairs(variants) do
+					local key = i.role .. ":" .. v[1] .. ":" .. tostring(v[2])
+					if not seen[key] then
+						seen[key] = true
+						rows[#rows + 1] = {key = key, role = i.role, outlet = v[1], kind = v[2]}
+					end
+				end
+			end
+			table.sort(rows, function(a, b) return a.key < b.key end)
+			local NAMES = {[R.junction] = "junction box", [R.device] = "device box",
+				[R.ceiling] = "lamp, at a ceiling box",
+				[R.equipment] = "equipment connection", [R.board] = "board"}
+			for _, rw in ipairs(rows) do
+				local name = NAMES[rw.role] or rw.role == R.outlet and (rw.outlet == 1 and
+						"data outlet (RJ45)" or "earthed outlet (Schuko)") or
+						"switch, " .. rw.kind
+				local ceiling = rw.role == R.ceiling
+				line(name, nil, function(x, zz)
+					local fake = {id = "legend", ints = {role = rw.role,
+							outlet = rw.outlet, count = 1, gangs = 1, wall = ceiling and 0 or 1}}
+					local oz = ceiling and 0 or -1.05
+					symbol(function(ax, az, bx, bz)
+						add(x + ax * lu, zz + (az + oz) * lu, x + bx * lu, zz + (bz + oz) * lu,
+								DARK)
+					end, fake, {["legend:1"] = rw.kind})
+				end)
+			end
+			line("blue: a flush box", DARK)
+			line("purple: a surface box", SURFACE)
+			line("a run in a cavity", nil, function(x, zz)
+				add(x - 2 * lu, zz, x + 2 * lu, zz, TEXT)
+			end)
+			line("a run on a surface", nil, function(x, zz)
+				dashes({x - 2 * lu, zz}, {x + 2 * lu, zz}, TEXT)
+			end)
+			line("ticks across a run: its conductors")
+			if on(1) then
+				line("nT(A): n travellers of group A")
+				line("S(A): group A's switched live")
+				for _, g in ipairs(der.groups) do
+					local sw = {}
+					for j, ch in ipairs(g.chain) do
+						sw[j] = el.box_name(d.ents, tonumber(ch:match("^(%d+)")))
+					end
+					line(g.letter .. ": " .. g.name .. " (" .. table.concat(sw, ", ") .. ")")
+				end
+			end
+			for _, c in ipairs(circuits()) do
+				line(circuit_text(c), circuit_color(c))
+			end
+		end
+	end
+	label_counts = counts
 	lines_n = #out
 	if lines_n > 0 then
 		buildat.set_line_geometry(lines_node, out)
@@ -1191,14 +1512,23 @@ end
 -- switch's links
 function E.elec_overlay(line, dashed)
 	local on = S.electrical and S.view == "2d"
-	dim_node.enabled = on
+	local aw, ao = dim_alphas()
+	dim_node.enabled = on and aw > 0
 	lines_node.enabled = on
-	dim_objects_node.enabled = on
+	labels_node.enabled = on
+	dim_objects_node.enabled = on and ao > 0
 	if not on then
 		return
 	end
 	local d = doc()
-	local cut = settings().cut
+	local st = settings()
+	local cut = st.cut
+	if alpha_key ~= aw .. ":" .. ao then
+		alpha_key = aw .. ":" .. ao
+		dim_material:SetShaderParameter("MatDiffColor", magic.Color(1, 1, 1, aw))
+		dim_objects_material:SetShaderParameter("MatDiffColor",
+				magic.Color(1, 1, 1, ao))
+	end
 	local okey = M.build_gen .. ":" .. cut .. ":" .. tostring(S.layout)
 	if okey ~= dim_objects_key then
 		dim_objects_key = okey
@@ -1242,32 +1572,16 @@ function E.elec_overlay(line, dashed)
 		g:SetMaterial(0, dim_material)
 	end
 	local der = E.elec_derived()
-	local key = gen .. ":" .. mm_per_px() .. ":" .. tostring(S.layout) .. ":" .. cut
+	-- (the zoom only while the symbols are the screen's size)
+	local key = gen .. ":" .. (st.el_sym > 0 and "" or mm_per_px()) .. ":" ..
+			tostring(S.layout) .. ":" .. cut .. ":" .. st.el_sym .. ":" ..
+			st.el_text .. ":" .. st.el_labels
 	if key ~= lines_key then
 		lines_key = key
 		build_lines(y)
 	end
 	lines_node.enabled = lines_n > 0
 	local accent = magic.Color(1.0, 0.6, 0.1)
-	-- Each run's circuit at its middle; a board's and an equipment box's
-	-- name at it
-	for id, r in pairs(der.runs) do
-		local e = d.ents[id]
-		local pts = r.on[S.layout]
-		if pts and #pts >= 2 then
-			local c = d.ents[e.ints.circuit]
-			local m = math.ceil(#pts / 2)
-			local p, q = pts[m], pts[m + 1] or pts[m]
-			world_label((p[1] + q[1]) / 2, 0, (p[2] + q[2]) / 2, tostring(c and
-					c.ints.number or "?"))
-		end
-	end
-	for _, b in ipairs(boxes_here()) do
-		if (b.e.ints.role == R.board or b.e.ints.role == R.equipment) and
-				b.e.strs.name ~= "" then
-			world_label(b.x, 0, b.z, b.e.strs.name)
-		end
-	end
 	-- The selection, where a drag has it: a run's points and the middles
 	-- of its segments (a point added there) on the floor it was drawn on
 	local dg = S.drag and S.drag.kind == "elec" and S.drag
@@ -1297,7 +1611,7 @@ function E.elec_overlay(line, dashed)
 			if dg and dg.box == id then
 				x, z = el.box_xz(d.ents, {ints = dg.ints}, geom)
 			end
-			local s = 28 * mm_per_px()
+			local s = st.el_sym > 0 and 1.75 * st.el_sym or 28 * mm_per_px()
 			for t = 0, 15 do
 				local a0, a1 = t / 16 * 2 * math.pi, (t + 1) / 16 * 2 * math.pi
 				line(x + s * math.cos(a0), z + s * math.sin(a0), x + s * math.cos(a1),
@@ -1643,6 +1957,71 @@ magic.SubscribeToEvent("command_seq:fp_elec", function(_, ev)
 					tostring(r and r.on[S.layout] ~= nil) .. ", " ..
 					(r and math.floor(r.len + 0.5) or "no") .. " mm")
 		end)
+	elseif cmd == "viewset" then
+		-- A View panel setting, as its control sends it: "viewset el_sym 100"
+		local k, v = arg:match("^(%S+) (%-?%d+)$")
+		send({{op = "set", ent = {id = doc().settings().id,
+				ints = {[k] = tonumber(v)}}}}, done("viewset " .. arg))
+	elseif cmd == "object" then
+		-- A box object, "object x z w d h", for the dimming
+		local v = {}
+		for w in arg:gmatch("%S+") do
+			v[#v + 1] = tonumber(w)
+		end
+		local d = doc()
+		local def = d.placeholder()
+		send({{op = "create", ent = {id = def, type = "definition",
+				ints = {w = v[3], d = v[4], h = v[5]}}},
+				{op = "create", ent = {id = d.placeholder(), type = "instance",
+				ints = {def = def, layout = S.layout, x = v[1], z = v[2]}}}},
+				done("object"))
+	elseif cmd == "probe" then
+		-- What the view draws now: the labels by kind, a symbol unit's and
+		-- the text's pixels, the dims, each object's middle; drawn first
+		E.elec_overlay(function() end, function() end)
+		local st, k = settings(), mm_per_px()
+		local kinds = {}
+		for _, l in ipairs({"conductors", "cable", "circuit", "length", "height",
+				"name", "inserts", "legend"}) do
+			kinds[#kinds + 1] = l .. " " .. (label_counts[l] or 0)
+		end
+		log:info("fp elec probe " .. arg .. ": labels " .. table.concat(kinds, ", "))
+		local aw, ao = dim_alphas()
+		log:info(string.format("fp elec probe %s: unit %.2f px, text %.2f px, " ..
+				"walls dim %.2f %s, objects dim %.2f %s, outline %d", arg,
+				(st.el_sym > 0 and st.el_sym or 16 * k) / k, st.el_text / k, aw,
+				tostring(dim_node.enabled), ao, tostring(dim_objects_node.enabled),
+				st.el_outline))
+		for _, it in pairs(E.inst_data) do
+			if it.foot and not it.hosted then
+				local cx, cz = geom.centroid(it.foot)
+				log:info(string.format("fp elec probe %s: object at %d %d", arg,
+						math.floor(cx + 0.5), math.floor(cz + 0.5)))
+			end
+		end
+	elseif cmd == "settings" then
+		-- The View panel's settings, for a round trip
+		local st, t = settings(), {}
+		for _, f in ipairs({"el_sym", "el_text", "el_objects", "el_walls",
+				"el_outline", "el_labels"}) do
+			t[#t + 1] = f .. "=" .. tostring(st[f])
+		end
+		log:info("fp elec settings " .. arg .. ": " .. table.concat(t, " "))
+	elseif cmd == "notation" then
+		-- Every run's label of its conductors, by its boxes' names
+		local d, der, lines = doc(), E.elec_derived(), {}
+		for id, r in pairs(der.runs) do
+			local e = d.ents[id]
+			lines[#lines + 1] = "fp elec notation: " .. el.box_name(d.ents, e.ints.a) ..
+					"-" .. el.box_name(d.ents, e.ints.b) .. ": " .. el.items_short(r.items, der)
+		end
+		for _, g in ipairs(der.groups) do
+			lines[#lines + 1] = "fp elec notation: group " .. g.letter .. ": " .. g.name
+		end
+		table.sort(lines)
+		for _, l in ipairs(lines) do
+			log:info(l)
+		end
 	elseif cmd == "windows" then
 		log:info("fp elec windows: layouts " .. tostring(E.place.win ~= nil) ..
 				", circuits " .. tostring(E.elec_win ~= nil))

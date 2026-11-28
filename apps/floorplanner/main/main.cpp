@@ -289,6 +289,20 @@ static const sv_<TypeSchema> SCHEMA = {
 		// simplified: picks, the user's to change in Plan settings
 		{"el_slack", 0, 5000, 300},
 		{"el_waste", 0, 100, 10},
+		// The Electrical view's look, the plan's so that a printout's is
+		// part of it: a symbol unit in plan mm (0: 16 pixels on the
+		// screen), the labels' text in mm, objects 0 normal 1 dim 2 faint
+		// 3 hidden, walls 0-2 the same, outlines 1 grey 0 off, and the
+		// labels drawn: bits 1 conductors, 2 cable, 4 circuit, 8 length,
+		// 16 box height, 32 box name, 64 switch inserts, 128 the legend
+		// simplified: picks: the symbols and the dimming as before, text
+		// 100 mm, the circuit numbers only
+		{"el_sym", 0, 1000, 0},
+		{"el_text", 10, 2000, 100},
+		{"el_objects", 0, 3, 1},
+		{"el_walls", 0, 2, 1},
+		{"el_outline", 0, 1, 1},
+		{"el_labels", 0, 255, 4},
 	}, {}, {}, true},
 	// A floor or a building placed in the world ([FP_LAYOUTS]): its own
 	// coordinates turned by yaw (millidegrees) and moved to x, y, z. The

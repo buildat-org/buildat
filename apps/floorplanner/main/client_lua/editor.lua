@@ -3914,10 +3914,13 @@ build_palette = function()
 	end
 	M.palette_view = nil
 	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
-	-- (the Electrical view has no use for it: hidden while it is on)
-	if panel.folded("palette") or S.electrical then
+	if panel.folded("palette") then
 		palette_win.visible = false
 		return
+	end
+	-- (the Electrical view has no use for it: its View panel in its place)
+	if S.electrical then
+		return E.elec_view_panel(palette_win)
 	end
 	-- **The palette folds to its title** (user): a click on the title
 	-- row, or a right click that clears the selection, folds it, and it
