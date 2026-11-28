@@ -44,6 +44,7 @@ M.BINDINGS = {
 	{action = "grid", key = magic.KEY_G, what = "The next grid"},
 	{action = "angle", key = magic.KEY_H, what = "The next angle step"},
 	{action = "flat", key = magic.KEY_L, what = "The plan's look: lit, flat, technical"},
+	{action = "electrical", key = magic.KEY_J, what = "The Electrical view"},
 	{action = "next_user", key = magic.KEY_U, what = "To the next user's view"},
 	{action = "chat", key = magic.KEY_T, what = "Chat"},
 	-- Listed, not bindable
