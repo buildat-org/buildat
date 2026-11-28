@@ -121,7 +121,8 @@ GONE='Disconnected from server: The game g is being reset to its template'
 
 # 1.
 server srv_a
-grep -aq 'workbench: the project from the template '$fp/reset_tmpl "$s" ||
+# (logged after "Listening at", which start_server waits for)
+wait_for_log "$s" "workbench: the project from the template $fp/reset_tmpl" 30 ||
 	fail "g not made from the template ($s)"
 cat > "$t/boss1.cmds" <<EOF
 wait_log_any 60000 Joined as kitboss

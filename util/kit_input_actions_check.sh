@@ -58,9 +58,9 @@ acts_type() # <name> <prefix> <key>...
 	[ -z "${MOUSE_LAST:-}" ] || echo "acts[$((i - 1))].mouse = \"$MOUSE_LAST\"" >> "$f"
 	echo "return {version = 1, actions = acts}" >> "$f"
 }
-# (keys free in play: not F6 (edit) nor F8, a recorded builder's mark that
-# opens its note field and takes the keys after it, [KIT_PLAYTEST_REC])
-ACTS_A="Y U O P J K L N" ACTS_B="M F3 F4 F5 F7 Home End"
+# (not F6, Edit mode's. b5 on F8, Kit's mark key: kitboss's playtest is
+# recorded, and the world's action wins over the mark [KIT_PLAYTEST_REC])
+ACTS_A="Y U O P J K L N" ACTS_B="M F3 F4 F8 F7 Home End"
 acts_type acts_a a $ACTS_A
 MOUSE_LAST=middle acts_type acts_b b $ACTS_B
 export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
@@ -264,7 +264,11 @@ for a in a1 a2 a3 a4 a5 a6 a7 a8 b1 b2 b3 b4 b5 b6 b7; do
 done
 grep -aqP '^action\t[^\t]+\tb7\tEnd\t' "$t/cu_kitboss/keys.txt" ||
 	fail "the key store lacks the world's 16th action"
-echo "ok: the world's 16 actions: each key reached the server"
+grep -aq "kit: rec: this playtest is recorded" "$c" ||
+	fail "kitboss's playtest not recorded: F8 proves nothing ($c)"
+! grep -aq "kit: mark: the note asked" "$c" ||
+	fail "F8, a world action's key, also opened Kit's mark ($c)"
+echo "ok: the world's 16 actions: each key reached the server (F8 the world's, not the mark)"
 # [KIT_SMALL_PIECES] b7's mouse = "middle": the middle button pressed it again
 [ "$(grep -ac 'Action b7 pressed by kitboss' "$s")" -ge 2 ] ||
 	fail "the middle mouse button did not press b7 (mouse = \"middle\") ($s)"

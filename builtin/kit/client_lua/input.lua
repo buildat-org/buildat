@@ -194,6 +194,16 @@ end
 function M.key(id, key)
 	return is_key(id, key) and not withheld(id)
 end
+-- A world action is on the key (Kit's own keys give way to the game's:
+-- rec.lua's mark)
+function M.world_key(key)
+	for _, k in ipairs(S.list or {}) do
+		if k.world and is_key(k.id, key) then
+			return true
+		end
+	end
+	return false
+end
 
 -- ---- The gamepad: the first game controller (SDL's layout), read
 -- through the sandbox's Input:GetControllerButtonDown and

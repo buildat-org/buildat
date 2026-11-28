@@ -288,7 +288,8 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	local f = magic.ui.focusElement
 	if R.on and not MK.w and not (f ~= nil and f:GetTypeName() == "LineEdit") and
 			not (E.menu and E.menu.held()) and M.key and
-			M.key("mark", data:GetInt("Key")) then
+			M.key("mark", data:GetInt("Key")) and
+			not M.world_key(data:GetInt("Key")) then -- the game's key wins
 		M.rec_mark(false)
 	end
 end)
