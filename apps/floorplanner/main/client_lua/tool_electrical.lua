@@ -314,6 +314,23 @@ function E.elec_drag(t)
 	end
 end
 
+-- **A drag on a box with the Box or Board tool moves it**, as Select's
+-- does (its release was a click that put a new box there: the user)
+function E.elec_tool_drag()
+	if not (S.electrical and S.view == "2d") then
+		return nil
+	end
+	-- Where it was pressed, which a quick drag is already far from
+	local mx, my = S.mx, S.my
+	S.mx, S.my = S.press.mx, S.press.my
+	local b = box_at(cursor_floor())
+	S.mx, S.my = mx, my
+	if b then
+		select("ebox", b.id)
+		return E.elec_drag({kind = "ebox", id = b.id})
+	end
+end
+
 local function snapped_cursor()
 	local x, z = cursor_floor()
 	if x and not S.ctrl then
@@ -328,11 +345,11 @@ function E.elec_drag_update(dg)
 		return
 	end
 	local i = dg.ints
-	-- A switch or outlet box on the ceiling dragged onto a wall goes on it,
-	-- at its role's height (the rest stay on the ceiling: a junction box
-	-- dragged across a room would be caught by a wall on the way)
-	local wp0 = i.wall == 0 and (i.role == R.switch or i.role == R.outlet) and
-			wall_point()
+	-- A box on the ceiling dragged onto a wall goes on it, at its role's
+	-- height (a lamp's ceiling box not); one dragged off its wall, but a
+	-- switch's, an outlet's or the board's, goes on the ceiling. Crossing a
+	-- wall, a box is on it until the pointer is past it.
+	local wp0 = i.wall == 0 and i.role ~= R.ceiling and wall_point()
 	if wp0 then
 		i.wall, i.along, i.side = wp0.wall, wp0.along, wp0.side
 		i.height = height_for(i.role, i.layout, wp0.x, wp0.z)
@@ -352,6 +369,12 @@ function E.elec_drag_update(dg)
 	end
 	local f = el.wall_line(doc().ents, i.wall, geom)
 	local x, z = cursor_floor()
+	if f and x and not wp and math.abs((x - f.ax) * f.uz - (z - f.az) * f.ux) >
+			3 * sym_unit() and i.role ~= R.switch and i.role ~= R.outlet and
+			i.role ~= R.board then
+		i.wall, i.side, i.x, i.z = 0, 0, snapped_cursor()
+		return
+	end
 	if f and x then
 		local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
 		i.along = math.floor(math.max(0, math.min(f.len, along)) + 0.5)
@@ -367,7 +390,7 @@ function E.elec_drag_end(dg)
 			send({{op = "set", ent = {id = dg.box, ints = i.wall ~= 0 and
 					{wall = i.wall, along = i.along, side = i.side,
 						height = i.height} or
-					{x = i.x, z = i.z}}}}, done("box moved"))
+					{wall = 0, side = 0, x = i.x, z = i.z}}}}, done("box moved"))
 		end
 		return
 	end

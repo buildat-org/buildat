@@ -23,7 +23,8 @@
 # window's place. The plan exported, imported into another user directory
 # and the same again; a switch box on the ceiling dragged onto a wall at
 # its height, a box picked by its symbol, a switch clicked off a wall
-# refused; then a riser to a floor above, drawn on it too.
+# refused, the Box tool's drags moving boxes (along a wall, from the
+# ceiling onto one and off it); then a riser to a floor above, drawn on it too.
 # Shots of the Electrical view, of it off, of a run's handles, of the
 # Circuits window's To buy page and of the riser (KEEP_TMP=1 keeps them).
 #   apps/floorplanner/electrical_check.sh
@@ -117,6 +118,15 @@ C
 	echo "event fp_elec view 1500 3000 3000 ebox 1 0"; echo "frames 3"
 	click_at 800 450; echo "frames 3"; echo "sync 5000"
 	echo "event fp_elec where csw_placed"
+	# With the Box tool: SW C dragged 500 mm north along its wall; J1 from
+	# the ceiling onto the west wall at z 2500, and off it back to where it
+	# was; no box added
+	drag 368 450 368 300; echo "sync 5000"
+	echo "event fp_elec where tool_along"
+	drag 650 750 352 600; echo "sync 5000"
+	echo "event fp_elec where tool_onto"
+	drag 375 600 650 750; echo "sync 5000"
+	echo "event fp_elec where tool_off"
 }
 {
 	cat <<C
@@ -386,7 +396,7 @@ def changed(tag, key, value):
 changed("box_moved", "box Outlet S", "at 5950 5000, wall 6000,0+7000 side 0")
 assert where("box_undone") == before and where("box_refused") == before
 moved = re.findall(r"fp elec: box moved(: [^\n]*| done)", log)
-assert moved == [" done", ": " + server[-1], " done"] and tries[-1][1] in moved[1], moved
+assert moved == [" done", ": " + server[-1]] + [" done"] * 4 and tries[-1][1] in moved[1], moved
 # SJ-Outlet S: a point from its middle at (4500, 6500) (4473 to the 100 mm
 # grid), moved to x 5000, undone, dropped on SJ: none again
 changed("pt_added", "run SJ-Outlet S", "pts 4500 6500")
@@ -406,6 +416,11 @@ w = where("csw_dragged")
 assert w == dict(csw, **{"box SW C": "at 50 3000, wall 0,0+7000 side 1"}), w
 assert re.search(r"fp elec sel csw_dragged: SW C height 1050\n", log), "dragged"
 assert where("csw_placed") == w and "A switch box goes on a wall: click one" in log
+# The Box tool's drags: a box moved, not added
+w = dict(w, **{"box SW C": "at 50 3500, wall 0,0+7000 side 1"})
+assert where("tool_along") == w, where("tool_along")
+assert where("tool_onto") == dict(w, **{"box J1": "at 50 2500, wall 0,0+7000 side 1"}), where("tool_onto")
+assert where("tool_off") == w, where("tool_off")
 # A riser from J1 to a ceiling box 1000 mm east on the floor above, after
 # the export: drawn there too; 1000 along, 3000 up a floor
 assert "fp elec riser: drawn on the upper floor: true, 4000 mm" in log

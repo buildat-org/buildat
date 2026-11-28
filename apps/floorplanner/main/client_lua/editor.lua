@@ -4547,6 +4547,10 @@ do
 			S.drag = {kind = "box"}
 			return
 		end
+		if (S.tool == "ebox" or S.tool == "eboard") and doc.can("edit") then
+			S.drag = E.elec_tool_drag()
+			return
+		end
 		if not t or not doc.can("edit") then
 			return
 		end
