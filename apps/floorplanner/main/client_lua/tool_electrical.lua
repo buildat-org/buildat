@@ -1008,7 +1008,11 @@ end
 local dim_node = scene:CreateChild("ElecDim")
 local dim_material = magic.cache:GetResource("Material", "main/fp_dim.xml")
 local lines_node = scene:CreateChild("ElecLines")
-local dim_key, lines_key, lines_n
+-- The objects under the cut dimmed again, over the first (walls a little,
+-- objects much)
+local dim_objects_node = scene:CreateChild("ElecDimObjects")
+local dim_objects_material = magic.cache:GetResource("Material", "main/fp_dim_objects.xml")
+local dim_key, lines_key, lines_n, dim_objects_key
 local DARK = magic.Color(0.1, 0.25, 0.75)
 local SURFACE = magic.Color(0.65, 0.15, 0.65)
 local CIRCUIT_COLORS = {magic.Color(0.85, 0.2, 0.1), magic.Color(0.1, 0.55, 0.15),
@@ -1189,11 +1193,36 @@ function E.elec_overlay(line, dashed)
 	local on = S.electrical and S.view == "2d"
 	dim_node.enabled = on
 	lines_node.enabled = on
+	dim_objects_node.enabled = on
 	if not on then
 		return
 	end
 	local d = doc()
 	local cut = settings().cut
+	local okey = M.build_gen .. ":" .. cut .. ":" .. tostring(S.layout)
+	if okey ~= dim_objects_key then
+		dim_objects_key = okey
+		dim_objects_node.position = magic.Vector3(0, W(cut) - 0.0024, 0)
+		local g = dim_objects_node:GetComponent("CustomGeometry") or
+				dim_objects_node:CreateComponent("CustomGeometry")
+		g:SetNumGeometries(1)
+		g:BeginGeometry(0, magic.TRIANGLE_LIST)
+		local c = magic.Color(1, 1, 1, 1)
+		for _, it in pairs(E.inst_data) do
+			if not it.hosted and it.y0 < cut and it.foot and #it.foot >= 3 then
+				for _, t in ipairs(geom.triangulate(it.foot)) do
+					for k = 1, 3 do
+						local p = it.foot[t[k]]
+						g:DefineVertex(magic.Vector3(W(p[1]), 0, W(p[2])))
+						g:DefineNormal(magic.Vector3(0, 1, 0))
+						g:DefineColor(c)
+					end
+				end
+			end
+		end
+		g:Commit()
+		g:SetMaterial(0, dim_objects_material)
+	end
 	local y = W(cut) - 0.002
 	if dim_key ~= cut then
 		dim_key = cut

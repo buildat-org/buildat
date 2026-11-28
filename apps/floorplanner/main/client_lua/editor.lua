@@ -3914,7 +3914,8 @@ build_palette = function()
 	end
 	M.palette_view = nil
 	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
-	if panel.folded("palette") then
+	-- (the Electrical view has no use for it: hidden while it is on)
+	if panel.folded("palette") or S.electrical then
 		palette_win.visible = false
 		return
 	end

@@ -1,4 +1,4 @@
 <material>
 	<technique name="Techniques/NoTextureUnlitAlpha.xml" />
-	<parameter name="MatDiffColor" value="1 1 1 0.65" />
+	<parameter name="MatDiffColor" value="1 1 1 0.75" />
 </material>
