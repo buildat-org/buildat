@@ -477,6 +477,7 @@ local function draw_overlay()
 					math.floor(dx + 0.5), math.floor(dz + 0.5)))
 		end
 	end
+	E.elec_overlay(line, dashed)
 	-- The registered tools' own drawing
 	local tl = S.tool and E.tools[S.tool]
 	if tl and tl.overlay then

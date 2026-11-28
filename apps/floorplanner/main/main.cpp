@@ -215,7 +215,7 @@ struct StrField {
 };
 struct ListField {
 	const char *name;
-	const char *ref;
+	const char *ref;    // entity type, or nullptr: plain numbers
 	OnDelete on_delete;
 	size_t min_len;
 };
@@ -234,6 +234,11 @@ struct TypeSchema {
 // What a definition is. A voxel volume comes with [FP_VOXELS].
 enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_SWITCH,
 	DK_STAIRS, DK_COUNT };
+
+// [FP_ELECTRICAL] What a box is for. Every box is a junction too.
+// electrical.lua's ROLE has the same numbers.
+enum EBoxRole { EB_JUNCTION, EB_SWITCH, EB_OUTLET, EB_DEVICE, EB_CEILING,
+	EB_EQUIPMENT, EB_BOARD, EB_COUNT };
 
 // Material types, as the palette's `kind` field holds them. The shader and
 // the client's palette editor use the same numbers.
@@ -267,6 +272,18 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"floor_step", 1000, 20000, 3000},
 		// The branch point drawn as a ghost in 2D ([FP_GHOST])
 		{"ghost", 0, 1, 0},
+		// [FP_ELECTRICAL] A new box's mounting height by its role, mm over
+		// the floor; a junction box's below the ceiling; a conduit's
+		// diameter where a run gives none
+		// simplified: picks (switch and outlet as Finnish practice, the
+		// rest guesses), each the user's to change in Plan settings
+		{"el_h_switch", 0, 10000, 1050},
+		{"el_h_outlet", 0, 10000, 300},
+		{"el_h_device", 0, 10000, 1050},
+		{"el_h_equipment", 0, 10000, 600},
+		{"el_h_board", 0, 10000, 1500},
+		{"el_h_junction", 0, 5000, 150},
+		{"el_conduit_d", 5, 200, 20},
 	}, {}, {}, true},
 	// A floor or a building placed in the world ([FP_LAYOUTS]): its own
 	// coordinates turned by yaw (millidegrees) and moved to x, y, z. The
@@ -279,6 +296,12 @@ static const sv_<TypeSchema> SCHEMA = {
 		// The foundation under a building's lowest floor when it is above
 		// the ground (user); 0 the plain grey
 		{"mat_foundation", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		// [FP_ELECTRICAL] Whether its floors and ceilings have a cavity
+		// boxes and runs may go in; a room may say otherwise
+		// simplified: picks, a ceiling with one and a floor (a slab)
+		// without
+		{"cavity_floor", 0, 1, 0},
+		{"cavity_ceiling", 0, 1, 1},
 	}, {
 		{"name", "Ground floor"},
 		{"group", "Building"},
@@ -302,11 +325,17 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"mat_left", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_right", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_core", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		// [FP_ELECTRICAL] An installable cavity: flush boxes and runs may
+		// go in it (a framed wall one may not cut into has none)
+		{"cavity", 0, 1, 1},
 	}, {}, {}},
 	{"room", {
 		{"mat_floor", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_ceiling", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"ceiling", 0, 10000, 0}, // 0: the plan's
+		// [FP_ELECTRICAL] 0 the layout's cavity, 1 one, 2 none
+		{"cavity_floor", 0, 2, 0},
+		{"cavity_ceiling", 0, 2, 0},
 	}, {
 		{"name", "room"},
 	}, {
@@ -361,6 +390,71 @@ static const sv_<TypeSchema> SCHEMA = {
 	}, {}, {
 		// A switch's lamps
 		{"lamps", "instance", OnDelete::Remove, 0},
+	}},
+	// **The electrical design** ([FP_ELECTRICAL]). A box: on a wall, `along`
+	// it from its a end on its left (side 0) or right face, `height` over
+	// the floor; or with no wall on the ceiling at x, z. Flush or surface.
+	// What it is for by EBoxRole; a board is a box too, which its circuits
+	// and their runs start from. An outlet box holds `count` outlets of one
+	// kind; a switch box `gangs` switches, each with the loads it controls.
+	{"ebox", {
+		{"layout", 1, INT32_MAX, 0, "layout", OnDelete::Restrict},
+		{"wall", 0, INT32_MAX, 0, "wall", OnDelete::Cascade, true},
+		{"along", -MAX_COORD, MAX_COORD, 0},
+		{"side", 0, 1, 0},
+		{"height", 0, 20000, 0},
+		{"x", -MAX_COORD, MAX_COORD, 0},
+		{"z", -MAX_COORD, MAX_COORD, 0},
+		{"surface", 0, 1, 0},
+		{"role", 0, EB_COUNT - 1, EB_JUNCTION},
+		{"outlet", 0, 1, 0},       // 0 Schuko, 1 RJ45
+		{"count", 1, 8, 1},
+		{"gangs", 1, 2, 1},
+		{"fuse", 1, 1000, 25},     // a board's main fuse, A
+	}, {
+		{"name", ""},              // a board's, an equipment box's label
+	}, {
+		{"controls1", "ebox", OnDelete::Remove, 0},
+		{"controls2", "ebox", OnDelete::Remove, 0},
+	}},
+	// A final circuit: its board and number there, power (0) or data, its
+	// conductors (bits PE 1, N 2, L1 4, L2 8, L3 16, and `wires`, custom
+	// names between commas), its fuse in A, its cross section (1 1.5 mm2,
+	// 2 2.5, 3 6.0, 4 CAT5E) and whether its runs are in conduit
+	{"circuit", {
+		{"board", 1, INT32_MAX, 0, "ebox", OnDelete::Cascade},
+		{"number", 1, 999, 1},
+		{"kind", 0, 1, 0},
+		{"cond", 0, 31, 7},
+		{"fuse", 1, 1000, 10},
+		{"section", 1, 4, 1},
+		// simplified: a pick, cable (MMJ) in a cavity as in most framed
+		// houses
+		{"conduit", 0, 1, 0},
+	}, {
+		{"name", ""},
+		{"wires", ""},
+	}, {}},
+	// A run of a circuit between two boxes (one may be its board), through
+	// `pts` (x, z pairs in a's layout) drawn by hand. Its route: 0 in a
+	// wall's cavity, 1 the floor's, 2 the ceiling's, 3 on a wall's surface,
+	// 4 on the ceiling's. conduit 0 the circuit's, 1 in one, 2 not, of
+	// conduit_d mm (0 the settings'); cable 0 by its conductors, 1 ML, 2
+	// MMJ, 3 MCMK, 4 CAT5E; section 0 the circuit's, else as its; elev the
+	// height over the floor a wall route runs at, 0 the higher box's. b in
+	// another layout: a riser between the floors.
+	{"erun", {
+		{"circuit", 1, INT32_MAX, 0, "circuit", OnDelete::Cascade},
+		{"a", 1, INT32_MAX, 0, "ebox", OnDelete::Cascade},
+		{"b", 1, INT32_MAX, 0, "ebox", OnDelete::Cascade},
+		{"route", 0, 4, 0},
+		{"conduit", 0, 2, 0},
+		{"conduit_d", 0, 200, 0},
+		{"cable", 0, 4, 0},
+		{"section", 0, 4, 0},
+		{"elev", 0, 20000, 0},
+	}, {}, {
+		{"pts", nullptr, OnDelete::None, 0},
 	}},
 	// One material: its type, its own colour, the paint over it, and the
 	// knobs of its type. See Palette.glsl for what each does.
@@ -1005,6 +1099,8 @@ struct Plan
 					cascade.push_back(e.id);
 				}
 				for(const ListField &f : s->lists){
+					if(!f.ref)
+						continue;
 					sv_<int32_t> &list = e.lists[f.name];
 					sv_<int32_t> kept;
 					for(int32_t v : list)
@@ -1116,7 +1212,7 @@ struct Plan
 				return e.type+"."+pair.first+" has a wrong length";
 			sv_<int32_t> list;
 			for(int32_t v : pair.second)
-				list.push_back(resolve(v));
+				list.push_back(f->ref ? resolve(v) : v);
 			e.lists[f->name] = list;
 		}
 		return "";
@@ -1168,6 +1264,12 @@ struct Plan
 				return e.type+"."+f.name+" is not a "+f.ref;
 		}
 		for(const ListField &f : s->lists){
+			if(!f.ref){
+				for(int32_t v : e.lists.at(f.name))
+					if(v < -MAX_COORD || v > MAX_COORD)
+						return e.type+"."+f.name+" out of range";
+				continue;
+			}
 			set_<int32_t> seen;
 			for(int32_t v : e.lists.at(f.name)){
 				if(!is_a(v, f.ref))
@@ -1205,6 +1307,238 @@ struct Plan
 				if(along - half < 0 || along + half > len)
 					return "It does not fit its wall";
 			}
+		}
+		if(e.type == "ebox")
+			return check_ebox(e);
+		if(e.type == "circuit"){
+			const Entity &board = m_ents[e.ints.at("board")];
+			if(board.ints.at("role") != EB_BOARD)
+				return "A circuit's board must be a board";
+			if((e.ints.at("kind") == 1) != (e.ints.at("section") == 4))
+				return "A data circuit is CAT5E, and only a data circuit";
+			return check_circuit(e.id);
+		}
+		if(e.type == "erun"){
+			if(e.ints.at("a") == e.ints.at("b"))
+				return "A run needs two different boxes";
+			if(e.lists.at("pts").size() % 2)
+				return "A run's points are x, z pairs";
+			ss_ err = check_route(e);
+			if(!err.empty())
+				return err;
+			return check_circuit(e.ints.at("circuit"));
+		}
+		return "";
+	}
+
+	// [FP_ELECTRICAL] A wall's a end, its direction and its length
+	bool wall_line(int32_t id, double &ax, double &az, double &ux, double &uz,
+			double &len)
+	{
+		const Entity &w = m_ents[id];
+		const Entity &a = m_ents[w.ints.at("a")];
+		const Entity &b = m_ents[w.ints.at("b")];
+		ax = a.ints.at("x");
+		az = a.ints.at("z");
+		double dx = b.ints.at("x") - ax, dz = b.ints.at("z") - az;
+		len = std::sqrt(dx * dx + dz * dz);
+		if(len <= 0)
+			return false;
+		ux = dx / len;
+		uz = dz / len;
+		return true;
+	}
+
+	// Where a box is in its layout's plan: on its wall's line, or its own
+	void box_xz(const Entity &e, double &x, double &z)
+	{
+		x = e.ints.at("x");
+		z = e.ints.at("z");
+		double ax, az, ux, uz, len;
+		if(e.ints.at("wall") && wall_line(e.ints.at("wall"), ax, az, ux, uz, len)){
+			x = ax + ux * e.ints.at("along");
+			z = az + uz * e.ints.at("along");
+		}
+	}
+
+	// Whether the floor's or the ceiling's cavity (field "cavity_floor" or
+	// "cavity_ceiling") is installable at x, z in a layout: the smallest
+	// room there says, else the layout
+	bool cavity_at(int32_t layout, double x, double z, const char *field)
+	{
+		const Entity *best = nullptr;
+		double best_area = 0;
+		for(auto &pair : m_ents){
+			const Entity &r = pair.second;
+			if(r.type != "room")
+				continue;
+			const sv_<int32_t> &ns = r.lists.at("nodes");
+			sv_<std::pair<double, double>> pts;
+			for(int32_t n : ns){
+				auto it = m_ents.find(n);
+				if(it == m_ents.end() || it->second.ints.at("layout") != layout)
+					break;
+				pts.push_back({(double)it->second.ints.at("x"),
+						(double)it->second.ints.at("z")});
+			}
+			if(pts.size() != ns.size() || pts.size() < 3)
+				continue;
+			bool inside = false;
+			double area = 0;
+			for(size_t i = 0, j = pts.size() - 1; i < pts.size(); j = i++){
+				const auto &a = pts[i], &b = pts[j];
+				if((a.second > z) != (b.second > z) && x < (b.first - a.first) *
+						(z - a.second) / (b.second - a.second) + a.first)
+					inside = !inside;
+				area += a.first * b.second - b.first * a.second;
+			}
+			area = std::fabs(area);
+			if(inside && (!best || area < best_area)){
+				best = &r;
+				best_area = area;
+			}
+		}
+		int32_t own = best ? best->ints.at(field) : 0;
+		if(own)
+			return own == 1;
+		auto l = m_ents.find(layout);
+		return l != m_ents.end() && l->second.ints.at(field) == 1;
+	}
+
+	// Checked when the box changes, not when its wall or a cavity flag
+	// does, as an opening's fit: a wall's cavity turned off under a flush
+	// box is the user's to sort out
+	ss_ check_ebox(const Entity &e)
+	{
+		int32_t wall = e.ints.at("wall");
+		if(wall){
+			const Entity &a = m_ents[m_ents[wall].ints.at("a")];
+			if(a.ints.at("layout") != e.ints.at("layout"))
+				return "A box is on a wall of its own layout";
+			double ax, az, ux, uz, len;
+			if(!wall_line(wall, ax, az, ux, uz, len) ||
+					e.ints.at("along") < 0 || e.ints.at("along") > len)
+				return "The box is not on its wall";
+		}
+		if(e.ints.at("surface") == 0){
+			if(wall && m_ents[wall].ints.at("cavity") != 1)
+				return "A flush box needs an installable cavity, and wall "+
+						itos(wall)+" has none: make it a surface box";
+			double x, z;
+			box_xz(e, x, z);
+			if(!wall && !cavity_at(e.ints.at("layout"), x, z, "cavity_ceiling"))
+				return "A flush box needs an installable cavity, and the "
+						"ceiling here has none: make it a surface box";
+		}
+		const int32_t role = e.ints.at("role");
+		for(const char *f : {"controls1", "controls2"}){
+			const sv_<int32_t> &l = e.lists.at(f);
+			if(l.empty())
+				continue;
+			if(role != EB_SWITCH || (ss_(f) == "controls2" &&
+					e.ints.at("gangs") < 2))
+				return "Only a switch controls loads, one list a gang";
+			for(int32_t id : l){
+				int32_t r = m_ents[id].ints.at("role");
+				if(r != EB_OUTLET && r != EB_DEVICE && r != EB_CEILING &&
+						r != EB_EQUIPMENT)
+					return "A switch controls loads: outlets, devices, ceiling "
+							"and equipment boxes";
+			}
+		}
+		return "";
+	}
+
+	// A run's route goes where there is an installable cavity: a wall's
+	// at the boxes on walls; the floor's or the ceiling's at every point
+	// and the middle of each segment
+	// simplified: a wall route is checked at its boxes' walls, not along
+	// the walls it passes
+	ss_ check_route(const Entity &e)
+	{
+		const int32_t route = e.ints.at("route");
+		if(route > 2)
+			return "";
+		const Entity &a = m_ents[e.ints.at("a")];
+		const Entity &b = m_ents[e.ints.at("b")];
+		if(route == 0){
+			for(const Entity *x : {&a, &b}){
+				int32_t w = x->ints.at("wall");
+				if(w && m_ents[w].ints.at("cavity") != 1)
+					return "Wall "+itos(w)+" has no installable cavity for the "
+							"run: route it on the surface";
+			}
+			return "";
+		}
+		const char *field = route == 1 ? "cavity_floor" : "cavity_ceiling";
+		const char *what = route == 1 ? "floor" : "ceiling";
+		const int32_t layout = a.ints.at("layout");
+		sv_<std::pair<double, double>> pts;
+		double x, z;
+		box_xz(a, x, z);
+		pts.push_back({x, z});
+		const sv_<int32_t> &p = e.lists.at("pts");
+		for(size_t i = 0; i + 1 < p.size(); i += 2)
+			pts.push_back({(double)p[i], (double)p[i + 1]});
+		box_xz(b, x, z);
+		const bool riser = b.ints.at("layout") != layout;
+		if(riser && !cavity_at(b.ints.at("layout"), x, z, field))
+			return ss_("The ")+what+" has no installable cavity at the run's "
+					"end: route it on the surface";
+		if(!riser)
+			pts.push_back({x, z});
+		for(size_t i = 0; i < pts.size(); i++){
+			double mx = pts[i].first, mz = pts[i].second;
+			bool ok = cavity_at(layout, mx, mz, field);
+			if(ok && i + 1 < pts.size())
+				ok = cavity_at(layout, (mx + pts[i + 1].first) / 2,
+						(mz + pts[i + 1].second) / 2, field);
+			if(!ok)
+				return ss_("The ")+what+" has no installable cavity along the "
+						"run: route it on the surface";
+		}
+		return "";
+	}
+
+	// A circuit's runs: a power circuit's a tree (no loop) from its own
+	// board, which no other board's run reaches; a data circuit's one run
+	// between two RJ45 boxes
+	ss_ check_circuit(int32_t id)
+	{
+		const Entity &c = m_ents[id];
+		sv_<const Entity*> runs;
+		for(auto &pair : m_ents)
+			if(pair.second.type == "erun" && pair.second.ints.at("circuit") == id)
+				runs.push_back(&pair.second);
+		if(c.ints.at("kind") == 1){
+			if(runs.size() > 1)
+				return "A data circuit is one run, point to point";
+			for(const Entity *r : runs)
+				for(const char *end : {"a", "b"}){
+					const Entity &x = m_ents[r->ints.at(end)];
+					if(x.ints.at("role") != EB_OUTLET || x.ints.at("outlet") != 1)
+						return "A data circuit runs between two RJ45 boxes";
+				}
+			return "";
+		}
+		std::map<int32_t, int32_t> up;
+		std::function<int32_t(int32_t)> root = [&](int32_t v){
+			auto it = up.find(v);
+			if(it == up.end() || it->second == v)
+				return v;
+			return it->second = root(it->second);
+		};
+		for(const Entity *r : runs){
+			for(const char *end : {"a", "b"}){
+				const Entity &x = m_ents[r->ints.at(end)];
+				if(x.ints.at("role") == EB_BOARD && x.id != c.ints.at("board"))
+					return "A run of a circuit goes to its own board only";
+			}
+			int32_t a = root(r->ints.at("a")), b = root(r->ints.at("b"));
+			if(a == b)
+				return "The runs of circuit "+itos(c.ints.at("number"))+
+						" would make a loop: a circuit's runs are a tree";
+			up[a] = b;
 		}
 		return "";
 	}

@@ -1278,7 +1278,7 @@ do
 		return {thickness = w.thickness, justify = w.justify, shift = w.shift,
 				height = w.height,
 				hang = w.hang, mat_left = w.mat_left, mat_right = w.mat_right,
-				mat_core = w.mat_core}
+				mat_core = w.mat_core, cavity = w.cavity}
 	end
 
 	-- The ops that give a point a node: an existing one, a new one on an edge,
@@ -1315,6 +1315,13 @@ do
 				if inst.ints.host == e.wall and inst.ints.along > ref.t then
 					add_op(b, "set", {id = inst.id, ints = {host = half,
 							along = inst.ints.along - ref.t}})
+				end
+			end
+			-- and the electrical boxes on it ([FP_ELECTRICAL])
+			for _, eb in ipairs(doc.of_type("ebox")) do
+				if eb.ints.wall == e.wall and eb.ints.along > ref.t then
+					add_op(b, "set", {id = eb.id, ints = {wall = half,
+							along = math.floor(eb.ints.along - ref.t + 0.5)}})
 				end
 			end
 			b.pairs[pair_key(w.a, ph)] = true
@@ -2851,6 +2858,7 @@ local function build_toolbar()
 					S.tool == id)
 		end
 	end
+	E.elec_toolbar(add)
 	-- The panels folded away on a narrow screen, opened here
 	if panel.narrow() then
 		for _, p in ipairs({{"palette", "Palette"}, {"props", "Properties"}}) do
@@ -3023,7 +3031,10 @@ local function build_props()
 	local PART_NAMES = {mat = "the frame", mat_leaf = "the leaf",
 			mat_glass = "the glass"}
 	local count = sel_count()
-	if S.tool == "node" then
+	-- A box's or a run's, or an electrical tool's ([FP_ELECTRICAL])
+	if S.tool ~= "node" and count <= 1 and
+			E.elec_props(props, sel, heading, set, int_field, delete_selected) then
+	elseif S.tool == "node" then
 		local n = 0
 		for _ in pairs(S.nodes) do
 			n = n + 1
@@ -3397,6 +3408,11 @@ local function build_props()
 		panel.check(props, "Hangs from the ceiling", w.hang == 1, function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
+		-- [FP_ELECTRICAL]: a stud wall's, not a solid or a log one's
+		panel.check(props, "Installable cavity (flush boxes)", w.cavity == 1,
+				function()
+			set(sel.id, {ints = {cavity = 1 - w.cavity}})
+		end)
 		local face_mat = face == "left" and w.mat_left or face == "right" and
 				w.mat_right or face == "core" and w.mat_core or nil
 		panel.label(props, face and ("Selected by its " .. (face == "core" and
@@ -3461,6 +3477,14 @@ local function build_props()
 		end, 120, true)
 		int_field(sel.id, "Ceiling mm", "ceiling", sel.ints.ceiling)
 		panel.label(props, "(ceiling 0: the plan's)")
+		-- [FP_ELECTRICAL]: the layout's cavities, or this room's own
+		for _, c in ipairs({{"Floor cavity", "cavity_floor"},
+				{"Ceiling cavity", "cavity_ceiling"}}) do
+			panel.dropdown(props, c[1], {{"the layout's", 0}, {"installable", 1},
+					{"none", 2}}, sel.ints[c[2]], function(v)
+				set(sel.id, {ints = {[c[2]] = v}})
+			end)
+		end
 		if r then
 			panel.label(props, "Floor " .. m2(r.net) .. " net")
 			panel.label(props, m2(r.gross) .. " to the wall lines")
@@ -4270,6 +4294,15 @@ place.build_window = function()
 	end
 	lamps_button("Lamps on this floor on/off", id)
 	lamps_button("All lamps on/off", nil)
+	-- [FP_ELECTRICAL] Where flush boxes and runs may go in this floor's
+	-- floor and ceiling; a room can say otherwise
+	panel.check(w, "Floor has an installable cavity", c.cavity_floor == 1, function()
+		set(id, {ints = {cavity_floor = 1 - c.cavity_floor}})
+	end)
+	panel.check(w, "Ceiling has an installable cavity", c.cavity_ceiling == 1,
+			function()
+		set(id, {ints = {cavity_ceiling = 1 - c.cavity_ceiling}})
+	end)
 	panel.button(w, "New building", function()
 		-- Beside the others, 20 m past the furthest
 		local x, n = 0, 1
@@ -4283,7 +4316,7 @@ place.build_window = function()
 				{name = "Ground floor", group = "Building " .. n})
 	end)
 	local empty = #list > 1
-	for _, t in ipairs({"node", "instance", "image"}) do
+	for _, t in ipairs({"node", "instance", "image", "ebox"}) do
 		for _, x in ipairs(doc.of_type(t)) do
 			if x.ints.layout == id then
 				empty = false
@@ -4319,6 +4352,7 @@ refresh_panels = function()
 	build_props()
 	build_palette()
 	place.build_window()
+	E.elec_window()
 	panel.view_only = false
 	if M.probe_what then
 		M.probe_add("panels", (buildat.get_time_us() - t0) / 1000)
@@ -4343,6 +4377,7 @@ end
 E.pause_win = nil
 E.GRID_STEPS, E.keys, E.panel, E.refresh_panels = GRID_STEPS, keys, panel, refresh_panels
 E.send, E.set_view, E.update_capture = send, set_view, update_capture
+E.set_tool, E.real_id = set_tool, real_id
 load("pause.lua")(E)
 local open_pause, close_pause = E.open_pause, E.close_pause
 
@@ -4350,7 +4385,7 @@ local function over_ui()
 	local s = magic.ui.scale
 	return panel.popup_open() or panel.over({toolbar, props, palette_win,
 			E.pause_win, picker_win, place.win, S.touch_bar, doc.accounts.page,
-			doc.accounts.frame}, S.mx / s, S.my / s)
+			doc.accounts.frame, E.elec_win}, S.mx / s, S.my / s)
 end
 
 local press_target, plan_facing, plan_aligned, stream_drag, use, use_target, walk
@@ -4396,6 +4431,10 @@ do
 	press_target = function()
 		local x, z = cursor_floor()
 		if S.tool == "select" then
+			local et = E.elec_target()
+			if et then
+				return et
+			end
 			local s = pick_surface(nil, M.sel_accept)
 			if not (s and S.sel[s.id]) then
 				local near = M.near_selection()
@@ -4533,7 +4572,10 @@ do
 			return
 		end
 		S.primary = t.id
-		if t.kind == "node" and sel_count() == 1 then
+		if t.kind == "ebox" or t.kind == "erun" then
+			-- simplified: a box or a run is not dragged; its panel moves it
+			return
+		elseif t.kind == "node" and sel_count() == 1 then
 			S.drag = {kind = "node", id = t.id, moved = true,
 					x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
 		else
@@ -6104,6 +6146,8 @@ do
 			use()
 		elseif is("next_user") then
 			go_to_next_user()
+		elseif is("electrical") then
+			E.elec_toggle()
 		elseif is("flat") then
 			S.plan_look = (S.plan_look + 1) % 3
 			set_view(S.view)
@@ -6437,6 +6481,8 @@ do
 					KIND_NAMES[kind]:lower()) .. " " .. id
 		elseif e.type == "room" then
 			return "room '" .. e.strs.name .. "'"
+		elseif e.type == "ebox" or e.type == "erun" then
+			return E.elec_name(id)
 		elseif e.type == "image" then
 			return "the picture " .. e.strs.file
 		end
@@ -6979,6 +7025,7 @@ E.m2, E.plan_symbol, E.draw_guide, E.mm_text = m2, plan_symbol, draw_guide, mm_t
 E.crosshair, E.user_color, E.over_ui = crosshair, user_color, over_ui
 local draw_overlay = load("overlay.lua")(E)
 load("tool_measure.lua")(E)
+load("tool_electrical.lua")(E)
 
 -- This user's presence, for the others, every PRESENCE_SECONDS
 local PRESENCE_SECONDS = 0.1
@@ -7041,6 +7088,7 @@ function M.suspend()
 	place.layers = {}
 	S.layout, S.layouts_open = nil, false
 	place.build_window()
+	E.elec_suspend()
 	for _, n in ipairs(SCENE_PARTS) do
 		n.enabled = false
 	end
