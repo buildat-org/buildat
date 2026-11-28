@@ -284,6 +284,11 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"el_h_board", 0, 10000, 1500},
 		{"el_h_junction", 0, 5000, 150},
 		{"el_conduit_d", 5, 200, 20},
+		// The listing's cable: a slack at each box end and a waste on the
+		// whole length ([FP_ELECTRICAL] stage 2)
+		// simplified: picks, the user's to change in Plan settings
+		{"el_slack", 0, 5000, 300},
+		{"el_waste", 0, 100, 10},
 	}, {}, {}, true},
 	// A floor or a building placed in the world ([FP_LAYOUTS]): its own
 	// coordinates turned by yaw (millidegrees) and moved to x, y, z. The
@@ -1446,14 +1451,22 @@ struct Plan
 							"and equipment boxes";
 			}
 		}
+		// Moved, its runs' routes as a run's own edit checks them
+		for(auto &pair : m_ents){
+			const Entity &r = pair.second;
+			if(r.type == "erun" && (r.ints.at("a") == e.id ||
+					r.ints.at("b") == e.id)){
+				ss_ err = check_route(r);
+				if(!err.empty())
+					return err;
+			}
+		}
 		return "";
 	}
 
 	// A run's route goes where there is an installable cavity: a wall's
-	// at the boxes on walls; the floor's or the ceiling's at every point
-	// and the middle of each segment
-	// simplified: a wall route is checked at its boxes' walls, not along
-	// the walls it passes
+	// at the boxes on walls and along every wall it passes; the floor's or
+	// the ceiling's at every point and the middle of each segment
 	ss_ check_route(const Entity &e)
 	{
 		const int32_t route = e.ints.at("route");
@@ -1461,18 +1474,8 @@ struct Plan
 			return "";
 		const Entity &a = m_ents[e.ints.at("a")];
 		const Entity &b = m_ents[e.ints.at("b")];
-		if(route == 0){
-			for(const Entity *x : {&a, &b}){
-				int32_t w = x->ints.at("wall");
-				if(w && m_ents[w].ints.at("cavity") != 1)
-					return "Wall "+itos(w)+" has no installable cavity for the "
-							"run: route it on the surface";
-			}
-			return "";
-		}
-		const char *field = route == 1 ? "cavity_floor" : "cavity_ceiling";
-		const char *what = route == 1 ? "floor" : "ceiling";
 		const int32_t layout = a.ints.at("layout");
+		// Its path in a's plan: a, its points, and b on the same floor
 		sv_<std::pair<double, double>> pts;
 		double x, z;
 		box_xz(a, x, z);
@@ -1482,11 +1485,62 @@ struct Plan
 			pts.push_back({(double)p[i], (double)p[i + 1]});
 		box_xz(b, x, z);
 		const bool riser = b.ints.at("layout") != layout;
+		if(!riser)
+			pts.push_back({x, z});
+		if(route == 0){
+			const ss_ none = " has no installable cavity for the run: route it "
+					"on the surface";
+			for(const Entity *box : {&a, &b}){
+				int32_t w = box->ints.at("wall");
+				if(w && m_ents[w].ints.at("cavity") != 1)
+					return "Wall "+itos(w)+none;
+			}
+			// A wall it runs along: 300 mm or more of a segment within the
+			// wall's thickness of its line, at under 30 degrees to it
+			// simplified: the thickness either side, whatever its justify
+			for(auto &pair : m_ents){
+				const Entity &w = pair.second;
+				double ax, az, ux, uz, len;
+				if(w.type != "wall" || w.ints.at("cavity") == 1 ||
+						m_ents[w.ints.at("a")].ints.at("layout") != layout ||
+						!wall_line(w.id, ax, az, ux, uz, len))
+					continue;
+				const double band = w.ints.at("thickness");
+				for(size_t i = 0; i + 1 < pts.size(); i++){
+					// The segment in the wall's frame: t along, s across
+					const double px = pts[i].first - ax, pz = pts[i].second - az;
+					const double qx = pts[i + 1].first - pts[i].first;
+					const double qz = pts[i + 1].second - pts[i].second;
+					const double t0 = px * ux + pz * uz, s0 = pz * ux - px * uz;
+					const double dt = qx * ux + qz * uz, ds = qz * ux - qx * uz;
+					const double l = std::sqrt(dt * dt + ds * ds);
+					if(l < 300 || std::fabs(ds) > l * 0.5)
+						continue;
+					// The part of it inside the wall's band
+					double lo = 0, hi = 1;
+					auto clip = [&](double p0, double d, double mn, double mx){
+						if(d == 0){
+							if(p0 < mn || p0 > mx)
+								hi = -1;
+							return;
+						}
+						double u0 = (mn - p0) / d, u1 = (mx - p0) / d;
+						lo = std::max(lo, std::min(u0, u1));
+						hi = std::min(hi, std::max(u0, u1));
+					};
+					clip(t0, dt, 0, len);
+					clip(s0, ds, -band, band);
+					if((hi - lo) * l >= 300)
+						return "Wall "+itos(w.id)+none;
+				}
+			}
+			return "";
+		}
+		const char *field = route == 1 ? "cavity_floor" : "cavity_ceiling";
+		const char *what = route == 1 ? "floor" : "ceiling";
 		if(riser && !cavity_at(b.ints.at("layout"), x, z, field))
 			return ss_("The ")+what+" has no installable cavity at the run's "
 					"end: route it on the surface";
-		if(!riser)
-			pts.push_back({x, z});
 		for(size_t i = 0; i < pts.size(); i++){
 			double mx = pts[i].first, mz = pts[i].second;
 			bool ok = cavity_at(layout, mx, mz, field);
