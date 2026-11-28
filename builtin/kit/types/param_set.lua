@@ -49,7 +49,7 @@ return {
 		group = "Logic",
 		what = "Sets a parameter of another entity in play, for the player who set it off or for everyone: a camera, a gravity, a bar's size.",
 		inputs = {
-			set = "Sets the parameter: to its value, or (source signal) to the signal's number through scale, offset, min and max.",
+			set = "Sets the parameter. Value: for source signal, a number, put through scale, offset, min and max.",
 			reset = "Puts the target's own value back.",
 		},
 		params = {

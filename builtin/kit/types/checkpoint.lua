@@ -44,7 +44,7 @@ return {
 		keywords = "race lap gate course respawn",
 		what = "An unseen gate across a course: passed in order, each player's last one is where they respawn.",
 		inputs = {
-			respawn = "Puts the player who sent it back at their last checkpoint passed, if it is this one: send it to every checkpoint.",
+			respawn = "Respawns its sender at their last checkpoint passed, if that is this one. Send it to every checkpoint.",
 			reset = "Clears the progress of the player who sent it, or everyone's from no player.",
 		},
 		outputs = {
