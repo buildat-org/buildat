@@ -21,7 +21,9 @@
 # run's point added from a segment's middle, dragged, undone and dropped
 # on its neighbour to go; the Circuits window opened in the Layouts
 # window's place. The plan exported, imported into another user directory
-# and the same again; then a riser to a floor above, drawn on it too.
+# and the same again; a switch box on the ceiling dragged onto a wall at
+# its height, a box picked by its symbol, a switch clicked off a wall
+# refused; then a riser to a floor above, drawn on it too.
 # Shots of the Electrical view, of it off, of a run's handles, of the
 # Circuits window's To buy page and of the riser (KEEP_TMP=1 keeps them).
 #   apps/floorplanner/electrical_check.sh
@@ -93,6 +95,28 @@ frames 10
 screenshot $t/circuits.png
 event fp_elec windows
 C
+}
+# A switch box on the ceiling 300 mm off the west wall (as a click beside a
+# wall put one) and a run to it; view (1500, 3000), 3000 mm tall: x z at
+# 800 + (x - 1500) * 0.3, 450 - (z - 3000) * 0.3. SW W picked by its lever,
+# 100 mm into the room off its point; SW C dragged onto the wall; the Box
+# tool's switch clicked in the room refused
+ceiling_switch() {
+	cat <<C
+event fp_elec try ceiling_switch
+wait_log 5000 fp elec: try ceiling_switch
+sync 5000
+event fp_elec view 1500 3000 3000 select
+frames 5
+event fp_elec where csw_before
+C
+	click_at 395 745; echo "frames 3"; echo "event fp_elec sel lever"
+	click_at 440 450; echo "frames 3"
+	drag 440 450 352 450; echo "sync 5000"
+	echo "event fp_elec where csw_dragged"; echo "event fp_elec sel csw_dragged"
+	echo "event fp_elec view 1500 3000 3000 ebox 1 0"; echo "frames 3"
+	click_at 800 450; echo "frames 3"; echo "sync 5000"
+	echo "event fp_elec where csw_placed"
 }
 {
 	cat <<C
@@ -171,6 +195,9 @@ frames 10
 screenshot $t/plain.png
 event fp_elec export
 wait_log 10000 Exported to
+C
+	ceiling_switch
+	cat <<C
 event fp_elec riser
 wait_log 5000 fp elec riser:
 event fp_elec view 1500 2000 4000 select
@@ -359,7 +386,7 @@ def changed(tag, key, value):
 changed("box_moved", "box Outlet S", "at 5950 5000, wall 6000,0+7000 side 0")
 assert where("box_undone") == before and where("box_refused") == before
 moved = re.findall(r"fp elec: box moved(: [^\n]*| done)", log)
-assert moved == [" done", ": " + server[-1]] and tries[-1][1] in moved[1], moved
+assert moved == [" done", ": " + server[-1], " done"] and tries[-1][1] in moved[1], moved
 # SJ-Outlet S: a point from its middle at (4500, 6500) (4473 to the 100 mm
 # grid), moved to x 5000, undone, dropped on SJ: none again
 changed("pt_added", "run SJ-Outlet S", "pts 4500 6500")
@@ -369,6 +396,16 @@ assert where("pt_deleted") == before and where("imported") == before
 assert re.findall(r"fp elec: run points(: [^\n]*| done)", log) == [" done"] * 3
 # The Circuits window opened in the Layouts window's place
 assert "fp elec windows: layouts false, circuits true" in log
+# The ceiling switch: SW W picked by its symbol; SW C dragged onto the west
+# wall at its role's height, its run kept; a switch clicked in the room
+# refused, nothing placed
+csw = where("csw_before")
+assert csw["box SW C"] == "at 300 3000, wall none side 0" and csw["run J1-SW C"] == "pts none", csw
+assert re.search(r"fp elec sel lever: SW W height 1050\n", log), "lever"
+w = where("csw_dragged")
+assert w == dict(csw, **{"box SW C": "at 50 3000, wall 0,0+7000 side 1"}), w
+assert re.search(r"fp elec sel csw_dragged: SW C height 1050\n", log), "dragged"
+assert where("csw_placed") == w and "A switch box goes on a wall: click one" in log
 # A riser from J1 to a ceiling box 1000 mm east on the floor above, after
 # the export: drawn there too; 1000 along, 3000 up a floor
 assert "fp elec riser: drawn on the upper floor: true, 4000 mm" in log
