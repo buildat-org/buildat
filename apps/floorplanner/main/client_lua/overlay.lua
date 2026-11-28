@@ -216,10 +216,17 @@ local function draw_overlay()
 			world_label(cx, 0, cz, E.doc.ents[id].strs.name .. "\n" .. m2(r.net))
 		end
 		-- What is above the cut, dashed; the objects below it outlined
-		local cut = settings().cut
-		-- (the Electrical view: in the background, medium grey)
+		local st = settings()
+		local cut = st.cut
+		-- (the Electrical view: in the background, medium grey, or none as
+		-- its View panel says; the objects' none while they are hidden)
 		local ol = S.electrical and magic.Color(0.55, 0.55, 0.58) or dark
+		local no_lines = S.electrical and st.el_outline == 0
+		local no_objects = S.electrical and st.el_objects == 3
 		local function plan_lines(ln)
+			if no_lines then
+				return
+			end
 			for id, o in pairs(E.outlines) do
 				if wall_span(E.doc.ents[id].ints) >= cut then
 					dashed(o.pts, ol, ln)
@@ -228,6 +235,8 @@ local function draw_overlay()
 			for id, it in pairs(E.inst_data) do
 				if it.hosted then
 					plan_symbol(id, it, ln)
+				elseif no_objects then
+					-- (hidden)
 				elseif it.y0 >= cut then
 					dashed(it.foot, ol, ln)
 				else
@@ -241,7 +250,8 @@ local function draw_overlay()
 		if not (S.drag and S.drag.kind ~= "box") then
 			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
 					":" .. tostring(S.layout) .. ":" .. S.plan_look .. ":" ..
-					tostring(S.electrical)
+					tostring(S.electrical) .. ":" .. tostring(no_lines) .. ":" ..
+					tostring(no_objects)
 			if key ~= M.plan_lines_key then
 				M.plan_lines_key = key
 				local out = {}

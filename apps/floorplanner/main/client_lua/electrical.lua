@@ -513,10 +513,38 @@ function M.items_text(items)
 	return #t > 0 and table.concat(t, ", ") or "nothing (no load past it)"
 end
 
+-- **A run's conductors as the Electrical view's label says them**,
+-- short enough to sit beside the run: PE, N and the phases by name; nT(A)
+-- n travellers of control group A; S(A) group A's switched live (both on
+-- the circuit's first phase); a circuit's own wires by name, quoted when
+-- there is a space in one and more than one wire; "-" for none. The
+-- groups' letters are derive()'s (groups[i].letter).
+-- simplified: a traveller's or a switched live's phase is not said: the
+-- first phase is the only one the derivation switches
+function M.items_short(items, der)
+	local letter = {}
+	for _, g in ipairs(der.groups) do
+		letter[g.name] = g.letter
+	end
+	local t = {}
+	for _, it in ipairs(items or {}) do
+		local g = it.group and "(" .. (letter[it.group] or "?") .. ")"
+		if it.name:find(" travellers$") then
+			t[#t + 1] = it.n .. "T" .. g
+		elseif it.name:find(" switched$") then
+			t[#t + 1] = (it.n > 1 and it.n or "") .. "S" .. g
+		else
+			t[#t + 1] = (it.n > 1 and it.n .. "×" or "") .. ((#items > 1 and
+					it.name:find(" ")) and '"' .. it.name .. '"' or it.name)
+		end
+	end
+	return #t > 0 and table.concat(t, " ") or "-"
+end
+
 -- Everything derived: runs[id] = {pts, on, len, horiz, vert, elev, items,
 -- count, text, cable, section, conduit, conduit_d, warn}; gangs["box:gang"]
 -- = the insert's kind; boxes[id] = {inserts}; groups = {{name, circuit,
--- chain, loads, feed, last}}; circuits[id] = {warn = {...}}
+-- chain, loads, feed, last, letter}}; circuits[id] = {warn = {...}}
 function M.derive(ents, geom)
 	local st = settings(ents)
 	local out = {runs = {}, gangs = {}, boxes = {}, groups = {}, circuits = {}}
@@ -585,6 +613,11 @@ function M.derive(ents, geom)
 					o.conduit and 1 or 2
 			o.cable = cables(kind, n_pe, n, sec)
 		end
+	end
+	-- The groups' letters, A to Z, then A2 on
+	for i, g in ipairs(out.groups) do
+		g.letter = string.char(65 + (i - 1) % 26) ..
+				(i > 26 and tostring(math.floor((i - 1) / 26) + 1) or "")
 	end
 	-- Each switch box's inserts, for the listing: per gang its kind, from
 	-- the chains above; a gang that controls nothing on a circuit, unlinked
