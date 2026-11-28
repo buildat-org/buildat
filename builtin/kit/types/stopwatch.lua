@@ -54,7 +54,7 @@ return {
 		outputs = {
 			elapsed = "Its stop. Value: the seconds it ran.",
 			lap = "A lap. Value: the seconds since its start or the last lap.",
-			time = "For a kit/ui_text's {value:time1}, at each start, stop and reset: the running time, counted on the player's screen.",
+			time = "Sent at each start, stop and reset. Value: the time, for a kit/ui_text's {value:time1} to count on screen.",
 		},
 		params = {},
 	},

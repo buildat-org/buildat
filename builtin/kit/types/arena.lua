@@ -535,7 +535,7 @@ return {
 			ended = "A round ended. Value: its session's id.",
 			result = "The players are back in the lobby after a round. Value: the winner's name; \"\" for a draw.",
 			won = "The round's result is shown, its players still in it. Value: the winner's name.",
-			status = "The round's status line changed. Value: its text: the time left, the scores and the score to win, the result (the full line, whatever status_line is).",
+			status = "The round's status line changed. Value: the full line, whatever status_line is: time left, scores, result.",
 		},
 		params = {
 			hud_style = "The status line's look: shapes (a background and a border) or plain text.",
