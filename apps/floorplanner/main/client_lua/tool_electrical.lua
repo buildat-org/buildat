@@ -129,26 +129,49 @@ function E.elec_name(id)
 			(i.surface == 1 and ", surface" or ", flush")
 end
 
--- The current layout's boxes, where the plan shows them
+-- The current layout's boxes, where the plan shows them: their symbol's
+-- frame, u along the wall and v into the room (a ceiling box: the plan's)
 local function boxes_here()
 	local d, out = doc(), {}
 	for _, b in ipairs(d.of_type("ebox")) do
-		if b.ints.layout == S.layout then
+		local i = b.ints
+		if i.layout == S.layout then
 			local x, z = el.box_xz(d.ents, b, geom)
-			out[#out + 1] = {id = b.id, e = b, x = x, z = z}
+			local ux, uz, vx, vz = 1, 0, 0, 1
+			local f = i.wall ~= 0 and el.wall_line(d.ents, i.wall, geom)
+			if f then
+				ux, uz, vx, vz = f.ux, f.uz, -f.uz, f.ux
+				if i.side == 1 then
+					vx, vz = -vx, -vz
+				end
+			end
+			out[#out + 1] = {id = b.id, e = b, x = x, z = z, ux = ux, uz = uz,
+					vx = vx, vz = vz, wall = f and true}
 		end
 	end
 	return out
+end
+
+-- A symbol's unit in mm: the View panel's, in plan mm; or the same on
+-- every zoom in pixels, 16 (8 px was too small to read: the user)
+local function sym_unit()
+	local mm = settings().el_sym
+	return mm > 0 and mm or 16 * mm_per_px()
 end
 
 local function box_at(x, z)
 	if not x then
 		return nil
 	end
-	local best, bd = nil, snap_radius() * 1.5
+	-- Anywhere on its symbol: a wall box's reaches about 2 units into
+	-- the room, a ceiling box's is round its point (a click on a switch's
+	-- lever missed it, the room under it taken: the user)
+	local best, bd, s = nil, math.huge, sym_unit()
+	local snap = snap_radius() * 1.5
 	for _, b in ipairs(boxes_here()) do
-		local dd = geom.len(b.x - x, b.z - z)
-		if dd <= bd then
+		local o = b.wall and s or 0
+		local dd = geom.len(b.x + b.vx * o - x, b.z + b.vz * o - z)
+		if dd <= math.max(snap, (b.wall and 2 or 1.3) * s) and dd < bd then
 			best, bd = b, dd
 		end
 	end
@@ -307,6 +330,16 @@ function E.elec_drag_update(dg)
 		return
 	end
 	local i = dg.ints
+	-- A switch or outlet box on the ceiling dragged onto a wall goes on it,
+	-- at its role's height (the rest stay on the ceiling: a junction box
+	-- dragged across a room would be caught by a wall on the way)
+	local wp0 = i.wall == 0 and (i.role == R.switch or i.role == R.outlet) and
+			wall_point()
+	if wp0 then
+		i.wall, i.along, i.side = wp0.wall, wp0.along, wp0.side
+		i.height = height_for(i.role, i.layout, wp0.x, wp0.z)
+		return
+	end
 	if i.wall == 0 then
 		local x, z = snapped_cursor()
 		if x then
@@ -334,7 +367,8 @@ function E.elec_drag_end(dg)
 		if e and (i.wall ~= e.ints.wall or i.along ~= e.ints.along or
 				i.side ~= e.ints.side or i.x ~= e.ints.x or i.z ~= e.ints.z) then
 			send({{op = "set", ent = {id = dg.box, ints = i.wall ~= 0 and
-					{wall = i.wall, along = i.along, side = i.side} or
+					{wall = i.wall, along = i.along, side = i.side,
+						height = i.height} or
 					{x = i.x, z = i.z}}}}, done("box moved"))
 		end
 		return
@@ -374,6 +408,11 @@ local function add_box(fields, at_wall_only)
 		ints.height = height_for(ints.role, S.layout, wp.x, wp.z)
 	elseif at_wall_only then
 		doc().notice("A board goes on a wall: click one")
+		return
+	elseif fields.role == R.switch or fields.role == R.outlet then
+		-- (a click beside the wall put one on the ceiling: the user)
+		doc().notice("A " .. (fields.role == R.switch and "switch" or "outlet") ..
+				" box goes on a wall: click one")
 		return
 	else
 		local x, z = cursor_floor()
@@ -1236,10 +1275,7 @@ local function build_lines(y)
 	local d = doc()
 	local der = E.elec_derived()
 	local st = settings()
-	local k = mm_per_px()
-	-- A symbol's unit: the View panel's mm, or 16 px (8 was too small to
-	-- read: the user)
-	local s = st.el_sym > 0 and st.el_sym or 16 * k
+	local s = sym_unit()
 	local tm, lb = st.el_text, st.el_labels
 	local function on(bit)
 		return el.bit(lb, bit)
@@ -1356,15 +1392,7 @@ local function build_lines(y)
 	-- The boxes, and their labels: the name, the inserts, the height
 	for _, b in ipairs(boxes_here()) do
 		local i = b.e.ints
-		local ux, uz, vx, vz = 1, 0, 0, 1
-		local f = i.wall ~= 0 and el.wall_line(d.ents, i.wall, geom)
-		if f then
-			ux, uz = f.ux, f.uz
-			vx, vz = -f.uz, f.ux
-			if i.side == 1 then
-				vx, vz = -vx, -vz
-			end
-		end
+		local ux, uz, vx, vz = b.ux, b.uz, b.vx, b.vz
 		local col = i.surface == 1 and SURFACE or DARK
 		symbol(function(ax, az, bx, bz)
 			add(b.x + (ux * ax + vx * az) * s, b.z + (uz * ax + vz * az) * s,
@@ -1393,7 +1421,7 @@ local function build_lines(y)
 		-- right of it, off the runs that leave it straight
 		if #lines > 0 then
 			local text = table.concat(lines, "\n")
-			if not f then
+			if not b.wall then
 				text3d(b.x + 0.9 * s, y, b.z + 0.9 * s, text, tm, TEXT, 0,
 						magic.HA_LEFT, magic.VA_BOTTOM)
 			else
@@ -1611,7 +1639,7 @@ function E.elec_overlay(line, dashed)
 			if dg and dg.box == id then
 				x, z = el.box_xz(d.ents, {ints = dg.ints}, geom)
 			end
-			local s = st.el_sym > 0 and 1.75 * st.el_sym or 28 * mm_per_px()
+			local s = 1.75 * sym_unit()
 			for t = 0, 15 do
 				local a0, a1 = t / 16 * 2 * math.pi, (t + 1) / 16 * 2 * math.pi
 				line(x + s * math.cos(a0), z + s * math.sin(a0), x + s * math.cos(a1),
@@ -1870,6 +1898,16 @@ local function try(what)
 		-- In the walls' cavities from SW K east, then 2500 mm along the
 		-- kitchen's outer wall, 50 mm off its line, to a ceiling box
 		run(2, "SW K", "Kitchen 1", 0, {8950, 3500, 8950, 1000})
+	elseif what == "ceiling_switch" then
+		-- A switch box on the ceiling 300 mm off the living room's west
+		-- wall, as a click beside a wall used to put one, run to J1
+		send({{op = "create", ent = {id = d.placeholder(), type = "ebox",
+				ints = {layout = S.layout, role = R.switch, gangs = 1, x = 300,
+					z = 3000}, strs = {name = "SW C"}}}}, function(err)
+			if err == "" then
+				run(1, "J1", "SW C", 2)
+			end
+		end)
 	end
 end
 
@@ -1934,6 +1972,11 @@ magic.SubscribeToEvent("command_seq:fp_elec", function(_, ev)
 		for _, l in ipairs(lines) do
 			log:info("fp elec where " .. arg .. ": " .. l)
 		end
+	elseif cmd == "sel" then
+		-- What is selected: its name and height
+		local e = S.primary and doc().ents[S.primary]
+		log:info("fp elec sel " .. arg .. ": " .. (e and e.type == "ebox" and
+				el.box_name(doc().ents, e.id) .. " height " .. e.ints.height or "none"))
 	elseif cmd == "riser" then
 		-- A floor above, a ceiling box on it 1 m east of J1 and a run of
 		-- circuit 1 up to it; then that floor's plan, logging whether it
@@ -1989,7 +2032,7 @@ magic.SubscribeToEvent("command_seq:fp_elec", function(_, ev)
 		local aw, ao = dim_alphas()
 		log:info(string.format("fp elec probe %s: unit %.2f px, text %.2f px, " ..
 				"walls dim %.2f %s, objects dim %.2f %s, outline %d", arg,
-				(st.el_sym > 0 and st.el_sym or 16 * k) / k, st.el_text / k, aw,
+				sym_unit() / k, st.el_text / k, aw,
 				tostring(dim_node.enabled), ao, tostring(dim_objects_node.enabled),
 				st.el_outline))
 		for _, it in pairs(E.inst_data) do
